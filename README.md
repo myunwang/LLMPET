@@ -1,0 +1,117 @@
+# 🐙 Octopus — Claude Code 桌面宠物
+
+一个实时盯着 **Claude Code**（及同类 coding agent）的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 Claude 说的话弹成气泡，遇到需要授权时让你一键允许 / 拒绝，并在详情面板里给出 **token 计量与花费**、用量趋势、会话列表。
+
+前端形象、渲染与动画全部**原创**（章鱼 + 像素怪兽两款皮肤，见 `renderer/`）；后端（状态机 / 计量 / 权限 / 进程对账）也是**从零自有实现**。整个项目以 **MIT** 开源，仅对接 Claude Code 的公开 hook 接口。
+
+---
+
+## 工作原理
+
+```
+Claude Code ──(生命周期 hook)──► octopus-hook.js ──HTTP POST /state──┐
+            ──(PermissionRequest HTTP hook，阻塞)──► /permission ──┤
+                                                                   ▼
+                                              ┌──────────────────────────────┐
+                                              │  本地 HTTP server (127.0.0.1) │
+                                              └──────────────┬───────────────┘
+                                                             ▼
+            会话状态机 (core) ── 适配器 ── pet:stats / pet:event ──► 桌宠/面板渲染
+            计量扫描 (metering) ── 读 ~/.claude transcript → 算 token & 花费 ─┘
+```
+
+1. 安装时往 `~/.claude/settings.json` 注册两类钩子（**合并写入，不覆盖你已有的钩子**，卸载会先备份）：
+   - **命令钩子**：Claude Code 在 `SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop / SubagentStart …` 触发 `hook/octopus-hook.js`，它读 stdin + transcript 尾巴，POST 一个状态包给本地 server（`127.0.0.1:41330` 起）。
+   - **PermissionRequest HTTP 钩子（阻塞）**：需要授权时 Claude Code POST `/permission` 并挂起，等桌宠回 `allow/deny`。
+2. 本地 server 把状态喂给**会话状态机**；**适配器**翻译成前端契约（`pet:stats` 快照 + `pet:event` 事件）。
+3. **计量模块**增量扫描 `~/.claude/projects/**/*.jsonl`，按 `message.id` 去重统计每轮 token，乘模型单价算花费，喂详情面板。
+
+> **「Claude 客户端消息」**指的是 Claude Code（CLI agent）的回复内容——`Stop` 时从 transcript 抽最后一段 assistant 文本（截断 + 密钥脱敏），对应桌宠的 `💬` 气泡。（不是 Claude 桌面聊天 App 的消息。）
+
+---
+
+## 运行
+
+```bash
+npm install          # 装 electron
+npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
+```
+
+- 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
+- **左键点桌宠** = 弹出**会话列表**（每行：状态点 + 会话名 + 上下文用量%），点某行把该会话的终端调到前台；没有会话时给「新开 Claude」按钮。
+- **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
+- 托盘菜单可开详情面板、静音、唤起 Claude、打开日志、**卸载钩子**、退出。
+- 详情面板里可切皮肤 / 模式 / 设 5h 预算。
+
+### 开发 / 验证开关
+- `OCTOPUS_NO_HOOKS=1 npm start` —— 启动但**不动** `~/.claude/settings.json`（只验证主进程 / 界面）。
+- `npm test` —— 无头端到端冒烟测试（hook→server→core→adapter、权限持开→decide 字节级响应）。
+- 日志：`~/.octopus/octopus.log`。
+
+### 计量 / 计费
+- 数据源：本机 `~/.claude/projects/**/*.jsonl`（只读 token 数 / 模型 / 时间戳，**不读内容**）。
+- 状态持久化：`~/.octopus/usage.json`（含 90 天日历、游标）。首次启动会回填近 95 天历史。
+- 单价表内置 opus / sonnet / haiku 估算值，可用 `~/.octopus/pricing.json` 覆盖：
+  ```json
+  { "opus": {"input":15,"output":75,"cacheWrite":18.75,"cacheRead":1.5} }
+  ```
+  （单位：美元 / 百万 token。）
+
+### 卸载钩子
+托盘「🧹 卸载 Claude 钩子」，或：
+```bash
+npm run uninstall:hooks
+```
+
+---
+
+## 目录结构
+
+```
+main.js                 Electron 主进程：窗口 / IPC / 托盘 / 启动编排
+preload.js              前后端唯一接口（contextBridge）
+renderer/  assets/      桌宠 + 面板的视觉与渲染（原创）
+hook/
+  octopus-hook.js        Claude Code 触发的钩子脚本（读 stdin/transcript，POST /state）
+backend/
+  transport.js          端口发现 / runtime 文件 / 标识头 / 钩子→server 传输 / node 定位
+  transcript.js         transcript 解析（assistant 文本 / 上下文用量 / API 错误 / 标题）
+  pidwalk.js            进程树解析（定位会话所在终端）
+  hookinstall.js        merge-safe 钩子安装器（合并不覆盖 / 原子写 / 卸载备份）
+  launch.js             开终端跑 claude
+  core.js               会话存储 + 状态机 + 快照 + 陈旧清理
+  server.js             本地 HTTP server（/state /permission /health）
+  permission.js         授权持开/决策（字节级 CC 响应）
+  adapter.js            内部模型 → 前端契约（事件 + 统计 + choice）
+  metering.js           计量 + 计费（transcript 扫描 + 定价 + 持久化）
+  hooks.js              钩子生命周期（安装 + settings 监视器）
+  focus.js              定位会话（mac 优先）
+  config.js  log.js     配置持久化 / 日志
+test/smoke.js           端到端冒烟测试
+```
+
+---
+
+## 风险与权衡（已知）
+
+| 项 | 说明 | 现状 / 缓解 |
+|---|---|---|
+| **本地 /permission 伪造** | 任何本机进程都能 POST `/permission` 弹一个假授权气泡 | 仅绑 `127.0.0.1` + loopback 校验；点「允许」只把决策回给持连接者，**无法让 Claude 执行任何东西**；属社工风险 |
+| **本地 /state 伪造** | 本机进程可驱动桌宠动画 / 假气泡 | 仅装饰性，localhost-only |
+| **钩子残留** | 退出后钩子仍在，Claude Code 每个事件会 spawn 一次钩子（连不上 server，100ms 超时） | 影响极小；托盘可一键卸载 |
+| **定价准确度** | 内置单价为估算，未单独处理 1M 上下文变体 | 可用 `~/.octopus/pricing.json` 覆盖 |
+| **读 transcript** | 读取本机 `~/.claude` 下的会话记录 | 仅本地、仅 token 计数，不外传、不读正文 |
+| **focusSession** | 「去回复」目前仅 macOS 生效 | Windows/Linux 需原生 helper，暂未实现 |
+| **计量去重边界** | 流式重复行若跨两次扫描被切开，可能极小概率重复计数 | 同文件内已去重；概率极低 |
+
+### 安全加固（已做）
+- HTTP 仅 `127.0.0.1` + loopback 校验；body 上限（state 4KB / permission 1MB）；全字段规范化校验。
+- 配置 / 用量 / settings 全部**原子写**；钩子安装**合并不覆盖**、卸载先备份；settings 被外部清空时自动重注册。
+- Electron：`contextIsolation` 开、`nodeIntegration` 关、拦截外部导航与 `window.open`。
+- assistant 文本截断 + 控制字符清洗；命令行密钥样式标题脱敏（钩子内置）。
+
+---
+
+## 未做 / 后续
+- 多 agent（Codex / Gemini / Copilot…）：本项目刻意只做 Claude Code。
+- Windows / Linux 的会话定位、远程审批、自动更新：本项目暂未实现。

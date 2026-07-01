@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="panel.css" />
+    <title>Claude 小章鱼 · 详情</title>
+  </head>
+  <body>
+    <div id="card">
+      <header id="titlebar">
+        <div class="brand">
+          <span class="logo">🐙</span>
+          <div>
+            <div class="brand-title">小章鱼</div>
+            <div class="brand-sub" id="active-sub">等待会话…</div>
+          </div>
+        </div>
+        <button id="close" title="关闭">✕</button>
+      </header>
+
+      <section class="grid">
+        <div class="stat">
+          <div class="stat-label">今日花费</div>
+          <div class="stat-value" id="today-cost">$0.000</div>
+          <div class="stat-foot" id="today-tokens">0 tokens</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">近 5 小时</div>
+          <div class="stat-value" id="win-cost">$0.000</div>
+          <div class="stat-foot" id="win-reset">窗口空闲</div>
+        </div>
+      </section>
+
+      <section id="budget-wrap" class="budget hidden">
+        <div class="budget-head">
+          <span>5h 预算</span>
+          <span id="budget-pct">0%</span>
+        </div>
+        <div class="bar"><div id="budget-fill" class="bar-fill"></div></div>
+      </section>
+
+      <section class="block" id="todo-block">
+        <div class="block-title">
+          <span>📋 待办清单 <span id="todo-proj" class="todo-proj"></span></span>
+          <span id="todo-prog" class="todo-prog"></span>
+        </div>
+        <div id="todo-list" class="todos"><div class="empty">当前没有待办</div></div>
+      </section>
+
+      <section class="block">
+        <div class="block-title">
+          <span>用量趋势</span>
+          <span class="view-tabs">
+            <button data-view="hours" class="vt active">今日24h</button>
+            <button data-view="cal" class="vt">日历</button>
+          </span>
+        </div>
+        <div id="view-hours" class="uview">
+          <div id="chart" class="chart"></div>
+          <div class="chart-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span><span>点</span></div>
+          <div id="hours-readout" class="readout"></div>
+        </div>
+        <div id="view-cal" class="uview hidden">
+          <div id="cal" class="cal"></div>
+          <div class="cal-legend">少 <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i> 多</div>
+          <div id="cal-readout" class="readout"></div>
+        </div>
+        <div id="price-src" class="price-src" title="价目数据来源与更新时间"></div>
+      </section>
+
+      <section class="block">
+        <div class="block-title">Token 明细（今日）</div>
+        <div class="rows" id="token-rows">
+          <div class="row"><span>输入</span><b id="t-in">0</b></div>
+          <div class="row"><span>输出</span><b id="t-out">0</b></div>
+          <div class="row"><span>缓存写入</span><b id="t-cw">0</b></div>
+          <div class="row"><span>缓存读取</span><b id="t-cr">0</b></div>
+          <div class="row total"><span>消息轮次</span><b id="t-msg">0</b></div>
+        </div>
+      </section>
+
+      <section class="block">
+        <div class="block-title">进行中的任务</div>
+        <div id="sess-list" class="rows"><div class="empty">暂无活跃会话</div></div>
+      </section>
+
+      <section class="block">
+        <div id="bg-head" class="block-title">后台任务</div>
+        <div id="bg-list" class="rows"><div class="empty">没有长跑的后台进程 — 干净</div></div>
+      </section>
+
+      <section class="block">
+        <div class="block-title">按模型</div>
+        <div id="by-model" class="rows"><div class="empty">暂无数据</div></div>
+      </section>
+
+      <section class="block grow">
+        <div class="block-title">实时操作</div>
+        <ul id="ops" class="ops"><li class="empty">等待操作…</li></ul>
+      </section>
+
+      <footer id="settings">
+        <div class="seg-row">
+          <span class="seg-label">形态</span>
+          <div class="seg" id="mode-seg">
+            <button data-mode="pet" class="seg-btn">浮游</button>
+            <button data-mode="panel" class="seg-btn">角落</button>
+            <button data-mode="menubar" class="seg-btn">菜单栏</button>
+          </div>
+        </div>
+        <div class="seg-row">
+          <span class="seg-label">形象</span>
+          <div class="seg" id="skin-seg">
+            <button data-skin="mascot" class="seg-btn">🐙</button>
+            <button data-skin="pixel" class="seg-btn">👾</button>
+          </div>
+          <label class="budget-input">
+            5h预算$
+            <input id="budget" type="number" min="0" step="0.5" placeholder="0=关" />
+          </label>
+        </div>
+      </footer>
+    </div>
+    <script src="panel.js"></script>
+  </body>
+</html>

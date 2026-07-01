@@ -1,0 +1,17 @@
+{
+  "name": "octopus",
+  "version": "0.1.0",
+  "description": "桌面宠物：实时盯 Claude Code 等 coding agent 的状态、消息、授权与花费",
+  "main": "main.js",
+  "license": "MIT",
+  "author": "myunwang",
+  "scripts": {
+    "start": "electron .",
+    "install:hooks": "node backend/hookinstall.js",
+    "uninstall:hooks": "node backend/hookinstall.js --uninstall",
+    "test": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

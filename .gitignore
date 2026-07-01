@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build artifacts (the hand-assembled .app is 200M+; rebuild locally)
+dist/
+*.app/
+
+# Local runtime state (never lives in the repo, but guard anyway)
+.octopus/
+usage.json
+
+# Editor / local project config
+.claude/
+.vscode/
+.idea/
+
+# Image iteration backups (not part of the shipped art)
+assets/_orig_mascot/
+
+# OS / logs
+.DS_Store
+*.log
+npm-debug.log*
