@@ -2,7 +2,26 @@
 
 一个实时盯着 **Claude Code**（及同类 coding agent）的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 Claude 说的话弹成气泡，遇到需要授权时让你一键允许 / 拒绝，并在详情面板里给出 **token 计量与花费**、用量趋势、会话列表。
 
-前端形象、渲染与动画**原创**（章鱼 + 像素怪兽两款皮肤，见 `renderer/`；另有第三款「月薪喵」meme 皮肤，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）；后端（状态机 / 计量 / 权限 / 进程对账）是**从零自有实现**。整个项目以 **MIT** 开源，仅对接 Claude Code 的公开 hook 接口。
+共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。整个项目以 **MIT** 开源，仅对接 Claude Code 的公开 hook 接口。
+
+### 月薪喵皮肤 × 状态
+
+| 表情 | 状态 | 什么时候出现 |
+|:---:|:---|:---|
+| <img src="assets/cat/cat-working.gif" width="72" alt="干活"> | 🛠️ **working 干活** | 正在调用工具 / 改文件（戴耳机敲代码，「熬夜冠军」） |
+| <img src="assets/cat/cat-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 你刚提交提问、Claude 正在想（对着笔记本托腮） |
+| <img src="assets/cat/cat-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Claude 正在输出回复文本（拿着手机絮叨） |
+| <img src="assets/cat/cat-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 召唤 subagent 多线开工（屏幕光里疯狂操作） |
+| <img src="assets/cat/cat-sweeping.gif" width="72" alt="清理上下文"> | 🧹 **sweeping 清理** | 压缩 / 清理上下文（对手机喷消毒水） |
+| <img src="assets/cat/cat-waiting.gif" width="72" alt="等你授权"> | ✋ **waiting 等你授权** | 需要你点「允许 / 拒绝」（抱着手机冒冷汗） |
+| <img src="assets/cat/cat-needsinput.gif" width="72" alt="等你回复"> | ❓ **needsinput 等你回复** | 需要你选择 / 输入（摊手：你说啥？） |
+| <img src="assets/cat/cat-attention.gif" width="72" alt="需要注意"> | 🔔 **attention 看一眼** | 任务刚结束提醒你（从电脑前猛回头） |
+| <img src="assets/cat/cat-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮任务干完（眯眼咧嘴大笑） |
+| <img src="assets/cat/cat-greet.gif" width="72" alt="打招呼"> | 👋 **greet 打招呼** | 新会话开始（猛拍红色按钮「上号」） |
+| <img src="assets/cat/cat-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 执行失败 / API 报错（瘫在椅子上，电脑蓝屏） |
+| <img src="assets/cat/cat-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 没有任务（瘫在电竞椅上放空） |
+| <img src="assets/cat/cat-roam.gif" width="72" alt="闲逛"> | 🚶 **roam 闲逛** | 长时间空闲（拿着手机边走边看） |
+| <img src="assets/cat/cat-sleeping.gif" width="72" alt="睡觉"> | 😴 **sleeping 睡觉** | 会话结束 / 久无活动（蜷成一团，橘猫抱枕） |
 
 ---
 
@@ -70,7 +89,7 @@ npm run uninstall:hooks
 ```
 main.js                 Electron 主进程：窗口 / IPC / 托盘 / 启动编排
 preload.js              前后端唯一接口（contextBridge）
-renderer/  assets/      桌宠 + 面板的视觉与渲染（原创）
+renderer/  assets/      桌宠 + 面板的视觉与渲染
 hook/
   octopus-hook.js        Claude Code 触发的钩子脚本（读 stdin/transcript，POST /state）
 backend/
