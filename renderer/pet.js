@@ -908,7 +908,9 @@ window.pet.onEvent((ev) => {
   switch (ev.kind) {
     case 'operation':
       if (state !== 'waiting') {
-        setState('working');
+        // transient（thinking/happy/talking…）存续期间不被工具事件立刻盖掉，
+        // 到期后由 applyStats 聚合接管（STATES.md：短暂态优先级高于聚合）
+        if (perfNow() >= transientUntil) setState('working');
         playAction(ev.tool, ev.icon);
       }
       showBubble(`${ev.icon || '🔧'} ${ev.detail}`);
@@ -931,7 +933,9 @@ window.pet.onEvent((ev) => {
         const tip = ev.emotion === 'loved' ? '🥰 谢谢夸奖！' : ev.emotion === 'sad' ? '😢 别生气…' : '✨ 收到！';
         transient(ev.emotion, 2800, tip, 2600);
       } else {
-        if (state !== 'waiting') setState('thinking');
+        // 多会话时聚合里 working > thinking，直接 setState 会在下个快照被盖掉
+        // （只闪 ~150ms）。用 transient 保证「刚提交任务」的思考表情至少停留一会。
+        if (state !== 'waiting') transient('thinking', 3500);
         showBubble('📨 收到新任务！', 2600);
       }
       break;
