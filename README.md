@@ -9,19 +9,19 @@
 | 表情 | 状态 | 什么时候出现 |
 |:---:|:---|:---|
 | <img src="assets/cat/cat-working.gif" width="72" alt="干活"> | 🛠️ **working 干活** | 正在调用工具 / 改文件（戴耳机敲代码，「熬夜冠军」） |
-| <img src="assets/cat/cat-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 你刚提交提问、Claude 正在想（对着笔记本托腮） |
-| <img src="assets/cat/cat-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Claude 正在输出回复文本（拿着手机絮叨） |
-| <img src="assets/cat/cat-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 召唤 subagent 多线开工（屏幕光里疯狂操作） |
+| <img src="assets/cat/cat-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 你刚提交提问、Claude 正在想（对着笔记本挠头） |
+| <img src="assets/cat/cat-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Claude 正在输出回复文本（对着笔记本疯狂输出喵喵喵） |
+| <img src="assets/cat/cat-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 召唤 subagent 多线开工（趴键盘上还同时刷手机） |
 | <img src="assets/cat/cat-sweeping.gif" width="72" alt="清理上下文"> | 🧹 **sweeping 清理** | 压缩 / 清理上下文（对手机喷消毒水） |
 | <img src="assets/cat/cat-waiting.gif" width="72" alt="等你授权"> | ✋ **waiting 等你授权** | 需要你点「允许 / 拒绝」（抱着手机冒冷汗） |
-| <img src="assets/cat/cat-needsinput.gif" width="72" alt="等你回复"> | ❓ **needsinput 等你回复** | 需要你选择 / 输入（摊手：你说啥？） |
-| <img src="assets/cat/cat-attention.gif" width="72" alt="需要注意"> | 🔔 **attention 看一眼** | 任务刚结束提醒你（从电脑前猛回头） |
-| <img src="assets/cat/cat-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮任务干完（眯眼咧嘴大笑） |
+| <img src="assets/cat/cat-needsinput.gif" width="72" alt="等你回复"> | ❓ **needsinput 等你回复** | 需要你选择 / 输入（头顶冒问号挠头） |
+| <img src="assets/cat/cat-attention.gif" width="72" alt="需要注意"> | 🔔 **attention 看一眼** | 任务刚结束提醒你（从工位起身够手机看消息） |
+| <img src="assets/cat/cat-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮任务干完（摸小猫的头夸夸） |
 | <img src="assets/cat/cat-greet.gif" width="72" alt="打招呼"> | 👋 **greet 打招呼** | 新会话开始（猛拍红色按钮「上号」） |
-| <img src="assets/cat/cat-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 执行失败 / API 报错（瘫在椅子上，电脑蓝屏） |
-| <img src="assets/cat/cat-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 没有任务（瘫在电竞椅上放空） |
-| <img src="assets/cat/cat-roam.gif" width="72" alt="闲逛"> | 🚶 **roam 闲逛** | 长时间空闲（拿着手机边走边看） |
-| <img src="assets/cat/cat-sleeping.gif" width="72" alt="睡觉"> | 😴 **sleeping 睡觉** | 会话结束 / 久无活动（蜷成一团，橘猫抱枕） |
+| <img src="assets/cat/cat-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 执行失败 / API 报错（抱头崩溃大叫） |
+| <img src="assets/cat/cat-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 没有任务（转椅上冰淇淋+手机摸鱼） |
+| <img src="assets/cat/cat-roam.gif" width="72" alt="闲逛"> | 🚶 **roam 闲逛** | 长时间空闲（撒腿跑着玩） |
+| <img src="assets/cat/cat-sleeping.gif" width="72" alt="睡觉"> | 😴 **sleeping 睡觉** | 会话结束 / 久无活动（被窝里睡成一坨） |
 
 ---
 

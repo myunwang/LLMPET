@@ -27,20 +27,20 @@ function updateMascotEyes(s) {
 // 月薪喵（cat）：每个状态一张 meme GIF（原作者：抖音 @月薪喵）
 const catImg = document.getElementById('cat-img');
 const CAT_STATES = {
-  idle: 'cat-idle.gif',           // 靠椅放空：待命
-  roam: 'cat-roam.gif',           // 拿手机溜达：闲逛
+  idle: 'cat-idle.gif',           // 转椅上冰淇淋+手机摸鱼：待命
+  roam: 'cat-roam.gif',           // 撒腿跑着玩：闲逛
   working: 'cat-working.gif',     // 戴耳机敲代码「熬夜冠军」：干活
-  thinking: 'cat-thinking.gif',   // 托腮沉思：思考
-  talking: 'cat-talking.gif',     // 拿手机絮叨：回应中
-  juggling: 'cat-juggling.gif',   // 屏幕光里多线操作：并行子任务
+  thinking: 'cat-thinking.gif',   // 对着笔记本挠头：思考
+  talking: 'cat-talking.gif',     // 对着笔记本疯狂输出喵喵喵：回应中
+  juggling: 'cat-juggling.gif',   // 趴键盘上还同时刷手机：并行子任务
   sweeping: 'cat-sweeping.gif',   // 喷消毒水打扫：压缩/清理
   waiting: 'cat-waiting.gif',     // 冒汗紧张等待：等你授权
-  needsinput: 'cat-needsinput.gif', // 摊手一脸问号：等你回复
-  happy: 'cat-happy.gif',         // 咧嘴大笑：完成庆祝
+  needsinput: 'cat-needsinput.gif', // 头顶冒问号挠头：等你回复
+  happy: 'cat-happy.gif',         // 摸小猫的头夸夸：完成庆祝
   greet: 'cat-greet.gif',         // 猛拍「上号」：打招呼
-  attention: 'cat-attention.gif', // 猛回头警觉：需要注意
-  sleeping: 'cat-sleeping.gif',   // 蜷成一团睡着：睡觉
-  error: 'cat-error.gif',         // 电脑蓝屏瘫坐：出错
+  attention: 'cat-attention.gif', // 从工位起身够手机看消息：需要注意
+  sleeping: 'cat-sleeping.gif',   // 被窝里睡成一坨：睡觉
+  error: 'cat-error.gif',         // 抱头崩溃大叫：出错
 };
 function updateCat(s) {
   if (!catImg) return;
