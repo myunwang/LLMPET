@@ -254,6 +254,21 @@ async function main() {
     const eTg = st.sessions.find((x) => x.sessionId === tgSid);
     check('PreToolUse 长间隙（工具仍在跑）→ 仍是 working', () => assert.strictEqual(eTg.state, 'working'));
   }
+  // 重连/流式输出场景：事件间隙里 transcript 还在长 → 干活，不是摸鱼
+  await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: tgSid, cwd: '/Users/me/proj-tg' });
+  core.sessions.get(tgSid).updatedAt = Date.now() - 6000;
+  core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 3000; // 3s 前还在写
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eTg = st.sessions.find((x) => x.sessionId === tgSid);
+    check('间隙但 transcript 在长（模型产出中）→ working', () => assert.strictEqual(eTg.state, 'working'));
+  }
+  core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 60 * 1000; // 文件 1 分钟没动
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eTg = st.sessions.find((x) => x.sessionId === tgSid);
+    check('间隙且 transcript 不动 → loafing 摸鱼', () => assert.strictEqual(eTg.state, 'loafing'));
+  }
 
   console.log('\n[15] SessionStart 无 source 时用 transcript 历史兜底');
   const fs = require('fs');

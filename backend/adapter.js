@@ -35,6 +35,8 @@ const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'Suba
 
 // 工具结束后超过这个间隙仍无事件 → 摸鱼中（等下一步）
 const LOAF_GAP_MS = 5000;
+// transcript 在这个窗口内有写入 = 模型仍在产出（巡检 10s 刷一次 mtime）
+const TRANSCRIPT_ACTIVE_MS = 25 * 1000;
 
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
@@ -233,14 +235,17 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     let reason = null;
     let choice = null;
 
-    // 「上一步干完了、下一步还没来」的间隙：谁也不知道模型在干嘛（推理/流式
-    // 输出/事件丢了都有可能），别硬说是「思考中」——显示摸鱼（loafing）最诚实。
+    // 「上一步干完了、下一步还没来」的间隙：
+    //   - transcript 还在长（mtime 新鲜）= 模型在产出（重连后继续跑/流式输出）
+    //     → 仍是干活，别误判摸鱼；
+    //   - 文件不动才是真没动静 → 摸鱼（loafing），不硬说「思考中」。
     // 只认 PostToolUse/SubagentStop 间隙——PreToolUse 间隙是工具还在跑，仍算干活。
     // 真思考仍有渠道：UserPromptSubmit → thinking 是事件驱动的。
     if (state === 'working'
       && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
       && e.idleMs > LOAF_GAP_MS) {
-      state = 'loafing';
+      const producing = e.transcriptActiveAt && (Date.now() - e.transcriptActiveAt) < TRANSCRIPT_ACTIVE_MS;
+      if (!producing) state = 'loafing';
     }
 
     const perm = permsBySession.get(e.id);

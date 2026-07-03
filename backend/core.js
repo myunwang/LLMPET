@@ -272,6 +272,7 @@ function createCore(options = {}) {
       lastEventTool: s.lastEventTool || null,
       updatedAt: s.updatedAt || 0,
       idleMs: Math.max(0, now - (s.updatedAt || now)),
+      transcriptActiveAt: s.transcriptActiveAt || 0,
       sourcePid: s.sourcePid || null,
       pidChain: Array.isArray(s.pidChain) ? s.pidChain : null,
       editor: s.editor || null,
@@ -357,6 +358,9 @@ function createCore(options = {}) {
       const p = transcriptPathFor(s);
       if (!p) continue;
       try {
+        // transcript 的 mtime = 模型最近一次产出时间。事件间隙里文件还在长，
+        // 说明模型在干活（重连后继续跑/流式输出），adapter 据此不判摸鱼。
+        try { s.transcriptActiveAt = fs.statSync(p).mtimeMs; } catch {}
         const entries = transcript.readTail(p);
         if (!entries) continue;
         const cu = transcript.contextUsage(entries, s.id);
