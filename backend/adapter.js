@@ -357,6 +357,12 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 
 // ── pet:event derivation ──────────────────────────────────────────────────────
 // Diff one activity into zero+ discrete events the frontend animates on.
+// 每个项目 30 分钟内只欢迎一次：宿主 app（ccd/openloomi）「点击进入会话」
+// 可能用一次性目录拉起全新 claude（新 id/新 cwd/无历史/source=startup），
+// 与真·新对话在 hook 层面无法区分——频控是最后一道保险。
+const GREET_DEBOUNCE_MS = 30 * 60 * 1000;
+const lastGreetAt = new Map(); // project -> ts
+
 function activityToEvents(act) {
   const { session, event, isNew, realCompletion, assistantChanged, cwdActive } = act;
   if (!session || session.headless) return []; // background sessions: no bubbles
@@ -365,14 +371,19 @@ function activityToEvents(act) {
 
   switch (event) {
     case 'SessionStart': {
-      // 三重判定，全过才欢迎：
+      // 多重判定，全过才欢迎：
       //  1) core 没见过这个 id（isNew）
       //  2) source 不是 resume/compact/clear（ccd 可能不带 source，靠 hook 的
       //     transcript 历史兜底出 startup/resume）
-      //  3) 同 cwd 没有忙碌/近期活跃的会话（点进正在执行的任务时,ccd 可能
-      //     fork 新 id + 空 transcript + 无 source，前两条全失效，靠这条兜死）
+      //  3) 同 cwd 没有忙碌/近期活跃的会话（fork 进入执行中任务的兜底）
+      //  4) cwd 不在隐藏目录里（~/.openloomi/sessions/<uuid> 这类一次性
+      //     工作目录是工具拉起的会话，不是人开的新对话）
+      //  5) 同项目 30 分钟内没欢迎过（频控兜底）
       const src = session.pendingSessionSource;
-      if (isNew && (!src || src === 'startup') && !cwdActive) {
+      const toolSpawned = /\/\./.test(session.cwd || '');
+      const recentlyGreeted = (Date.now() - (lastGreetAt.get(project) || 0)) < GREET_DEBOUNCE_MS;
+      if (isNew && (!src || src === 'startup') && !cwdActive && !toolSpawned && !recentlyGreeted) {
+        lastGreetAt.set(project, Date.now());
         out.push({ kind: 'greet', project, ts: Date.now() });
       }
       break;

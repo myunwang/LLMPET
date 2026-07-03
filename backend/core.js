@@ -216,7 +216,7 @@ function createCore(options = {}) {
           break;
         }
       }
-      log('core', `SessionStart ${id.slice(0, 8)} source=${f.sessionSource || '-'} isNew=${isNew} cwdActive=${cwdActive}`);
+      log('core', `SessionStart ${id.slice(0, 8)} source=${f.sessionSource || '-'} isNew=${isNew} cwdActive=${cwdActive} cwd=${s.cwd || '-'}`);
     }
 
     s.state = resolvedState;

@@ -280,6 +280,18 @@ async function main() {
   check('全新项目的新对话仍正常欢迎', () =>
     assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-brand-new')));
 
+  console.log('\n[19] 工具拉起的一次性目录会话 + 同项目欢迎频控');
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'toolspawn-ssss', cwd: '/Users/me/.someapp/sessions/ab12cd34', session_source: 'startup' });
+  check('隐藏目录 cwd（工具拉起）不欢迎', () =>
+    assert(!events.some((e) => e.kind === 'greet' && e.project === 'ab12cd34')));
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-a-tttt', cwd: '/Users/me/proj-debounce', session_source: 'startup' });
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-b-uuuu', cwd: '/Users/me/proj-debounce2', session_source: 'startup' });
+  // 同项目名 30 分钟内第二次 SessionStart（新 id、新 cwd 但 basename 相同的场景走 cwdActive；
+  // 这里直接验证同名项目频控）
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-c-vvvv', cwd: '/tmp/other/proj-debounce', session_source: 'startup' });
+  check('同项目 30 分钟内只欢迎一次', () =>
+    assert.strictEqual(events.filter((e) => e.kind === 'greet' && e.project === 'proj-debounce').length, 1));
+
   console.log('\n[16] ESC 中断检测（transcript 发现，10s 巡检放下忙碌态）');
   const intSid = 'interrupt-session-nnnn';
   const intCwd = path.join(os.tmpdir(), 'octo-int-test');
