@@ -424,7 +424,10 @@ function createCore(options = {}) {
         sessions.delete(id); changed = true; continue;
       }
       // Stuck working/thinking → settle to idle, but KEEP it visible.
-      if (BUSY_STATES.has(s.state) && idle > WORKING_STALE_MS) {
+      // 「卡死」的判定用 事件时间 和 transcript 产出时间 取较新者：慢长任务
+      // （17 分钟一轮、token 缓慢增长）事件少但文件一直在写，不算卡死。
+      const busyIdle = now - Math.max(s.updatedAt || 0, s.transcriptActiveAt || 0);
+      if (BUSY_STATES.has(s.state) && busyIdle > WORKING_STALE_MS) {
         s.state = 'idle'; changed = true;
       }
       // Idle sessions whose terminal is still alive stay visible (no auto-sleep)

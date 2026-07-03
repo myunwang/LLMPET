@@ -221,10 +221,11 @@ async function main() {
   }
 
   console.log('\n[13] greet 延迟到第一条 prompt：入口会话静默、真对话欢迎');
+  // 用户定义情形 b：看板上没有的会话被 resume 进入 = 新对话，说话后欢迎
   const rsSid = 'resume-session-kkkk';
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: rsSid, cwd: '/Users/me/proj-resume', session_source: 'resume' });
   await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: rsSid, cwd: '/Users/me/proj-resume' });
-  check('resume 进入已有任务：说话也不欢迎', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-resume')));
+  check('看板外会话 resume 进入 + 说话 → 欢迎', () => assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-resume')));
   const nsSid = 'startup-session-llll';
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: nsSid, cwd: '/Users/me/proj-fresh', session_source: 'startup' });
   check('SessionStart 本身不欢迎（等第一条 prompt）', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-fresh')));
@@ -263,12 +264,17 @@ async function main() {
     const eTg = st.sessions.find((x) => x.sessionId === tgSid);
     check('间隙但 transcript 在长（模型产出中）→ working', () => assert.strictEqual(eTg.state, 'working'));
   }
-  core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 60 * 1000; // 文件 1 分钟没动
+  core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 200 * 1000; // 文件 3 分多钟没动
   {
     const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
     const eTg = st.sessions.find((x) => x.sessionId === tgSid);
-    check('间隙且 transcript 不动 → loafing 摸鱼', () => assert.strictEqual(eTg.state, 'loafing'));
+    check('间隙且 transcript 长时间不动 → loafing 摸鱼', () => assert.strictEqual(eTg.state, 'loafing'));
   }
+  // 慢长任务（17m 一轮、token 缓涨）：事件 6 分钟没来但文件半分钟前还在写 → 不被卡死兜底打成 idle
+  core.sessions.get(tgSid).updatedAt = Date.now() - 6 * 60 * 1000;
+  core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 30 * 1000;
+  core.cleanStaleSessions();
+  check('慢长任务不被 WORKING_STALE 打成 idle', () => assert.strictEqual(core.getSession(tgSid).state, 'working'));
 
   console.log('\n[15] SessionStart 无 source 时用 transcript 历史兜底');
   const fs = require('fs');
@@ -278,11 +284,11 @@ async function main() {
   const histFile = path.join(tmpDir, 'hist.jsonl');
   fs.writeFileSync(histFile, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '之前聊过' }] } }) + '\n'
     + JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '好的' }] } }) + '\n');
-  check('有历史对话 + 无 source → resume（不欢迎）', () => {
+  check('有历史对话 + 无 source → 标记 resume（诊断用）', () => {
     const b = hook.buildBody('SessionStart', { session_id: 'x3', transcript_path: histFile });
     assert.strictEqual(b.session_source, 'resume');
   });
-  check('无 transcript + 无 source → startup（欢迎）', () => {
+  check('无 transcript + 无 source → 标记 startup', () => {
     const b = hook.buildBody('SessionStart', { session_id: 'x4', transcript_path: path.join(tmpDir, 'nope.jsonl') });
     assert.strictEqual(b.session_source, 'startup');
   });

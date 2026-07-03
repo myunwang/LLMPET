@@ -35,8 +35,10 @@ const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'Suba
 
 // 工具结束后超过这个间隙仍无事件 → 摸鱼中（等下一步）
 const LOAF_GAP_MS = 5000;
-// transcript 在这个窗口内有写入 = 模型仍在产出（巡检 10s 刷一次 mtime）
-const TRANSCRIPT_ACTIVE_MS = 25 * 1000;
+// transcript 在这个窗口内有写入 = 模型仍在产出（巡检 10s 刷一次 mtime）。
+// 长推理时 CC 按内容块落盘，块间隔可达一两分钟——窗口放宽到 150s，
+// 「时间在走、token 在涨」的慢长任务不会被误判成摸鱼。
+const TRANSCRIPT_ACTIVE_MS = 150 * 1000;
 
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
@@ -376,16 +378,16 @@ function activityToEvents(act) {
 
   switch (event) {
     case 'SessionStart': {
-      // 不在 SessionStart 上直接欢迎——那个瞬间信息最少：宿主 app 点击进入
-      // 会话时会拉起全新 claude（新 id/新 cwd/无历史/source=startup），与
-      // 真·新对话完全同构。真·新对话的确凿标志是「用户真的在里面说了话」，
-      // 所以这里只做资格预审，欢迎延迟到该会话的第一条 prompt 触发；
+      // 「进入新对话」的判定（用户定义的两种情形，欢迎都延迟到首条 prompt）：
+      //  a) 全新会话的创建——首条 prompt 时欢迎；
+      //  b) 看板上没有的会话被进入（resume 回来）——桌宠世界里它就是新出现的，
+      //     同样欢迎。所以 source 不参与资格判定，只看 isNew。
+      // 排除项：
+      //  - cwdActive：该项目已有忙碌/近期会话 → 是进入执行中的任务，不是新对话
+      //  - toolSpawned：~/.xxx/sessions/<uuid> 一次性目录 → 宿主 app 拉起的入口进程
       // 入口/巡检类会话永远等不到 prompt，自然静默。
-      const src = session.pendingSessionSource;
-      const toolSpawned = /\/\./.test(session.cwd || ''); // ~/.xxx/sessions/<uuid> 一次性目录
-      session.greetPending = (isNew && (!src || src === 'startup') && !cwdActive && !toolSpawned)
-        ? Date.now()
-        : null;
+      const toolSpawned = /\/\./.test(session.cwd || '');
+      session.greetPending = (isNew && !cwdActive && !toolSpawned) ? Date.now() : null;
       break;
     }
     case 'UserPromptSubmit': {
