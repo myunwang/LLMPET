@@ -57,10 +57,36 @@ const CAT_STATES = {
   sorry: 'cat-waiting.gif',       // 道歉 → 冒冷汗心虚
   puzzled: 'cat-needsinput.gif',  // 疑惑 → 头顶问号
 };
+// working 是停留最久的状态 → 多张打工姿态轮换：进入时换下一张，
+// 持续干活期间每 60s 也换一张，别一直钉在同一个画面上。
+const CAT_WORKING_POOL = [
+  'cat-working.gif',   // 猛拍「上号」按钮
+  'cat-working-2.gif', // 熬夜冠军：戴耳机对着显示器
+  'cat-working-3.gif', // 捂着耳朵埋头猛敲键盘
+  'cat-working-4.gif', // 边吃零食边敲键盘
+];
+const WORKING_ROTATE_MS = 60 * 1000;
+let workingIdx = 0;
+let workingRot = null;
 function updateCat(s) {
   if (!catImg) return;
-  const f = CAT_STATES[s] || CAT_STATES.idle;
+  const f = s === 'working'
+    ? CAT_WORKING_POOL[workingIdx % CAT_WORKING_POOL.length]
+    : (CAT_STATES[s] || CAT_STATES.idle);
   if (!catImg.getAttribute('src').endsWith(f)) catImg.src = '../assets/cat/' + f;
+  if (s === 'working') {
+    if (!workingRot) {
+      workingRot = setInterval(() => {
+        if (state !== 'working' || skin !== 'cat') return;
+        workingIdx++;
+        catImg.src = '../assets/cat/' + CAT_WORKING_POOL[workingIdx % CAT_WORKING_POOL.length];
+      }, WORKING_ROTATE_MS);
+    }
+  } else if (workingRot) {
+    clearInterval(workingRot);
+    workingRot = null;
+    workingIdx++; // 下次进入 working 直接是下一张
+  }
 }
 const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');

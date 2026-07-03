@@ -11,7 +11,10 @@
 
 | 文件 | 状态 | 表情含义 |
 |---|---|---|
-| `cat-working.gif`    | working    | 戴耳机猛拍「上号」按钮——干活中 |
+| `cat-working.gif`    | working    | 戴耳机猛拍「上号」按钮——干活中（轮换第 1 张） |
+| `cat-working-2.gif`  | working    | 熬夜冠军：戴耳机对着显示器——干活轮换 |
+| `cat-working-3.gif`  | working    | 捂着耳朵埋头猛敲键盘——干活轮换 |
+| `cat-working-4.gif`  | working    | 边吃零食边敲键盘——干活轮换 |
 | `cat-idle.gif`       | idle       | 转椅上冰淇淋+手机摸鱼——待命 |
 | `cat-roam.gif`       | roam       | 撒腿跑着玩——闲逛 |
 | `cat-thinking.gif`   | thinking   | 对着笔记本挠头——思考 |
