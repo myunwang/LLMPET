@@ -69,6 +69,9 @@ function buildBody(event, p) {
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
   if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
   if (typeof p.model === 'string' && p.model) body.model = p.model;
+  // SessionStart 带来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
+  // resume/compact 进入已有任务不该触发「新会话欢迎」。
+  if (event === 'SessionStart' && typeof p.source === 'string' && p.source) body.session_source = p.source;
   if (p.stop_hook_active === true) body.stop_hook_active = true;
   // StopFailure carries the API/server error kind (CC 2.1.x enum: server_error,
   // rate_limit, overloaded_error, billing_error, authentication_failed, …).

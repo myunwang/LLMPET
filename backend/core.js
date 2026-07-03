@@ -155,6 +155,7 @@ function createCore(options = {}) {
     // between updateSession() and the onActivity() callback).
     s.pendingUserEmotion = f.userEmotion || null;
     s.pendingAssistantEmotion = f.assistantEmotion || null;
+    s.pendingSessionSource = f.sessionSource || null; // SessionStart 来源，同为 per-event
 
     // assistant_last_output only arrives on Stop; keep prior otherwise.
     let assistantChanged = false;

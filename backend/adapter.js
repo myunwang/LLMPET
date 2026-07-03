@@ -33,6 +33,9 @@ function toolLabel(tool) { return TOOL_LABEL[tool] || tool || '处理中'; }
 // 「最近事件是工具活动」判定——op 标签只该跟着这些事件走
 const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop']);
 
+// 工具结束后超过这个间隙仍无事件 → 视为模型在推理（Thinking some more）
+const THINK_GAP_MS = 5000;
+
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
   switch (type) {
@@ -230,6 +233,15 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     let reason = null;
     let choice = null;
 
+    // 「Thinking some more」：上一个工具已经结束、几秒内没有新事件 = 模型在
+    // 推理/组织下一步（CLI 里的 Thinking…），显示思考而不是一直「干活中」。
+    // 只认 PostToolUse/SubagentStop 间隙——PreToolUse 间隙是工具还在跑，仍算干活。
+    if (state === 'working'
+      && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
+      && e.idleMs > THINK_GAP_MS) {
+      state = 'thinking';
+    }
+
     const perm = permsBySession.get(e.id);
     if (perm && perm.isElicitation && !e.headless) {
       state = 'needsinput';
@@ -349,9 +361,13 @@ function activityToEvents(act) {
   const out = [];
 
   switch (event) {
-    case 'SessionStart':
-      if (isNew) out.push({ kind: 'greet', project, ts: Date.now() });
+    case 'SessionStart': {
+      // 只有真·新对话（source=startup，或老版本 hook 没带 source）才欢迎；
+      // resume/compact 进入正在执行的任务不打招呼——之前会误报「新会话，你好！」。
+      const src = session.pendingSessionSource;
+      if (isNew && (!src || src === 'startup')) out.push({ kind: 'greet', project, ts: Date.now() });
       break;
+    }
     case 'UserPromptSubmit': {
       const emo = session.pendingUserEmotion || null;
       out.push({ kind: 'user-turn', project, emotion: emo, ts: Date.now() });

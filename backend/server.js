@@ -136,6 +136,7 @@ function createServer(deps) {
         headless: data.headless === true,
         model: typeof data.model === 'string' && data.model.trim() ? data.model.trim() : null,
         sessionTitle: typeof data.session_title === 'string' && data.session_title.trim() ? data.session_title.trim() : null,
+        sessionSource: typeof data.session_source === 'string' && /^[a-z]{1,16}$/.test(data.session_source) ? data.session_source : null,
         contextUsage: normContext(data.context_usage),
         assistantLastOutput: normAssistant(data.assistant_last_output),
         assistantLastOutputTruncated: data.assistant_last_output_truncated === true,

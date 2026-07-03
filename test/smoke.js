@@ -218,6 +218,35 @@ async function main() {
     check('thinking 阶段不显示上一轮的「运行命令」', () => assert.strictEqual(eOp.op, null));
   }
 
+  console.log('\n[13] greet 只对真·新对话（source=startup）');
+  const rsSid = 'resume-session-kkkk';
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: rsSid, cwd: '/Users/me/proj-resume', session_source: 'resume' });
+  check('resume 进入已有任务不欢迎', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-resume')));
+  const nsSid = 'startup-session-llll';
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: nsSid, cwd: '/Users/me/proj-fresh', session_source: 'startup' });
+  check('startup 新对话正常欢迎', () => assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-fresh')));
+  check('hook 转发 SessionStart source', () => {
+    const b = hook.buildBody('SessionStart', { session_id: 'x2', source: 'resume' });
+    assert(b && b.session_source === 'resume');
+  });
+
+  console.log('\n[14] Thinking some more：工具结束后长间隙 = 推理中');
+  const tgSid = 'thinkgap-session-mmmm';
+  await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: tgSid, cwd: '/Users/me/proj-tg' });
+  core.sessions.get(tgSid).updatedAt = Date.now() - 6000; // 工具结束 6s 无事件
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eTg = st.sessions.find((x) => x.sessionId === tgSid);
+    check('PostToolUse 后 >5s 无事件 → thinking', () => assert.strictEqual(eTg.state, 'thinking'));
+  }
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: tgSid, cwd: '/Users/me/proj-tg' });
+  core.sessions.get(tgSid).updatedAt = Date.now() - 6000; // 工具还在跑 6s
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eTg = st.sessions.find((x) => x.sessionId === tgSid);
+    check('PreToolUse 长间隙（工具仍在跑）→ 仍是 working', () => assert.strictEqual(eTg.state, 'working'));
+  }
+
   server.stop();
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : '❌ ' + failures + ' FAILURE(S)'} — events captured: ${events.length}, dirty fires: ${dirtyCount}`);
   process.exit(failures === 0 ? 0 : 1);
