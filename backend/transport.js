@@ -136,10 +136,11 @@ function resolveNodeBin() {
     path.join(home, '.local', 'bin', 'node'),
     '/usr/bin/node',
   ];
-  // Newest nvm/fnm version dirs.
+  // Newest nvm/fnm version dirs. Sort numerically, NOT lexically — a lexical sort
+  // ranks 'v8.x' after 'v18.x'/'v20.x' and would pick the ancient v8 first.
   for (const root of [path.join(home, '.nvm', 'versions', 'node'), path.join(home, '.fnm', 'node-versions')]) {
     try {
-      const vers = fs.readdirSync(root).filter((v) => /^v?\d+\./.test(v)).sort().reverse();
+      const vers = fs.readdirSync(root).filter((v) => /^v?\d+\./.test(v)).sort(cmpVersionDesc);
       for (const v of vers) candidates.push(path.join(root, v, root.includes('.fnm') ? 'installation' : '', 'bin', 'node').replace('//', '/'));
     } catch {}
   }
@@ -154,7 +155,21 @@ function resolveNodeBin() {
     const line = out.split('\n').map((s) => s.trim()).filter((s) => s.startsWith('/')).pop();
     if (line) { fs.accessSync(line, fs.constants.X_OK); return line; }
   } catch {}
-  return process.execPath || 'node';
+  // Last resort: bare 'node'. Never process.execPath here — under Electron that's
+  // the app binary, so every hook event would spawn a whole GUI instance. (A real
+  // node process already returned its own execPath at the top.)
+  return 'node';
+}
+
+// Compare 'v18.19.0' style versions numerically, newest first.
+function cmpVersionDesc(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] || 0) - (pa[i] || 0);
+    if (d) return d;
+  }
+  return 0;
 }
 
 function resolveWinNode() {

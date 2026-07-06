@@ -156,7 +156,9 @@ const isInteracting = () => askActive && (askHover || document.activeElement ===
 
 const rlog = (tag, msg) => { try { window.pet.petLog(tag, msg); } catch {} }; // 把 UI 决策写日志，便于自检
 const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const choiceKey = (c) => (c && (c.project || '') + '|' + (c.question || '')) || '';
+// 带上 sessionId：否则同一项目下两个并行会话若问了同样的问题，会共用一个 key，
+// 答掉一个就把另一个也标记成 answered 吞掉。choice 各构造处都带 sessionId。
+const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
 
 // 动态定高：弹层贴 pet 上方(bottom:200)，把窗口高度调到刚好容纳内容，
 // 避免固定大窗口留白 / 顶屏被下移。w=440 让会话名有地方换行不截断。

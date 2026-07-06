@@ -270,6 +270,10 @@ function bootBackend() {
           { id: entry.id, sessionId: entry.sessionId, toolName: entry.toolName, toolInput: entry.toolInput, suggestions: entry.suggestions }, lite);
         kind = 'waiting'; reason = '授权';
       }
+      // A parked permission needs the user's eyes. In menubar mode (or if the pet
+      // was hidden) the ask panel would render into an invisible window and CC
+      // would hang until the park times out — so surface the pet window first.
+      try { if (petWin && !petWin.isDestroyed() && !petWin.isVisible()) petWin.show(); } catch {}
       sendPet('pet:event', { kind, project: choice.project, reason, sessionId: entry.sessionId, choice, ts: Date.now() });
       scheduleEmit();
     },
