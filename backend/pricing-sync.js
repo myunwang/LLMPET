@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { log } = require('./log');
+const { normModelName } = require('./metering');
 
 const CACHE = path.join(os.homedir(), '.octopus', 'pricing-cache.json');
 const URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
@@ -80,6 +81,33 @@ function extractFamilies(table) {
   return out;
 }
 
+// Exact per-model-id prices (NOT folded to families), keyed by the bare model
+// name the transcripts use (claude-fable-5, claude-opus-4-8). This is what fixes
+// "every non-opus/sonnet/haiku model silently billed at sonnet price" and keeps
+// opus generations (4-1 $15/$75 vs 4-8 $5/$25) distinct. Only anthropic-direct
+// rows are taken (bedrock/vertex/region variants skipped).
+function extractModels(table) {
+  const out = {};
+  if (!table || typeof table !== 'object') return out;
+  const r = (v) => (Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null);
+  for (const [name, m] of Object.entries(table)) {
+    if (!m || typeof m !== 'object') continue;
+    if (m.litellm_provider !== 'anthropic') continue;
+    if (!/claude/i.test(name)) continue;
+    const id = normModelName(name);
+    if (!id) continue;
+    const input = toMTok(m.input_cost_per_token);
+    const output = toMTok(m.output_cost_per_token);
+    if (input == null && output == null) continue;
+    let cacheWrite = toMTok(m.cache_creation_input_token_cost);
+    let cacheRead = toMTok(m.cache_read_input_token_cost);
+    if (cacheWrite == null && input != null) cacheWrite = input * 1.25; // Anthropic standard ratios
+    if (cacheRead == null && input != null) cacheRead = input * 0.1;
+    out[id] = { input: r(input), output: r(output), cacheWrite: r(cacheWrite), cacheRead: r(cacheRead) };
+  }
+  return out;
+}
+
 function createPricingSync(options = {}) {
   const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : () => {};
   let timer = null;
@@ -97,13 +125,14 @@ function createPricingSync(options = {}) {
     try {
       const table = await fetchJson(URL);
       const pricing = extractFamilies(table);
+      const models = extractModels(table);
       if (!Object.keys(pricing).length) throw new Error('no claude families extracted');
       try {
         fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-        fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), source: 'litellm', url: URL, pricing }, null, 2));
+        fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), source: 'litellm', url: URL, pricing, models }, null, 2));
       } catch (e) { log('pricing', 'cache write failed:', e.message); }
       const fams = Object.keys(pricing).join('/');
-      log('pricing', `synced from LiteLLM (${fams})`);
+      log('pricing', `synced from LiteLLM (${fams}; ${Object.keys(models).length} models)`);
       try { onUpdate(); } catch {}
     } catch (e) {
       log('pricing', 'sync skipped:', e.message);
@@ -126,4 +155,4 @@ function createPricingSync(options = {}) {
   return { start, stop, getCached, refresh };
 }
 
-module.exports = { createPricingSync, CACHE_PATH: CACHE, _extractFamilies: extractFamilies };
+module.exports = { createPricingSync, CACHE_PATH: CACHE, _extractFamilies: extractFamilies, _extractModels: extractModels };

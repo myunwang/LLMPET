@@ -34,14 +34,28 @@ const DAILY_KEEP_DAYS = 95;
 const RECENT_KEEP_MS = WINDOW_MS + 30 * 60 * 1000;
 const BACKFILL_MS = DAILY_KEEP_DAYS * DAY_MS;
 
-// USD per 1,000,000 tokens. Estimates — override via ~/.octopus/pricing.json:
-//   { "opus": {"input":15,"output":75,"cacheWrite":18.75,"cacheRead":1.5}, ... }
+// USD per 1,000,000 tokens. Family-level ESTIMATES — only a last-resort fallback
+// now that we price by exact model id (pricing._models, synced from LiteLLM).
+// Override via ~/.octopus/pricing.json (families and/or a "models" map):
+//   { "opus": {...}, "models": { "claude-opus-4-8": {"input":5,"output":25,...} } }
 const DEFAULT_PRICING = {
   opus:    { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  fable:   { input: 10, output: 50, cacheWrite: 12.5,  cacheRead: 1 },
   sonnet:  { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
   haiku:   { input: 1,  output: 5,  cacheWrite: 1.25,  cacheRead: 0.1 },
   default: { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
 };
+
+// Normalize a model name to match the pricing table: lowercase, strip any
+// provider/region prefix (anthropic./us.…), and drop the date + version suffix.
+// transcript names (claude-opus-4-8) are already bare — this mainly folds
+// LiteLLM's dated variants (claude-opus-4-5-20251101) onto the bare id.
+function normModelName(model) {
+  const s = String(model || '').toLowerCase().trim().split(':')[0];
+  if (!s) return '';
+  const seg = s.split(/[/.]/).find((p) => p.includes('claude')) || s;
+  return seg.replace(/-\d{8}\b/g, '').replace(/-v\d+$/, '').replace(/@.*$/, '');
+}
 
 // Priority: user manual override > LiteLLM sync cache > built-in defaults.
 // Family-level shallow merge — sub-keys (input/output/cacheWrite/cacheRead)
@@ -49,6 +63,7 @@ const DEFAULT_PRICING = {
 // keep the lower-layer value. So a stale cache can't zero-out a missing field.
 function loadPricing() {
   const out = JSON.parse(JSON.stringify(DEFAULT_PRICING));
+  out._models = {}; // exact per-model-id prices (claude-fable-5 → {...}); wins over family
   // layer 1: synced cache (~/.octopus/pricing-cache.json)
   try {
     const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
@@ -59,22 +74,41 @@ function loadPricing() {
         }
       }
     }
+    if (c && c.models && typeof c.models === 'object') {
+      for (const [id, row] of Object.entries(c.models)) {
+        if (row && typeof row === 'object' && Number.isFinite(row.input)) out._models[normModelName(id)] = row;
+      }
+    }
   } catch {}
-  // layer 2: user override (~/.octopus/pricing.json) — wins
+  // layer 2: user override (~/.octopus/pricing.json) — wins. Supports both family
+  // keys and a "models" map of exact ids.
   try {
     const raw = JSON.parse(fs.readFileSync(PRICING_OVERRIDE_PATH, 'utf8'));
     for (const [fam, row] of Object.entries(raw)) {
-      if (row && typeof row === 'object') out[fam] = { ...(out[fam] || {}), ...row };
+      if (fam === 'models' && row && typeof row === 'object') {
+        for (const [id, r] of Object.entries(row)) {
+          const k = normModelName(id);
+          if (r && typeof r === 'object') out._models[k] = { ...(out._models[k] || {}), ...r };
+        }
+      } else if (row && typeof row === 'object') {
+        out[fam] = { ...(out[fam] || {}), ...row };
+      }
     }
   } catch {}
   return out;
 }
 
+// Price a model: exact per-id table first (correct across opus generations and
+// new models like fable-5), then family keyword, then the generic default.
 function priceFor(pricing, model) {
+  const models = pricing._models || {};
+  const norm = normModelName(model);
+  if (norm && models[norm]) return models[norm];
   const m = String(model || '').toLowerCase();
   if (m.includes('opus')) return pricing.opus;
-  if (m.includes('sonnet')) return pricing.sonnet;
+  if (m.includes('fable')) return pricing.fable || pricing.default;
   if (m.includes('haiku')) return pricing.haiku;
+  if (m.includes('sonnet')) return pricing.sonnet;
   return pricing.default;
 }
 
@@ -308,7 +342,11 @@ function createMetering() {
     try {
       const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
       if (c && c.pricing && typeof c.pricing === 'object' && Object.keys(c.pricing).length) {
-        live = true; ts = Number(c.ts) || 0; count = Object.keys(c.pricing).length; source = 'litellm';
+        live = true; ts = Number(c.ts) || 0; source = 'litellm';
+        // Prefer the exact per-model count (what actually drives billing now).
+        count = (c.models && typeof c.models === 'object' && Object.keys(c.models).length)
+          ? Object.keys(c.models).length
+          : Object.keys(c.pricing).length;
       }
     } catch {}
     try { fs.accessSync(PRICING_OVERRIDE_PATH); live = true; source = 'override'; } catch {}
@@ -336,4 +374,4 @@ function num(v) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-module.exports = { createMetering, DEFAULT_PRICING };
+module.exports = { createMetering, DEFAULT_PRICING, normModelName, priceFor, loadPricing };
