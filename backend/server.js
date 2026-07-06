@@ -120,16 +120,20 @@ function normTranscriptPath(v) {
 }
 
 function readBody(req, cap, onDone) {
-  let body = '';
+  // Collect raw Buffers and decode ONCE at the end. `body += chunk` decoded each
+  // TCP chunk on its own, so a multi-byte UTF-8 char split across a packet
+  // boundary (common for CJK past ~1.4KB) became U+FFFD — corrupting assistant
+  // bubbles and the AskUserQuestion round-trip. Cap still counts bytes.
+  const chunks = [];
   let size = 0;
   let tooLarge = false;
   req.on('data', (chunk) => {
     if (tooLarge) return;
     size += chunk.length;
     if (size > cap) { tooLarge = true; return; }
-    body += chunk;
+    chunks.push(chunk);
   });
-  req.on('end', () => onDone(tooLarge ? null : body));
+  req.on('end', () => onDone(tooLarge ? null : Buffer.concat(chunks).toString('utf8')));
   req.on('error', () => onDone(null));
 }
 
@@ -149,7 +153,11 @@ function createServer(deps) {
 
       const state = data.state;
       const event = data.event;
-      const sid = data.session_id || 'default';
+      // No session_id → reject. Defaulting to 'default' forged a ghost session
+      // named "efault" and cross-wired state between real sessions. The hook
+      // already drops these; this closes the same hole on the server side.
+      const sid = typeof data.session_id === 'string' && data.session_id ? data.session_id : null;
+      if (!sid) { res.writeHead(400); res.end('missing session_id'); return; }
       if (!core.VALID_STATES.has(state)) { res.writeHead(400); res.end('unknown state'); return; }
 
       // DND: accept (so the hook gets a fast 200) but the renderer suppresses noise.

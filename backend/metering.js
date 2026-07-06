@@ -250,7 +250,9 @@ function createMetering() {
     try {
       const files = await listTranscripts();
       for (const file of files) {
-        await scanFile(file);
+        // Isolate per file: a single unreadable/poison transcript must not abort
+        // the whole loop and starve every file after it, scan after scan.
+        try { await scanFile(file); } catch (e) { log('meter', 'scanFile failed:', file, e.message); }
       }
       pruneRecent();
       pruneDaily();
