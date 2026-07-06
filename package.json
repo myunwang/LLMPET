@@ -9,6 +9,7 @@
     "start": "electron .",
     "install:hooks": "node backend/hookinstall.js",
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
+    "meter:rebuild": "node backend/meter-rebuild.js",
     "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js"
   },
   "devDependencies": {

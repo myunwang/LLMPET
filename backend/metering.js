@@ -353,6 +353,37 @@ function createMetering() {
     return { live, count, ts, source };
   }
 
+  // Whole-history recompute: clear the aggregates + cursors + dedupe set and
+  // re-scan every transcript from byte 0 with the CURRENT (fixed) price table.
+  // The transcripts are the source of truth, so this retroactively corrects cost
+  // stored under a wrong price (e.g. fable-5 previously billed at sonnet). Async.
+  async function rebuild() {
+    load(); // pull existing so a partial failure still leaves the old data
+    state.cursors = {};
+    state.seen = {};
+    state.daily = {};
+    state.byModelByDay = {};
+    state.hourlyByDay = {};
+    state.recent = [];
+    pricing = loadPricing();
+    await scan();
+    saveNow();
+    return totals();
+  }
+
+  // All-time cost/token totals per model, summed across the retained days.
+  function totals() {
+    let cost = 0, tokens = 0;
+    const byModel = {};
+    for (const day of Object.values(state.byModelByDay)) {
+      for (const [id, v] of Object.entries(day)) {
+        byModel[id] = (byModel[id] || 0) + (v.cost || 0);
+        cost += v.cost || 0; tokens += v.tokens || 0;
+      }
+    }
+    return { cost, tokens, byModel };
+  }
+
   let timer = null;
   function start(intervalMs = 30000) {
     load();
@@ -366,7 +397,7 @@ function createMetering() {
     saveNow(); // always flush the latest aggregates on quit
   }
 
-  return { start, stop, scan, getStats, priceInfo, reloadPricing, _state: state };
+  return { start, stop, scan, getStats, priceInfo, reloadPricing, rebuild, totals, _state: state };
 }
 
 function num(v) {
