@@ -241,14 +241,20 @@ function bootBackend() {
   // user override. Public-data only — no credentials, no API calls.
   // On a fresh sync: reload the in-memory price table (so new prices apply this
   // run, not next restart) and push the updated source line to the panel.
-  pricingSync = createPricingSync({
-    onUpdate: () => {
-      if (metering) { try { metering.reloadPricing(); } catch {} }
-      if (metering) sendPanel('panel:price', metering.priceInfo());
-      scheduleEmit();
-    },
-  });
-  pricingSync.start();
+  // OCTOPUS_NO_NET=1 keeps the app fully offline (the pricing fetch is the ONLY
+  // outbound request Octopus ever makes) — falls back to the built-in price table.
+  if (process.env.OCTOPUS_NO_NET === '1') {
+    log('main', 'OCTOPUS_NO_NET=1 — pricing sync disabled (fully offline)');
+  } else {
+    pricingSync = createPricingSync({
+      onUpdate: () => {
+        if (metering) { try { metering.reloadPricing(); } catch {} }
+        if (metering) sendPanel('panel:price', metering.priceInfo());
+        scheduleEmit();
+      },
+    });
+    pricingSync.start();
+  }
 
   permissions = createPermissions({
     // muted only silences sound (renderer-side); it is NOT do-not-disturb, so we
