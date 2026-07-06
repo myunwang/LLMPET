@@ -57,19 +57,8 @@ function render(s) {
   $('t-cr').textContent = fmt(s.today.cacheRead);
   $('t-msg').textContent = s.today.messages;
 
-  // 按模型
-  const bm = $('by-model');
-  const entries = Object.entries(s.byModel || {}).sort((a, b) => b[1].cost - a[1].cost);
-  if (entries.length === 0) {
-    bm.innerHTML = '<div class="empty">暂无数据</div>';
-  } else {
-    bm.innerHTML = entries
-      .map(
-        ([model, v]) =>
-          `<div class="row"><span class="mc">${shortModel(model)}</span><b>$${v.cost.toFixed(3)} · ${fmt(v.tokens)}</b></div>`
-      )
-      .join('');
-  }
+  // 按模型（有总有分：每模型 cost + 占比条 + in/out/cache 四元组明细，末行合计）
+  renderByModel(s.byModel || {});
 
   // 待办清单
   renderTodos(s.todos || [], s.todosProject || '');
@@ -100,6 +89,36 @@ function render(s) {
       )
       .join('');
   }
+}
+
+// 按模型明细：每模型一行 = 名称 + 占比条 + $花费 + token/占比；下方灰字给出
+// 入/出/缓写/缓读 四元组与轮次；最后一行合计。数据里没有明细字段（旧数据）时只
+// 显示头行，跑一次 `npm run meter:rebuild` 可回填历史明细。
+function renderByModel(byModel) {
+  const bm = $('by-model');
+  const entries = Object.entries(byModel).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
+  if (!entries.length) { bm.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+  const totCost = entries.reduce((s, [, v]) => s + (v.cost || 0), 0);
+  const totTok = entries.reduce((s, [, v]) => s + (v.tokens || 0), 0);
+  const base = totCost || 1;
+  let html = '';
+  for (const [model, v] of entries) {
+    const pct = Math.round(((v.cost || 0) / base) * 100);
+    const hasDetail = (v.input || v.output || v.cacheCreate || v.cacheRead);
+    const detail = hasDetail
+      ? `<div class="m-detail">入 ${fmt(v.input)} · 出 ${fmt(v.output)} · 缓写 ${fmt(v.cacheCreate)} · 缓读 ${fmt(v.cacheRead)}${v.msgs ? ' · ' + v.msgs + ' 轮' : ''}</div>`
+      : '';
+    html += `<div class="m-item">`
+      + `<div class="m-head"><span class="mc">${escapeHtml(shortModel(model))}</span>`
+      + `<span class="m-bar"><i style="width:${pct}%"></i></span>`
+      + `<b class="m-cost">$${(v.cost || 0).toFixed(3)}</b>`
+      + `<span class="m-tok">${fmt(v.tokens)} · ${pct}%</span></div>`
+      + detail + `</div>`;
+  }
+  html += `<div class="m-item m-total"><div class="m-head"><span class="mc">合计</span>`
+    + `<span class="m-bar"></span><b class="m-cost">$${totCost.toFixed(3)}</b>`
+    + `<span class="m-tok">${fmt(totTok)}</span></div></div>`;
+  bm.innerHTML = html;
 }
 
 const STATE_META = {

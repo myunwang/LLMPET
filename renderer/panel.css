@@ -64,6 +64,19 @@ html, body {
 .row .mc { color: #c79b86; font-size: 10.5px; }
 .empty { font-size: 12px; color: #8c6a5a; padding: 6px 4px; }
 
+/* 按模型明细（有总有分） */
+#by-model { max-height: 240px; overflow-y: auto; }
+.m-item { background: rgba(255,255,255,0.04); border-radius: 8px; padding: 5px 10px; }
+.m-item.m-total { background: rgba(217,119,87,0.16); }
+.m-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.m-head .mc { color: #e9c9b8; font-size: 12px; flex-shrink: 0; min-width: 74px; }
+.m-bar { flex: 1; height: 5px; min-width: 24px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.m-bar i { display: block; height: 100%; background: #d97757; border-radius: 3px; }
+.m-cost { color: #ffd8bf; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.m-tok { color: #a9826f; font-size: 10.5px; font-variant-numeric: tabular-nums; flex-shrink: 0; min-width: 72px; text-align: right; }
+.m-detail { color: #8c6a5a; font-size: 10px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.m-total .m-head .mc { color: #c79b86; }
+
 /* 待办清单 */
 .todo-proj { font-size: 10px; color: #b06a48; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .todo-prog { font-size: 11px; color: #ffd8bf; font-variant-numeric: tabular-nums; }

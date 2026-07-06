@@ -199,8 +199,10 @@ function createMetering() {
 
     const fam = (state.byModelByDay[k] = state.byModelByDay[k] || {});
     const mk = model || 'unknown';
-    const mv = (fam[mk] = fam[mk] || { cost: 0, tokens: 0 });
-    mv.cost += cost; mv.tokens += tokens;
+    // Per-model detail (cost + token 四元组 + 轮次) so the panel can show 有总有分.
+    const mv = (fam[mk] = fam[mk] || { cost: 0, tokens: 0, msgs: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 });
+    mv.cost += cost; mv.tokens += tokens; mv.msgs += 1;
+    mv.input += input; mv.output += output; mv.cacheCreate += cacheCreate; mv.cacheRead += cacheRead;
 
     const hours = (state.hourlyByDay[k] = state.hourlyByDay[k] || new Array(24).fill(0));
     hours[new Date(tsMs).getHours()] += cost;
