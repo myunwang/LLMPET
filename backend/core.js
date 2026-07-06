@@ -14,6 +14,7 @@ const os = require('os');
 const path = require('path');
 const { log } = require('./log');
 const transcript = require('./transcript');
+const States = require('../shared/states');
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
@@ -28,38 +29,18 @@ function pushRecentEvent(session, state, event, now) {
   return prev;
 }
 
-// ── pet state vocabulary + priority (highest wins for the global mood)
-const STATE_PRIORITY = Object.freeze({
-  error: 8,
-  notification: 7,
-  sweeping: 6,
-  attention: 5,
-  carrying: 4,
-  juggling: 4,
-  working: 3,
-  thinking: 2,
-  idle: 1,
-  roam: 1,
-  sleeping: 0,
-});
-const ONESHOT_STATES = new Set(['attention', 'error', 'sweeping', 'notification', 'carrying']);
-const SLEEP_SEQUENCE = new Set(['yawning', 'dozing', 'collapsing', 'sleeping', 'waking']);
-
-// 一次性态的衰减兜底（STATES.md：oneshot 触发后衰减）。之前只有声明没有实现：
-// StopFailure 后会话卡在 error、/clear 后卡在 sweeping，一直霸占最高优先级。
-// notification 例外——它语义是「等你回复」，要等用户行动，不自动衰减。
-const ONESHOT_TTL_MS = Object.freeze({
-  attention: 15 * 1000,
-  carrying: 15 * 1000,
-  sweeping: 20 * 1000,
-  error: 45 * 1000,
-});
-
-// States the /state route accepts.
-const VALID_STATES = new Set([...Object.keys(STATE_PRIORITY), ...SLEEP_SEQUENCE]);
+// ── pet state vocabulary + priority — sourced from shared/states.js so the
+// renderer and the test share the exact same words (no more 5-way drift).
+// oneshot decay backstop: error/attention/sweeping/carrying settle to idle after
+// their TTL if no further event arrives; notification is excluded (it means
+// "waiting for you" and must persist until you act).
+const STATE_PRIORITY = States.STATE_PRIORITY;
+const ONESHOT_STATES = new Set(States.ONESHOT_STATES);
+const ONESHOT_TTL_MS = States.ONESHOT_TTL_MS;
+const VALID_STATES = new Set(States.VALID_STATES); // states the /state route accepts
+const BUSY_STATES = new Set(States.BUSY_STATES);
 
 const DONE_EVENTS = new Set(['Stop']);
-const BUSY_STATES = new Set(['working', 'thinking', 'juggling', 'carrying', 'sweeping']);
 const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart']);
 
 // Stale-cleanup thresholds (ms). An idle session whose terminal process is still

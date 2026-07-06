@@ -7,6 +7,7 @@
 
 const assert = require('assert');
 const { loadRenderer } = require('./dom-stub');
+const States = require('../shared/states');
 
 let failures = 0;
 function check(name, fn) {
@@ -14,12 +15,9 @@ function check(name, fn) {
   catch (e) { failures++; console.log('  ✗', name, '\n     ', e.message); }
 }
 
-// 与 pet.js STATE_WORDS 对齐的状态词全集（用于 class 泄漏检测）
-const STATE_WORDS = [
-  'idle', 'working', 'juggling', 'sweeping', 'happy', 'sleeping', 'waiting',
-  'thinking', 'needsinput', 'error', 'greet', 'talking', 'attention', 'roam',
-  'loved', 'sad', 'sorry', 'excited', 'puzzled',
-];
+// 状态词全集取自唯一来源 shared/states.js（用于 class 泄漏检测）。此前这里是
+// pet.js 的手抄副本、漏了 'loafing'，让 R8 泄漏检测对该状态失明——现在同源。
+const STATE_WORDS = States.RENDER_STATE_WORDS;
 
 function baseStats(over = {}) {
   return {
@@ -31,7 +29,7 @@ function baseStats(over = {}) {
 }
 
 function world() {
-  const w = loadRenderer(['renderer/pet.js']);
+  const w = loadRenderer(['shared/states.js', 'renderer/pet.js']);
   w.handlers.config({ skin: 'cat', muted: true }); // muted: 免声音路径干扰
   return w;
 }
@@ -40,6 +38,20 @@ const catSrc = (w) => w.elements('cat-img').getAttribute('src');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  console.log('[R0] 状态词表单一来源一致性');
+  {
+    // 后端 VALID_STATES（core 接受的状态）必须全部落在渲染端 STATE_WORDS 里，
+    // 否则新增一个后端状态时 classList.remove 覆盖不到 → class 残留。
+    const missing = States.VALID_STATES.filter((s) => !States.RENDER_STATE_WORDS.includes(s));
+    check('渲染端 STATE_WORDS ⊇ 后端 VALID_STATES', () => assert.deepStrictEqual(missing, []));
+    check('STATE_WORDS 含 loafing（曾在手抄副本里漏掉）', () => assert(STATE_WORDS.includes('loafing')));
+    check('renderer 通过 <script> 拿到同一份 STATE_WORDS', () => {
+      const oi = world().window.OctoStates;
+      assert(oi && Array.isArray(oi.RENDER_STATE_WORDS));
+      assert.deepStrictEqual(oi.RENDER_STATE_WORDS, States.RENDER_STATE_WORDS);
+    });
+  }
+
   console.log('[R1] 聚合梯子优先级（对齐 STATES.md）');
   {
     const w = world();

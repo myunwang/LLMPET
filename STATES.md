@@ -163,4 +163,4 @@
 
 ---
 
-_状态机来源:`backend/core.js`(STATE_PRIORITY / ONESHOT / SLEEP_SEQUENCE)+ `hook/octopus-hook.js`(EVENT_STATE)+ `backend/adapter.js`(mapState)+ `renderer/pet.js`(setState/聚合)。_
+_状态词表单一来源:**`shared/states.js`**(STATE_PRIORITY / ONESHOT / SLEEP_SEQUENCE / BUSY / VALID_STATES / RENDER_STATE_WORDS)—— 主进程 `require`、渲染端 `<script>` 注入 `window.OctoStates`、测试 `require` 同一份，`test/state-smoke.js` 的 [R0] 断言渲染端词表 ⊇ 后端 VALID_STATES。事件→状态映射在 `hook/octopus-hook.js`(EVENT_STATE),合成态在 `backend/adapter.js`(mapState),聚合梯子在 `renderer/pet.js`(applyStats)。_

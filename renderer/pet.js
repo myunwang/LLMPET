@@ -785,13 +785,10 @@ function buildPixel() {
 buildPixel();
 
 // ---------- 状态机（作用于两种形象，仅当前皮肤可见） ----------
-// 前端会 setState 的全部状态词（聚合态 + 短暂态 + 情绪态）。
-// classList.remove 必须覆盖此全集，漏一个就会 class 残留在皮肤元素上。
-const STATE_WORDS = [
-  'idle', 'working', 'juggling', 'sweeping', 'loafing', 'happy', 'sleeping', 'waiting',
-  'thinking', 'needsinput', 'error', 'greet', 'talking', 'attention', 'roam',
-  'loved', 'sad', 'sorry', 'excited', 'puzzled',
-];
+// 前端会 setState 的全部状态词（聚合态 + 短暂态 + 情绪态）——统一取自
+// shared/states.js（pet.html 以 <script> 在 pet.js 之前加载它）。classList.remove
+// 必须覆盖此全集，漏一个就会 class 残留在皮肤元素上。
+const STATE_WORDS = (window.OctoStates && window.OctoStates.RENDER_STATE_WORDS) || [];
 function setState(s) {
   if (state === s) return;
   for (const el of stateEls) {
