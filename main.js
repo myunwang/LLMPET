@@ -339,14 +339,8 @@ function registerIpc() {
   ipcMain.on('open-panel', openPanel);
   ipcMain.on('close-panel', closePanel);
 
-  ipcMain.on('set-mode', (_e, mode) => {
-    config.save({ mode });
-    if (mode === 'panel') openPanel();
-    else if (mode === 'pet' && petWin) petWin.show();
-    else if (mode === 'menubar' && petWin) petWin.hide();
-    broadcastConfig();
-  });
-  ipcMain.on('set-skin', (_e, skin) => { config.save({ skin }); broadcastConfig(); });
+  ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
+  ipcMain.on('set-skin', (_e, skin) => applySkin(skin));
   ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
 
@@ -415,6 +409,21 @@ function registerIpc() {
   ipcMain.on('pet-log', (_e, tag, msg) => { log('ui:' + String(tag || ''), String(msg || '')); });
 }
 
+// ── settings actions (shared by tray menu + panel IPC) ─────────────────────────
+function applyMode(mode) {
+  config.save({ mode });
+  if (mode === 'panel') openPanel();
+  else if (mode === 'pet' && petWin) petWin.show();
+  else if (mode === 'menubar' && petWin) petWin.hide();
+  broadcastConfig();
+  refreshTrayMenu();
+}
+function applySkin(skin) {
+  config.save({ skin });
+  broadcastConfig();
+  refreshTrayMenu();
+}
+
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
   let img;
@@ -430,12 +439,27 @@ function buildTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  const muted = config.get().muted;
+  const cfg = config.get();
+  const muted = cfg.muted;
+  const skin = cfg.skin || 'mascot';
+  const mode = cfg.mode || 'pet';
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '📊 详情面板', click: openPanel },
     { label: '🐙 显示桌宠', click: () => petWin && petWin.show() },
     { type: 'separator' },
-    { label: muted ? '🔔 取消静音' : '🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
+    { label: '⚙️ 设置', enabled: false },
+    { label: '　形象', submenu: [
+      { label: '章鱼', type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
+      { label: '像素怪兽', type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
+      { label: '月薪喵', type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
+    ] },
+    { label: '　形态', submenu: [
+      { label: '浮游桌宠', type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
+      { label: '角落面板', type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
+      { label: '菜单栏（隐藏桌宠）', type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
+    ] },
+    { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
+    { type: 'separator' },
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },

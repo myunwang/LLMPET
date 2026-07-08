@@ -173,8 +173,9 @@ html, body {
   display: flex; flex-direction: column; gap: 8px;
   padding: 10px 16px 14px; border-top: 1px solid rgba(217,119,87,0.18);
 }
-.seg-row { display: flex; align-items: center; gap: 10px; }
-.seg-label { font-size: 11px; color: #a9826f; width: 28px; flex-shrink: 0; }
+.seg-row { display: flex; align-items: center; gap: 8px; }
+.seg-label { font-size: 11px; color: #a9826f; white-space: nowrap; flex-shrink: 0; }
+.set-hint { font-size: 10px; color: #8c6a5a; margin-left: auto; }
 .seg { display: flex; background: rgba(255,255,255,0.06); border-radius: 9px; padding: 2px; }
 .seg-btn { border: none; background: transparent; color: #c79b86; font-size: 11.5px; padding: 5px 10px; border-radius: 7px; cursor: pointer; }
 .seg-btn.active { background: #d97757; color: #fff; }
