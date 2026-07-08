@@ -89,6 +89,22 @@ function render(s) {
       )
       .join('');
   }
+  fitPanelHeight();
+}
+
+// 面板按内容高度自适应：量出内容底边（footer 底）到卡片顶的距离，通知主进程调窗口高，
+// 避免固定高窗口在内容变短时露出大片空白。requestAnimationFrame 确保布局已完成。
+let fitRaf = 0;
+function fitPanelHeight() {
+  if (!window.pet || !window.pet.setPanelHeight) return;
+  if (fitRaf) cancelAnimationFrame(fitRaf);
+  fitRaf = requestAnimationFrame(() => {
+    fitRaf = 0;
+    const card = $('card'); const foot = $('settings');
+    if (!card || !foot) return;
+    const h = Math.ceil(foot.getBoundingClientRect().bottom - card.getBoundingClientRect().top + card.scrollTop) + 2;
+    if (h > 0) window.pet.setPanelHeight(h);
+  });
 }
 
 // 按模型明细：每模型一行 = 名称 + 占比条 + $花费 + token/占比；下方灰字给出

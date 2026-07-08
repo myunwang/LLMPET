@@ -35,6 +35,7 @@ const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
 
 let petWin = null;
 let panelWin = null;
+let panelH = 0; // 面板当前自适应高度（防抖用）
 let tray = null;
 let core = null;
 let metering = null;
@@ -144,13 +145,15 @@ function createPetWindow() {
 
 function openPanel() {
   if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
+  panelH = 0; // 每次开面板重置自适应高度基准
   panelWin = new BrowserWindow({
     width: 560,
-    height: 780,
+    height: 720,
     frame: false,
     transparent: false,
     resizable: true,
     skipTaskbar: false,
+    show: false, // 先隐藏，首帧按内容定高后再显示，避免闪一下大窗口
     backgroundColor: '#2c1f1a',
     webPreferences: {
       preload: PRELOAD,
@@ -165,6 +168,8 @@ function openPanel() {
     sendPanel('panel:config', frontendConfig());
     if (lastStats) sendPanel('panel:stats', lastStats);
     if (metering) sendPanel('panel:price', metering.priceInfo());
+    // 首帧渲染 + setPanelHeight 已到位后再显示
+    setTimeout(() => { try { if (panelWin && !panelWin.isDestroyed()) panelWin.show(); } catch {} }, 90);
   });
   panelWin.on('closed', () => { panelWin = null; });
 }
@@ -338,6 +343,17 @@ function registerIpc() {
 
   ipcMain.on('open-panel', openPanel);
   ipcMain.on('close-panel', closePanel);
+
+  // 详情面板按内容高度自适应：clamp 到屏幕工作区，阈值防抖避免每次 stats 都抖
+  ipcMain.on('set-panel-height', (_e, h) => {
+    if (!panelWin || panelWin.isDestroyed() || !Number.isFinite(h)) return;
+    const b = panelWin.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    const clamped = Math.max(320, Math.min(Math.round(h), wa.height - 24));
+    if (Math.abs(clamped - panelH) < 6) return;
+    panelH = clamped;
+    panelWin.setBounds({ x: b.x, y: b.y, width: b.width, height: clamped });
+  });
 
   ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
   ipcMain.on('set-skin', (_e, skin) => applySkin(skin));

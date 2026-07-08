@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('pet', {
   setPetBig: (on) => ipcRenderer.send('pet-big', on),
   // 按弹层内容精确定高（动态，避免固定大窗口留白）；w/h<=0 复位
   setPetSize: (w, h) => ipcRenderer.send('set-pet-size', w, h),
+  // 详情面板按内容高度自适应，避免底部留白 / 内容多时被切
+  setPanelHeight: (h) => ipcRenderer.send('set-panel-height', h),
   // 在桌宠输入框打字时，让窗口拿到键盘焦点(隐藏 Dock 的 accessory app 默认拿不到)；用完归还
   focusPet: () => ipcRenderer.send('pet-focus'),
   blurPet: () => ipcRenderer.send('pet-blur'),
