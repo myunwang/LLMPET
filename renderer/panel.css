@@ -13,9 +13,11 @@ html, body {
   background: linear-gradient(160deg, #2c1f1a 0%, #3a2620 60%, #4a2c22 100%);
   border: 1px solid rgba(217, 119, 87, 0.35);
   border-radius: 18px;
-  overflow: hidden;
+  overflow-y: auto; overflow-x: hidden;
   box-shadow: 0 20px 50px rgba(0,0,0,0.45);
 }
+/* 子块不许被 flex 压缩：总高超出时 #card 整体滚动，下方区块（按模型/设置）不再被裁切 */
+#card > * { flex-shrink: 0; }
 
 /* 标题栏 */
 #titlebar {
@@ -55,7 +57,7 @@ html, body {
 
 /* 区块 */
 .block { padding: 8px 16px; }
-.block.grow { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.block.grow { display: flex; flex-direction: column; min-height: 0; }
 .block-title { font-size: 11px; color: #c79b86; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 7px; }
 .rows { display: flex; flex-direction: column; gap: 5px; }
 .row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 10px; background: rgba(255,255,255,0.04); border-radius: 8px; }
@@ -149,7 +151,7 @@ html, body {
 @keyframes badgePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 /* 操作流 */
-.ops { list-style: none; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
+.ops { list-style: none; overflow-y: auto; max-height: 300px; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
 .ops::-webkit-scrollbar { width: 6px; }
 .ops::-webkit-scrollbar-thumb { background: rgba(217,119,87,0.4); border-radius: 3px; }
 .ops li { font-size: 12px; padding: 5px 9px; background: rgba(255,255,255,0.04); border-radius: 8px; display: flex; gap: 7px; align-items: baseline; }
