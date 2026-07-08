@@ -145,13 +145,13 @@ function createPetWindow() {
 function openPanel() {
   if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
   panelWin = new BrowserWindow({
-    width: 400,
-    height: 700,
+    width: 480,
+    height: 760,
     frame: false,
     transparent: false,
     resizable: true,
     skipTaskbar: false,
-    backgroundColor: '#1b1b1f',
+    backgroundColor: '#2c1f1a',
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,

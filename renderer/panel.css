@@ -18,6 +18,8 @@ html, body {
 }
 /* 子块不许被 flex 压缩：总高超出时 #card 整体滚动，下方区块（按模型/设置）不再被裁切 */
 #card > * { flex-shrink: 0; }
+/* 隐藏滚动条：触控板/滚轮照常滚，视觉更干净 */
+#card::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 标题栏 */
 #titlebar {
