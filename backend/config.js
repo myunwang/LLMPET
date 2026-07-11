@@ -40,7 +40,7 @@ function sanitize(raw) {
   if (Array.isArray(raw.territoryRivals)) {
     out.territoryRivals = raw.territoryRivals
       .filter((s) => typeof s === 'string' && s.trim())
-      .map((s) => s.trim())
+      .map((s) => s.trim().slice(0, 64)) // 单条封顶:超长字符串没有匹配意义,还会拖慢 osascript
       .slice(0, 30);
   }
   return out;

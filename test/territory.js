@@ -199,6 +199,98 @@ check('手动 runNow 即使自动巡逻关闭也会扫描一次并反馈 clear',
   assert.deepStrictEqual(phases, ['searching', 'clear']);
 });
 
+console.log('[T6] 整场驱逐战编排(注入 osascript/拖拽/空闲检测假实现,零真实副作用)');
+// 按脚本内容路由的假 osascript:AXPosition→推窗、AXRaise→抬窗、含窗口枚举→scan、其余→presence
+function fakeOsa(world) {
+  return async (script, args) => {
+    if (script.includes('AXPosition')) return { ok: true, out: world.move(+args[0], +args[1], +args[2]), err: '' };
+    if (script.includes('AXRaise')) return { ok: true, out: 'ok', err: '' };
+    if (script.includes('position of w')) return { ok: true, out: world.windows(), err: '' };
+    return { ok: true, out: world.presence(), err: '' };
+  };
+}
+
+check('victory:发现对手 → ontop/spotted/march → 一步步推到屏幕边', async () => {
+  const phases = [];
+  let rivalX = 700;
+  const { hooks } = mockHooks({
+    rivalNames: () => ['BongoCat'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => 999,
+    runOsa: fakeOsa({
+      presence: () => 'BongoCat|42\n',
+      windows: () => `BongoCat|42|${rivalX}|300|120|120\n`,
+      move: (_pid, x) => { const old = rivalX; rivalX = x; return `${old}|300|${x}|300`; },
+    }),
+  });
+  const t = createTerritory(hooks);
+  const res = await t.tick();
+  assert.strictEqual(res, 'episode');
+  assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'victory']);
+  assert(rivalX >= 1320 - 6, `对手应被推到右边缘,实际 x=${rivalX}`); // WA 1440 - 宽 120
+  assert.strictEqual(t.busy, false, 'episode 结束后必须放开 busy');
+});
+
+check('defeat:AXPosition 无效+物理拖拽也推不动 → 拔河认怂', async () => {
+  const phases = [];
+  const { hooks } = mockHooks({
+    rivalNames: () => ['Shimeji'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => 999,
+    dragRival: async () => ({ ok: true }), // 拖了,但 scan 显示纹丝不动
+    runOsa: fakeOsa({
+      presence: () => 'Shimeji|7\n',
+      windows: () => 'Shimeji|7|700|300|120|120\n',
+      move: () => '700|300|700|300', // 请求推 76px,实际没动(对手顶回来)
+    }),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'defeat']);
+});
+
+check('用户手上有活(输入空闲<2s)→ 绝不抢鼠标,静默 abort 撤退', async () => {
+  const phases = [];
+  const { hooks } = mockHooks({
+    rivalNames: () => ['Shimeji'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => 0.2, // 刚动过鼠标
+    dragRival: async () => { throw new Error('不该走到物理拖拽'); },
+    runOsa: fakeOsa({
+      presence: () => 'Shimeji|7\n',
+      windows: () => 'Shimeji|7|700|300|120|120\n',
+      move: () => '700|300|700|300',
+    }),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'abort']);
+});
+
+check('shouldAbort(弹层打开)→ 广播 abort 复位表情并回家', async () => {
+  const phases = [];
+  let lastTween = null;
+  const { hooks } = mockHooks({
+    rivalNames: () => ['Shimeji'],
+    shouldAbort: () => true,
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    tweenPetTo: async (x, y) => { lastTween = [x, y]; },
+    runOsa: fakeOsa({
+      presence: () => 'Shimeji|7\n',
+      windows: () => 'Shimeji|7|700|300|120|120\n',
+      move: () => { throw new Error('shouldAbort 下不该出手'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert.deepStrictEqual(phases, ['ontop', 'spotted', 'abort']);
+  assert.deepStrictEqual(lastTween, [0, 0], '撤退后应回到出发位');
+});
+
 Promise.all(pending).then(() => {
   if (failures) { console.log(`\n${failures} failed`); process.exit(1); }
   console.log('\nterritory: all passed');

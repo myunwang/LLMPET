@@ -67,6 +67,7 @@ function frontendConfig() {
     muted: c.muted,
     permHook: c.permHook,
     territory: c.territory,
+    territorySupported: process.platform === 'darwin', // 渲染端据此隐藏「巡视」菜单
   };
 }
 
@@ -220,6 +221,8 @@ function tweenPetTo(x, y, ms) {
 }
 
 function getTerritoryPetBounds() {
+  // 退出瞬间被 episode 调到时不能抛异常(shouldAbort 随后就会让它撤退)
+  if (!petWin || petWin.isDestroyed()) return { x: 0, y: 0, width: 0, height: 0 };
   const win = petWin.getBounds();
   if (!petVisualRect) return win;
   return {
@@ -294,11 +297,13 @@ function bootTerritory() {
   territory.start();
 }
 
+let lastPermDialogAt = 0; // 引导框节流:连点「巡视」不该连环弹窗
 function ensureTerritoryPermission() {
   if (process.platform !== 'darwin') return false;
   let trusted = false;
   try { trusted = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
-  if (!trusted) {
+  if (!trusted && Date.now() - lastPermDialogAt > 60 * 1000) {
+    lastPermDialogAt = Date.now();
     // 推别人的窗口要走辅助功能 API;prompt=true 弹系统引导框并把本 app 加入列表
     try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
     dialog.showMessageBox({
@@ -314,19 +319,22 @@ function ensureTerritoryPermission() {
 
 function runTerritoryNow() {
   if (process.platform !== 'darwin' || !territory) return;
-  if (!ensureTerritoryPermission()) {
-    sendPet('pet:event', { kind: 'territory', phase: 'noperm', ts: Date.now() });
-    return;
-  }
-  territory.runNow().catch((e) => log('territory', 'manual scan failed:', e.message));
+  // 没权限也照跑:定律①(进程检测+抬层级)不需要辅助功能,只有推窗需要。
+  // 引导框由 ensureTerritoryPermission 弹(带节流);巡视结果先演完再提示缺权限。
+  const trusted = ensureTerritoryPermission();
+  territory.runNow()
+    .then(() => {
+      if (!trusted) sendPet('pet:event', { kind: 'territory', phase: 'noperm', ts: Date.now() });
+    })
+    .catch((e) => log('territory', 'manual scan failed:', e.message));
 }
 
 function applyTerritory(on) {
   config.save({ territory: !!on });
   if (on && process.platform === 'darwin') {
-    const trusted = ensureTerritoryPermission();
-    // 开启后立刻巡逻一次，不让用户等到下一个轮询周期。
-    if (trusted && territory) territory.runNow().catch((e) => log('territory', 'initial scan failed:', e.message));
+    ensureTerritoryPermission();
+    // 开启后立刻巡逻一次，不让用户等到下一个轮询周期(定律①无需权限)。
+    if (territory) territory.runNow().catch((e) => log('territory', 'initial scan failed:', e.message));
   } else if (!on && territory && territory.dominating) {
     // 关闭后立刻执行一次 disabled tick，把窗口层级恢复为 floating。
     territory.tick().catch(() => {});

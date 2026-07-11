@@ -165,6 +165,19 @@ function isPermError(errText) {
   return /assistive access|-25211|not authorized|-1719/i.test(errText || '');
 }
 
+// 用户输入空闲秒数(IOHIDSystem 的 HIDIdleTime,纳秒)。物理拖拽会真的接管
+// 用户鼠标 ~1s,绝不能在人家正拖文件/框选文字时抢——动手前必须确认手上没活。
+// 读取失败按「空闲」放行(ioreg 在 macOS 上基本不会失败,失败多半是环境异常)。
+function userIdleSeconds() {
+  return new Promise((resolve) => {
+    execFile('ioreg', ['-c', 'IOHIDSystem', '-d', '4'], { timeout: 3000 }, (err, stdout) => {
+      const m = /"HIDIdleTime"\s*=\s*(\d+)/.exec(String(stdout || ''));
+      resolve(err || !m ? Infinity : Number(m[1]) / 1e9);
+    });
+  });
+}
+const IDLE_BEFORE_DRAG_S = 2;
+
 // "name|pid" 行 → {name, pid};去重 pid,排除自己。
 function parsePresence(out, excludePids) {
   const res = [];
@@ -278,6 +291,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //   emit(ev)               — pet:event 转发({kind:'territory', phase, rival})
 function createTerritory(hooks) {
   const intervalMs = Math.max(3000, +process.env.OCTOPUS_TERRITORY_INTERVAL || 7000);
+  // 可注入的副作用原语(测试用假实现驱动整场驱逐战,不真调 osascript/CGEvent)
+  const osa = hooks.runOsa || runOsa;
+  const wait = hooks.sleep || sleep;
+  const idleSeconds = hooks.userIdleSeconds || userIdleSeconds;
+  const drag = hooks.dragRival || dragRival; // 函数声明有提升,此处可安全引用
   let timer = null;
   let episode = false;
   let lastPermNag = 0;
@@ -317,10 +335,18 @@ function createTerritory(hooks) {
     return [...new Set([...hooks.rivalNames(), ...extraRivals()])];
   }
 
+  // 物理拖拽前的「用户手上没活」闸门:输入空闲 < 2s 一律不动真鼠标。
+  async function userHandsOff() {
+    const idle = await idleSeconds();
+    if (idle >= IDLE_BEFORE_DRAG_S) return true;
+    log('territory', `user active ${idle.toFixed(1)}s ago — skip physical drag`);
+    return false;
+  }
+
   async function presence() {
     const names = allNames();
     if (!names.length) return [];
-    const res = await runOsa(PRESENCE_SCRIPT, names);
+    const res = await osa(PRESENCE_SCRIPT, names);
     if (!res.ok) return [];
     return parsePresence(res.out, hooks.excludePids());
   }
@@ -332,7 +358,7 @@ function createTerritory(hooks) {
   async function scan() {
     const names = [...new Set([...allNames(), ...hostNames()])];
     if (!names.length) return [];
-    const res = await runOsa(SCAN_SCRIPT, names);
+    const res = await osa(SCAN_SCRIPT, names);
     if (!res.ok) {
       if (isPermError(res.err) && Date.now() - lastPermNag > 15 * 60 * 1000) {
         lastPermNag = Date.now();
@@ -345,7 +371,7 @@ function createTerritory(hooks) {
   }
 
   async function moveRival(pid, x, y) {
-    const res = await runOsa(MOVE_SCRIPT, [pid, Math.round(x), Math.round(y), MAX_RIVAL_SIZE]);
+    const res = await osa(MOVE_SCRIPT, [pid, Math.round(x), Math.round(y), MAX_RIVAL_SIZE]);
     if (!res.ok) return { error: res.err };
     if (res.out === 'gone') return { gone: true };
     const [bx, by, ax, ay] = res.out.split('|').map(Number);
@@ -354,7 +380,7 @@ function createTerritory(hooks) {
   }
 
   async function raiseRival(rival) {
-    const res = await runOsa(RAISE_SCRIPT, [rival.pid, rival.w, rival.h]);
+    const res = await osa(RAISE_SCRIPT, [rival.pid, rival.w, rival.h]);
     if (!res.ok || res.out !== 'ok') {
       log('territory', 'raise rival failed:', String(res.err || res.out).slice(0, 200));
       return false;
@@ -372,7 +398,17 @@ function createTerritory(hooks) {
       dragHelperBin = packaged;
       return dragHelperPromise;
     } catch {}
-    const bin = path.join(os.tmpdir(), `octopus-drag-window-${process.pid}`);
+    // 开发运行:产物用固定文件名 + 源码 mtime 做缓存,不带 pid 后缀——
+    // 否则每次启动都留一个孤儿二进制在 tmpdir,且每次都重付一遍 swiftc。
+    const bin = path.join(os.tmpdir(), 'octopus-drag-window');
+    try {
+      if (fs.statSync(bin).mtimeMs >= fs.statSync(DRAG_HELPER).mtimeMs) {
+        fs.accessSync(bin, fs.constants.X_OK);
+        dragHelperBin = bin;
+        dragHelperPromise = Promise.resolve({ ok: true, bin });
+        return dragHelperPromise;
+      }
+    } catch {}
     dragHelperPromise = new Promise((resolve) => {
       execFile('/usr/bin/swiftc', ['-O', DRAG_HELPER, '-o', bin], { timeout: 20000 },
         (err, _stdout, stderr) => {
@@ -444,15 +480,16 @@ function createTerritory(hooks) {
     try {
       if (hooks.setPetClickThrough) hooks.setPetClickThrough(true);
       for (const [rx, ry] of points) {
-        if (hooks.shouldAbort()) return null;
+        // 每个探测点都是一次真实的 180ms 鼠标接管,用户中途动了手就立刻收手
+        if (hooks.shouldAbort() || !(await userHandsOff())) return null;
         const beforeX = current.x;
         const probeX = beforeX + dir * 22;
-        const dragged = await dragRival(current, probeX, rx, ry, 180);
+        const dragged = await drag(current, probeX, rx, ry, 180);
         if (!dragged.ok) {
           log('territory', 'drag calibration helper failed:', dragged.error.slice(0, 240));
           return null;
         }
-        await sleep(110);
+        await wait(110);
         const rescanned = (await scan()).find((candidate) => candidate.pid === rival.pid);
         if (!rescanned) return null;
         const delta = rescanned.x - beforeX;
@@ -478,6 +515,7 @@ function createTerritory(hooks) {
     let maxTravel = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (hooks.shouldAbort()) return 'abort';
+      if (!(await userHandsOff())) return 'abort'; // 用户手上有活,不抢鼠标
       const wa = hooks.getWorkArea(current);
       const visual = rivalVisualBounds(current);
       const targetX = windowTargetForVisual(current, visual, wa, dir);
@@ -492,7 +530,7 @@ function createTerritory(hooks) {
       const syncStarted = Date.now();
       try {
         if (hooks.setPetClickThrough) hooks.setPetClickThrough(true);
-        dragged = await dragRival(current, targetX, point[0], point[1], 720, (progress) => {
+        dragged = await drag(current, targetX, point[0], point[1], 720, (progress) => {
           if (!hooks.setPetFrame) return;
           syncFrames++;
           finalProgress = progress;
@@ -505,7 +543,7 @@ function createTerritory(hooks) {
       }
       log('territory', `sync frames=${syncFrames} duration=${Date.now() - syncStarted}ms final=${finalProgress.toFixed(3)}`);
       if (!dragged.ok) return 'defeat';
-      await sleep(260);
+      await wait(260);
       const rescanned = (await scan()).find((candidate) => candidate.pid === rival.pid);
       if (!rescanned) return 'victory';
       log('territory', `physical push ${attempt + 1}: ${current.x},${current.y} -> ${rescanned.x},${rescanned.y}`);
@@ -535,6 +573,9 @@ function createTerritory(hooks) {
     let dragTried = false;
     for (let i = 0; i < 80; i++) {
       if (hooks.shouldAbort()) return 'abort';
+      // 对方可能被推过显示器边界:每步按它当前所在屏重算工作区和目标边
+      wa = hooks.getWorkArea(rival);
+      targetX = dir === 1 ? wa.x + wa.width - rival.w : wa.x;
       const stepTarget = dir === 1
         ? Math.min(targetX, rival.x + 76)
         : Math.max(targetX, rival.x - 76);
@@ -557,6 +598,7 @@ function createTerritory(hooks) {
       if (resist >= 4) {
         if (dragTried) return 'defeat';
         dragTried = true;
+        if (!(await userHandsOff())) return 'abort'; // 物理拖拽档:用户手上有活就撤
         log('territory', `AXPosition ignored by "${rival.name}" — trying physical mouse drag fallback`);
         // 透明窗口的几何中心可能没有任何可拖内容。依次探测少量内部候选点，
         // 每次都重扫验证；一旦真实移动立即停止探测。
@@ -580,7 +622,7 @@ function createTerritory(hooks) {
           try {
             if (hooks.setPetClickThrough) hooks.setPetClickThrough(true);
             [dragged] = await Promise.all([
-              dragRival(current, targetX, rx, ry),
+              drag(current, targetX, rx, ry),
               hooks.tweenPetTo(finalPetX, petB.y, 600),
             ]);
           } finally {
@@ -590,7 +632,7 @@ function createTerritory(hooks) {
             log('territory', 'mouse drag fallback failed:', dragged.error.slice(0, 240));
             return 'defeat';
           }
-          await sleep(260);
+          await wait(260);
           const rescanned = (await scan()).find((candidate) => candidate.pid === rival.pid);
           if (!rescanned) return 'victory';
           current = rescanned;
@@ -615,29 +657,36 @@ function createTerritory(hooks) {
       // 贴身跟上,保持顶着的姿态
       const px = Math.min(Math.max(standX(rival.x, rival.w, dir, petB.width), wa.x - petB.width + 60), wa.x + wa.width - 60);
       await hooks.tweenPetTo(px, petB.y, 130);
-      await sleep(40);
+      await wait(40);
     }
     return 'defeat';
   }
 
   async function runEpisode(rival) {
     episode = true;
-    const home = hooks.getPetBounds();
+    // home 必须在 try 里取:getPetBounds 若抛异常(petWin 销毁瞬间),episode
+    // 标志已置位,不进 finally 的话 territory 会永久卡在 busy。
+    let home = null;
     let outcome = 'abort';
     try {
+      home = hooks.getPetBounds();
       log('territory', `spotted rival "${rival.name}" (pid ${rival.pid}) at ${rival.x},${rival.y} ${rival.w}x${rival.h}`);
       hooks.emit({ kind: 'territory', phase: 'spotted', rival: rival.name, ts: Date.now() });
-      await sleep(1100);
+      await wait(1100);
       if (hooks.shouldAbort()) return;
 
       let wa = hooks.getWorkArea(rival);
       let pet = hooks.getPetBounds();
       if (/chatgpt/i.test(rival.name)) {
+        // 这条路要动真鼠标(校准探测),用户手上有活就直接不开战
+        if (!(await userHandsOff())) return;
         // 透明窗口没有稳定几何中心：先在小章鱼保持原位时校准真实可拖锚点。
         await raiseRival(rival);
         const roughDir = pet.x + pet.width / 2 <= rival.x + rival.w / 2 ? 1 : -1;
         const calibrated = await calibrateDragPoint(rival, roughDir);
         if (!calibrated) {
+          // 校准半途用户动了手 → 静默撤退(abort);真探不到可拖点才算 defeat
+          if (hooks.shouldAbort() || !(await userHandsOff())) return;
           outcome = 'defeat';
           log('territory', `could not calibrate draggable area for "${rival.name}"`);
           hooks.emit({ kind: 'territory', phase: outcome, rival: rival.name, ts: Date.now() });
@@ -674,12 +723,15 @@ function createTerritory(hooks) {
       if (outcome === 'victory' || outcome === 'partial' || outcome === 'defeat') {
         log('territory', `episode vs "${rival.name}": ${outcome}`);
         hooks.emit({ kind: 'territory', phase: outcome, rival: rival.name, ts: Date.now() });
-        await sleep(900); // 让表情/气泡先演一拍再回家
+        await wait(900); // 让表情/气泡先演一拍再回家
       }
     } catch (e) {
       log('territory', 'episode error:', e.message);
     } finally {
-      try { await hooks.tweenPetTo(home.x, home.y, 1600); } catch {}
+      // 中途撤退(用户来了/弹层打开/出错)也要通知渲染端复位表情——
+      // 否则 march 给的 16s 斗志表情会一路挂到超时。
+      if (outcome === 'abort') hooks.emit({ kind: 'territory', phase: 'abort', rival: rival.name, ts: Date.now() });
+      try { if (home) await hooks.tweenPetTo(home.x, home.y, 1600); } catch {}
       episode = false;
     }
   }
@@ -723,7 +775,7 @@ function createTerritory(hooks) {
       let r = scanned;
       if (/chatgpt/i.test(r.name)) {
         // 连续两帧确认同一尺寸候选，过滤通知/弹层等瞬时小窗。
-        await sleep(140);
+        await wait(140);
         const confirmed = (await scan()).find((candidate) => candidate.pid === r.pid
           && Math.abs(candidate.w - r.w) <= 2 && Math.abs(candidate.h - r.h) <= 2);
         if (!confirmed) {
@@ -760,10 +812,14 @@ function createTerritory(hooks) {
 
   function start() {
     if (timer || process.platform !== 'darwin') return;
-    // 后台预编译一次，真正打架时不再卡在 Swift 冷启动。
-    ensureDragHelper().then((r) => {
-      if (!r.ok) log('territory', 'drag helper compile failed:', r.error.slice(0, 240));
-    });
+    // 只在自动巡逻已开启时预热编译(避免功能关着也每次启动付一遍 swiftc;
+    // 没装 CLT 的机器上调 /usr/bin/swiftc 还会弹系统的装工具引导框)。
+    // 关着的用户走懒路径:首次真要拖拽时由 dragRival 触发编译,产物有 mtime 缓存。
+    if (hooks.isEnabled()) {
+      ensureDragHelper().then((r) => {
+        if (!r.ok) log('territory', 'drag helper compile failed:', r.error.slice(0, 240));
+      });
+    }
     timer = setInterval(() => { tick().catch((e) => log('territory', 'tick error:', e.message)); }, intervalMs);
     if (timer.unref) timer.unref();
     log('territory', `watching for rivals every ${intervalMs}ms`);

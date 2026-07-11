@@ -1105,6 +1105,12 @@ window.pet.onEvent((ev) => {
         case 'busy':
           showBubble('🔎 正在巡视中，等我处理完这只桌宠！', 2600);
           break;
+        case 'abort':
+          // 中途撤退(用户来了/弹层打开):静默收掉 march 的长斗志表情,
+          // 立刻回落到真实聚合态,不冒气泡打扰正事。
+          clearTransient();
+          if (lastStats) applyStats(lastStats);
+          break;
       }
       break;
   }
@@ -1191,6 +1197,7 @@ function renderSessions(sessions) {
 window.pet.onConfig((cfg) => {
   if (!cfg) return;
   muted = !!cfg.muted;
+  territorySupported = !!cfg.territorySupported;
   if (cfg.skin) applySkin(cfg.skin);
 });
 
@@ -1296,13 +1303,14 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
 });
 
 // ---------- 泡泡菜单 ----------
+let territorySupported = false; // 由 pet:config 下发(仅 macOS true)
 const MENU = [
   { ic: 'chart',  label: '详情', act: () => window.pet.openPanel() },
   { ic: 'mask',   label: '形象', act: () => toggleSkin() },
   { ic: 'hand',   label: '待处理', badge: true, act: () => window.pet.openPanel() },
   { ic: 'zombie', label: '后台', badgeBg: true, act: () => window.pet.openPanel() },
   { ic: 'doc',    label: '日志', act: () => window.pet.openLog() },
-  { ic: 'hand',   label: '巡视', act: () => window.pet.territoryRunNow() },
+  { ic: 'search', label: '巡视', when: () => territorySupported, act: () => window.pet.territoryRunNow() },
   { ic: 'bell',   label: '静音', act: () => window.pet.toggleMute() },
   { ic: 'power',  label: '退出', act: () => window.pet.quit() },
 ];
@@ -1321,10 +1329,11 @@ function buildRadial() {
   const r = el.getBoundingClientRect();
   const cx = r.left - sr.left + r.width / 2;
   const cy = r.top - sr.top + r.height / 2;
-  const n = MENU.length;
+  const items = MENU.filter((it) => !it.when || it.when()); // 平台不支持的项(如非 mac 的巡视)不渲染
+  const n = items.length;
   const radius = 96;
   const startA = 192, endA = 348; // 头顶上方的弧
-  MENU.forEach((it, i) => {
+  items.forEach((it, i) => {
     const a = ((startA + (endA - startA) * (n === 1 ? 0.5 : i / (n - 1))) * Math.PI) / 180;
     const x = cx + radius * Math.cos(a);
     const y = cy + radius * Math.sin(a);
@@ -1393,6 +1402,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   const cfg = await window.pet.getConfig();
   if (cfg) {
     muted = !!cfg.muted;
+    territorySupported = !!cfg.territorySupported;
     applySkin(cfg.skin || 'mascot');
   }
   const s = await window.pet.getStats();
@@ -1438,4 +1448,7 @@ setInterval(() => {
   try { window.pet.uiBusy(busy); } catch {}
 }, 700);
 // 气泡、皮肤切换和窗口自适应都可能改变本体在透明窗里的局部位置。
-setInterval(reportPetVisualBounds, 500);
+// 窗口尺寸变化(fitPopup/resetPetSize)在渲染端表现为 resize 事件,按事件上报;
+// 常驻轮询只留一个低频兜底,不必每 500ms 强制一次 getBoundingClientRect 回流。
+window.addEventListener('resize', () => requestAnimationFrame(reportPetVisualBounds));
+setInterval(reportPetVisualBounds, 3000);

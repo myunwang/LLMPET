@@ -19,13 +19,11 @@ cp -R "$ELECTRON_APP" "$APP"
 rm -rf "$RESOURCES/app"
 mkdir -p "$RESOURCES/app"
 
-rsync -a \
-  --exclude '.git' \
-  --exclude 'dist' \
-  --exclude 'node_modules' \
-  --exclude 'test' \
-  --exclude 'scripts' \
-  "$ROOT/" "$RESOURCES/app/"
+# 显式清单拷贝(而非"整仓排除法"):仓库里以后加的文档/素材目录不会被误打进 app。
+# hook/ 是安装进 ~/.claude/settings.json 的钩子脚本,shared/ 是主/渲染两端共用的状态表。
+for item in main.js preload.js package.json backend renderer assets shared hook; do
+  cp -R "$ROOT/$item" "$RESOURCES/app/"
+done
 
 /usr/bin/swiftc -O "$ROOT/backend/drag-window.swift" -o "$RESOURCES/drag-window"
 chmod +x "$RESOURCES/drag-window"
