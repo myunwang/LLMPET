@@ -41,7 +41,9 @@ const VALID_STATES = new Set(States.VALID_STATES); // states the /state route ac
 const BUSY_STATES = new Set(States.BUSY_STATES);
 
 const DONE_EVENTS = new Set(['Stop']);
-const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart']);
+// TaskStarted: Codex 回合开始（rollout 的 task_started）——同样属于「新工作开始」，
+// 要清掉上一轮的完成徽标；Claude 路径永远不会发这个事件名。
+const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart', 'TaskStarted']);
 
 // Stale-cleanup thresholds (ms). An idle session whose terminal process is still
 // ALIVE stays visible (never auto-slept or removed) — so every open Claude
@@ -89,7 +91,8 @@ function deriveBadge(s) {
   const ev = latest && latest.event;
   // A failure wins regardless of the current state word (octopus stores the
   // 'error' state, unlike clawd which stores idle, so check this first).
-  if (ev === 'StopFailure' || ev === 'PostToolUseFailure' || ev === 'ApiError') return 'interrupted';
+  // TurnAborted = Codex 回合被用户叫停（ESC），和 Claude 的 ESC 中断同一个徽标。
+  if (ev === 'StopFailure' || ev === 'PostToolUseFailure' || ev === 'ApiError' || ev === 'TurnAborted') return 'interrupted';
   if (s.state !== 'idle' && s.state !== 'sleeping') return 'running';
   if (s.state === 'sleeping') return 'idle';
   // 只认 requiresCompletionAck（真完成才置位）。之前 DONE_EVENTS.has(ev) 兜底会
@@ -227,6 +230,30 @@ function createCore(options = {}) {
     return s;
   }
 
+  // Silent insert for watcher backfill（Codex rollout / 其它外部来源）：像
+  // backfillFromTranscripts 一样直接入库，不走 updateSession —— 不触发欢迎、
+  // 庆祝等 activity 事件，启动时把「已存在的会话」原样摆进列表。
+  function seedSession(fields) {
+    if (!fields || !fields.id || sessions.has(fields.id)) return null;
+    const now = Date.now();
+    const s = {
+      state: 'idle', recentEvents: [], createdAt: now, updatedAt: now,
+      ...fields,
+    };
+    sessions.set(s.id, s);
+    onDirty();
+    return s;
+  }
+
+  // Context-only refresh（Codex 的 token_count 事件）：不动状态机、不进
+  // recentEvents（null 事件会掩盖 deriveBadge 对最近失败事件的判定）。
+  function setContextUsage(sid, cu) {
+    const s = sessions.get(sid);
+    if (!s || !cu) return;
+    s.contextUsage = cu;
+    onDirty();
+  }
+
   // Mark a session as "completion acknowledged" (user saw the done state).
   function ackCompletion(sid) {
     const s = sessions.get(sid);
@@ -348,6 +375,9 @@ function createCore(options = {}) {
         // transcript 的 mtime = 模型最近一次产出时间。事件间隙里文件还在长，
         // 说明模型在干活（重连后继续跑/流式输出），adapter 据此不判摸鱼。
         try { s.transcriptActiveAt = fs.statSync(p).mtimeMs; } catch {}
+        // Codex 会话的 transcript 是 rollout JSONL（非 Claude 格式）：mtime 活跃度
+        // 通用，但上下文/中断/API 错误由 codex-watch 事件驱动，别用 Claude 解析器猜。
+        if (s.agentId === 'codex') continue;
         const entries = transcript.readTail(p);
         if (!entries) continue;
         const cu = transcript.contextUsage(entries, s.id);
@@ -438,6 +468,8 @@ function createCore(options = {}) {
     sessions,
     VALID_STATES,
     updateSession,
+    seedSession,
+    setContextUsage,
     ackCompletion,
     getSession,
     buildSnapshot,
