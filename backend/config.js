@@ -19,6 +19,8 @@ const DEFAULTS = Object.freeze({
   budget5h: 10,           // USD — kept for forward-compat; pricing is deferred
   muted: false,
   permHook: true,         // whether the blocking permission HTTP hook is active
+  territory: false,       // 领地模式:发现别的桌宠就顶到屏幕边上(macOS,需辅助功能权限)
+  territoryRivals: [],    // 用户自定义的对手进程名特征(叠加在内置名单上)
 });
 
 let cache = null;
@@ -34,6 +36,13 @@ function sanitize(raw) {
   if (Number.isFinite(raw.budget5h) && raw.budget5h >= 0) out.budget5h = raw.budget5h;
   out.muted = !!raw.muted;
   out.permHook = raw.permHook !== false;
+  out.territory = !!raw.territory;
+  if (Array.isArray(raw.territoryRivals)) {
+    out.territoryRivals = raw.territoryRivals
+      .filter((s) => typeof s === 'string' && s.trim())
+      .map((s) => s.trim().slice(0, 64)) // 单条封顶:超长字符串没有匹配意义,还会拖慢 osascript
+      .slice(0, 30);
+  }
   return out;
 }
 

@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('pet', {
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),
   toggleMute: () => ipcRenderer.send('toggle-mute'),
+  territoryRunNow: () => ipcRenderer.send('territory-run-now'),
+  territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),
   // 手动拖动窗口
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
@@ -50,4 +52,7 @@ contextBridge.exposeInMainWorld('pet', {
   openLog: () => ipcRenderer.send('open-log'),
   // 渲染端把关键 UI 决策写进日志(便于自检验证，不靠截图)
   petLog: (tag, msg) => ipcRenderer.send('pet-log', tag, msg),
+  // 上报「用户正在交互」(选项面板/右键菜单/记事本)——领地模式据此避战/撤退
+  uiBusy: (on) => ipcRenderer.send('ui-busy', on),
+  petVisualBounds: (rect) => ipcRenderer.send('pet-visual-bounds', rect),
 });

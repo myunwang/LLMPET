@@ -10,7 +10,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences } = require('electron');
 
 // Give the dev app a distinct identity ("octopus") so it isn't shown as a generic
 // "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
@@ -27,6 +27,7 @@ const { createServer } = require('./backend/server');
 const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
+const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude } = require('./backend/launch');
 const transport = require('./backend/transport');
 
@@ -43,6 +44,11 @@ let pricingSync = null;
 let permissions = null;
 let server = null;
 let stopWatcher = null;
+let territory = null;
+let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
+let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
+let uiBusy = false;    // 渲染端上报的「用户正在交互」(选项面板/右键菜单/记事本开着)
+let petVisualRect = null; // 可见宠物本体在透明 BrowserWindow 内的局部矩形
 
 let lastStats = null;
 let customSize = null; // {w,h} when a popup wants the window sized to fit it
@@ -60,6 +66,8 @@ function frontendConfig() {
     budget5h: c.budget5h,
     muted: c.muted,
     permHook: c.permHook,
+    territory: c.territory,
+    territorySupported: process.platform === 'darwin', // 渲染端据此隐藏「巡视」菜单
   };
 }
 
@@ -133,7 +141,7 @@ function createPetWindow() {
   petWin.loadFile(path.join(__dirname, 'renderer', 'pet.html'));
 
   petWin.on('moved', () => {
-    if (!petWin || customSize) return; // only persist the resting position (not while a popup is open)
+    if (!petWin || customSize || petGuided || petFrameGuided) return; // only persist the resting position
     const b = petWin.getBounds();
     config.save({ petPosition: { x: b.x, y: b.y } });
   });
@@ -177,6 +185,162 @@ function openPanel() {
 function closePanel() {
   if (panelWin && !panelWin.isDestroyed()) panelWin.close();
   panelWin = null;
+}
+
+// ── 领地模式(territory) ─────────────────────────────────────────────────────
+// 宠物窗口平滑走位原语(驱逐战专用)。petGuided 挡住 moved 持久化;结束后延迟
+// 一拍再放开 —— macOS 的 moved 事件可能晚于最后一次 setBounds 才派发。
+let petGuideRefs = 0;
+function tweenPetTo(x, y, ms) {
+  return new Promise((resolve) => {
+    if (!petWin || petWin.isDestroyed()) return resolve();
+    const from = petWin.getBounds();
+    const dur = Math.max(80, ms || 800);
+    const t0 = Date.now();
+    petGuided = true;
+    petGuideRefs++;
+    const step = setInterval(() => {
+      if (!petWin || petWin.isDestroyed()) return finish();
+      const t = Math.min(1, (Date.now() - t0) / dur);
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      // 宽高取当前值:走位途中气泡可能 fitPopup 改窗口尺寸,别跟它打架
+      const b = petWin.getBounds();
+      petWin.setBounds({
+        x: Math.round(from.x + (x - from.x) * e),
+        y: Math.round(from.y + (y - from.y) * e),
+        width: b.width, height: b.height,
+      });
+      if (t >= 1) finish();
+    }, 16);
+    function finish() {
+      clearInterval(step);
+      setTimeout(() => { if (--petGuideRefs <= 0) { petGuideRefs = 0; petGuided = false; } }, 300);
+      resolve();
+    }
+  });
+}
+
+function getTerritoryPetBounds() {
+  // 退出瞬间被 episode 调到时不能抛异常(shouldAbort 随后就会让它撤退)
+  if (!petWin || petWin.isDestroyed()) return { x: 0, y: 0, width: 0, height: 0 };
+  const win = petWin.getBounds();
+  if (!petVisualRect) return win;
+  return {
+    x: win.x + petVisualRect.x,
+    y: win.y + petVisualRect.y,
+    width: petVisualRect.width,
+    height: petVisualRect.height,
+  };
+}
+
+function tweenTerritoryPetTo(x, y, ms) {
+  // territory 的 x/y 表示「可见身体」左上角；真正移动的是透明窗口。
+  return tweenPetTo(
+    x - (petVisualRect ? petVisualRect.x : 0),
+    y - (petVisualRect ? petVisualRect.y : 0),
+    ms,
+  );
+}
+
+function bootTerritory() {
+  if (process.platform !== 'darwin') return;
+  territory = createTerritory({
+    isEnabled: () => !!config.get().territory,
+    rivalNames: () => [...DEFAULT_RIVALS, ...(config.get().territoryRivals || [])],
+    excludePids: () => [process.pid],
+    // 注意:不能拿 customSize 当「用户在交互」—— 气泡的 fitPopup 也会设它,
+    // 发现入侵者时自己冒的气泡就把驱逐战吓停了。用渲染端上报的 uiBusy。
+    canScan: () => !!(petWin && !petWin.isDestroyed() && petWin.isVisible() && !uiBusy),
+    canMove: () => {
+      try { return systemPreferences.isTrustedAccessibilityClient(false); } catch { return false; }
+    },
+    // 用户来正事了(面板/菜单开着/有待授权)→ 立刻停手回家
+    shouldAbort: () => !(petWin && !petWin.isDestroyed() && petWin.isVisible()) || uiBusy
+      || !!(permissions && permissions.getPending().length > 0),
+    getPetBounds: getTerritoryPetBounds,
+    tweenPetTo: tweenTerritoryPetTo,
+    setPetFrame: (x, y) => {
+      if (!petWin || petWin.isDestroyed()) return;
+      petFrameGuided = true;
+      const b = petWin.getBounds();
+      petWin.setBounds({
+        x: Math.round(x - (petVisualRect ? petVisualRect.x : 0)),
+        y: Math.round(y - (petVisualRect ? petVisualRect.y : 0)),
+        width: b.width, height: b.height,
+      });
+    },
+    endPetFrames: () => { setTimeout(() => { petFrameGuided = false; }, 300); },
+    setPetClickThrough: (on) => {
+      if (!petWin || petWin.isDestroyed()) return;
+      // 物理拖拽对手时，最高层的自己必须完全穿透，否则 CGEvent 会点中自己。
+      // 结束后也先恢复为透明区穿透；renderer 收到 forwarded mousemove 后会
+      // 只在真实宠物内容上重新接管。不能设 false，否则整块透明窗会挡住 Codex 输入。
+      petWin.setIgnoreMouseEvents(true, { forward: !on });
+    },
+    // 猫爪在上定律:对手在场就抬到 screen-saver 层并 moveTop(不抢焦点);
+    // 对手走光了降回 floating,不长期骑在系统 UI 头上。
+    assertTop: () => {
+      if (!petWin || petWin.isDestroyed()) return;
+      try { petWin.setAlwaysOnTop(true, 'screen-saver'); petWin.moveTop(); } catch {}
+    },
+    relaxTop: () => {
+      if (!petWin || petWin.isDestroyed()) return;
+      try { petWin.setAlwaysOnTop(true, 'floating'); } catch {}
+    },
+    getWorkArea: (rect) => screen.getDisplayMatching({
+      x: Math.round(rect.x), y: Math.round(rect.y),
+      width: Math.max(1, Math.round(rect.w || 1)),
+      height: Math.max(1, Math.round(rect.h || 1)),
+    }).workArea,
+    emit: (ev) => sendPet('pet:event', ev),
+  });
+  territory.start();
+}
+
+let lastPermDialogAt = 0; // 引导框节流:连点「巡视」不该连环弹窗
+function ensureTerritoryPermission() {
+  if (process.platform !== 'darwin') return false;
+  let trusted = false;
+  try { trusted = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
+  if (!trusted && Date.now() - lastPermDialogAt > 60 * 1000) {
+    lastPermDialogAt = Date.now();
+    // 推别人的窗口要走辅助功能 API;prompt=true 弹系统引导框并把本 app 加入列表
+    try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
+    dialog.showMessageBox({
+      type: 'info',
+      message: '巡视桌宠需要「辅助功能」权限',
+      detail: '小章鱼需要移动对方的窗口，才能把它顶到屏幕边上。\n' +
+        '请在 系统设置 → 隐私与安全性 → 辅助功能 里勾选本应用(octopus/Electron)。\n' +
+        '授权后无需重启，重新点击「巡视」即可。',
+    }).catch(() => {});
+  }
+  return trusted;
+}
+
+function runTerritoryNow() {
+  if (process.platform !== 'darwin' || !territory) return;
+  // 没权限也照跑:定律①(进程检测+抬层级)不需要辅助功能,只有推窗需要。
+  // 引导框由 ensureTerritoryPermission 弹(带节流);巡视结果先演完再提示缺权限。
+  const trusted = ensureTerritoryPermission();
+  territory.runNow()
+    .then(() => {
+      if (!trusted) sendPet('pet:event', { kind: 'territory', phase: 'noperm', ts: Date.now() });
+    })
+    .catch((e) => log('territory', 'manual scan failed:', e.message));
+}
+
+function applyTerritory(on) {
+  config.save({ territory: !!on });
+  if (on && process.platform === 'darwin') {
+    ensureTerritoryPermission();
+    // 开启后立刻巡逻一次，不让用户等到下一个轮询周期(定律①无需权限)。
+    if (territory) territory.runNow().catch((e) => log('territory', 'initial scan failed:', e.message));
+  } else if (!on && territory && territory.dominating) {
+    // 关闭后立刻执行一次 disabled tick，把窗口层级恢复为 floating。
+    territory.tick().catch(() => {});
+  }
+  broadcastConfig();
+  refreshTrayMenu();
 }
 
 // Block any navigation / new-window to external content (hardening).
@@ -359,6 +523,8 @@ function registerIpc() {
   ipcMain.on('set-skin', (_e, skin) => applySkin(skin));
   ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
+  ipcMain.on('territory-run-now', runTerritoryNow);
+  ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
   ipcMain.on('quit-app', () => app.quit());
 
@@ -419,6 +585,17 @@ function registerIpc() {
     if (petWin && !petWin.isDestroyed()) {
       try { petWin.setIgnoreMouseEvents(!!ignore, { forward: true }); } catch {}
     }
+  });
+
+  // 渲染端上报「用户正在交互」(领地模式据此避战/撤退,别的场景以后也能用)
+  ipcMain.on('ui-busy', (_e, on) => { uiBusy = !!on; });
+  ipcMain.on('pet-visual-bounds', (_e, rect) => {
+    if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return;
+    if (!(rect.width > 0) || !(rect.height > 0)) return;
+    petVisualRect = {
+      x: Math.round(rect.x), y: Math.round(rect.y),
+      width: Math.round(rect.width), height: Math.round(rect.height),
+    };
   });
 
   ipcMain.on('open-log', () => { shell.openPath(LOG_PATH); });
@@ -488,6 +665,11 @@ function refreshTrayMenu() {
       { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
       { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
+    ...(process.platform === 'darwin' ? [
+      { label: '　🥊 自动巡逻（顶走别的桌宠）', type: 'checkbox', checked: !!cfg.territory,
+        click: () => applyTerritory(!config.get().territory) },
+      { label: '　🔎 立即巡视一次', click: runTerritoryNow },
+    ] : []),
     { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
     { type: 'separator' },
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
@@ -562,6 +744,7 @@ if (!gotTheLock) {
     registerIpc();
     bootBackend();
     createPetWindow();
+    bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
     log('main', 'Octopus ready');
   });
@@ -570,6 +753,7 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
+  try { if (territory) territory.stop(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}
   try { if (server) server.stop(); } catch {}

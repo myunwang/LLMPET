@@ -14,6 +14,13 @@ const MAX_BYTES = 1 * 1024 * 1024; // rotate at 1 MB so the file never grows unb
 
 let stream = null;
 let written = 0; // bytes in the current LOG_PATH, tracked so we rotate mid-run
+let stdoutUsable = true;
+
+// Socket/PTY 写失败是异步 error 事件，try/catch 捕获不到。启动终端关闭后
+// 只停止镜像 stdout，文件日志仍继续工作，绝不能因此击穿 Electron 主进程。
+if (process.stdout && typeof process.stdout.on === 'function') {
+  process.stdout.on('error', () => { stdoutUsable = false; });
+}
 
 function ensureStream() {
   if (stream) return stream;
@@ -25,7 +32,9 @@ function ensureStream() {
       if (st.size > MAX_BYTES) { fs.renameSync(LOG_PATH, LOG_PATH + '.1'); written = 0; }
       else written = st.size;
     } catch { written = 0; }
-    stream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+    const created = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+    created.on('error', () => { if (stream === created) stream = null; });
+    stream = created;
   } catch {
     stream = null;
   }
@@ -53,7 +62,9 @@ function log(tag, ...parts) {
     try { s.write(line); written += Buffer.byteLength(line); rotateIfNeeded(); } catch {}
   }
   // Also mirror to stdout so `npm start` shows the pipeline live.
-  try { process.stdout.write(line); } catch {}
+  if (stdoutUsable && process.stdout && process.stdout.writable && !process.stdout.destroyed) {
+    try { process.stdout.write(line); } catch { stdoutUsable = false; }
+  }
 }
 
 function safeJson(v) {
