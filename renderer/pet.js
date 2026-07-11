@@ -1063,6 +1063,50 @@ window.pet.onEvent((ev) => {
     case 'longcmd':
       if (state !== 'waiting') showBubble('💦 这条命令有点久，稍等…', 3000);
       break;
+    case 'territory':
+      // 领地模式(main 的 territory 编排):发现别的桌宠 → 走过去顶到屏幕边上。
+      // 全程复用现成情绪态,窗口走位由主进程完成,这里只负责表情/气泡/音效。
+      switch (ev.phase) {
+        case 'spotted':
+          transient('puzzled', 2400, `👀 咦？「${ev.rival || '不明生物'}」闯进我的地盘！`, 2600);
+          SOUND.waiting();
+          break;
+        case 'march':
+          // 推挤最长十几秒,给个长时限的斗志表情,victory/defeat 到了自然接管
+          transient('excited', 16000, '🥊 走开走开！这是我的桌面！', 3200);
+          break;
+        case 'victory':
+          transient('happy', 2800, '🏆 哼！把它顶到墙边啦～', 3400);
+          confetti();
+          SOUND.bigDone();
+          break;
+        case 'defeat':
+          transient('sad', 3000, `😤 「${ev.rival || '它'}」纹丝不动…算它狠！`, 3200);
+          SOUND.error();
+          break;
+        case 'partial':
+          transient('excited', 3200, `💨 已经把「${ev.rival || '它'}」推到系统允许的最边上啦！`, 3600);
+          SOUND.done();
+          break;
+        case 'ontop':
+          // 猫爪在上定律:发现别的桌宠进程,窗口层级已被主进程抬到最上
+          transient('excited', 2600, `🐾 猫爪在上定律！「${ev.rival || '入侵者'}」不许压着我～`, 3000);
+          SOUND.greet();
+          break;
+        case 'noperm':
+          showBubble('🔒 想把入侵者顶走，但还没有「辅助功能」权限（系统设置 → 隐私与安全性 → 辅助功能）', 7000);
+          break;
+        case 'searching':
+          showBubble('🔎 正在巡视桌面，找找有没有别的桌宠…', 2400);
+          break;
+        case 'clear':
+          showBubble('✨ 巡视完毕，地盘很安静～', 2600);
+          break;
+        case 'busy':
+          showBubble('🔎 正在巡视中，等我处理完这只桌宠！', 2600);
+          break;
+      }
+      break;
   }
 });
 
@@ -1157,6 +1201,14 @@ function applySkin(s) {
   document.body.classList.toggle('skin-cat', skin === 'cat');
   if (skin === 'mascot') updateMascotEyes(state);
   if (skin === 'cat') updateCat(state);
+  requestAnimationFrame(reportPetVisualBounds);
+}
+
+function reportPetVisualBounds() {
+  const el = curSkinEl();
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  try { window.pet.petVisualBounds({ x: r.left, y: r.top, width: r.width, height: r.height }); } catch {}
 }
 
 // ====================================================================
@@ -1250,6 +1302,7 @@ const MENU = [
   { ic: 'hand',   label: '待处理', badge: true, act: () => window.pet.openPanel() },
   { ic: 'zombie', label: '后台', badgeBg: true, act: () => window.pet.openPanel() },
   { ic: 'doc',    label: '日志', act: () => window.pet.openLog() },
+  { ic: 'hand',   label: '巡视', act: () => window.pet.territoryRunNow() },
   { ic: 'bell',   label: '静音', act: () => window.pet.toggleMute() },
   { ic: 'power',  label: '退出', act: () => window.pet.quit() },
 ];
@@ -1292,8 +1345,8 @@ function buildRadial() {
     }
     b.addEventListener('click', (e) => {
       e.stopPropagation();
-      it.act();
       closeRadial();
+      it.act();
     });
     radial.appendChild(b);
   });
@@ -1320,11 +1373,13 @@ function openRadial() {
   buildRadial();
   radial.classList.remove('hidden');
   radialOpen = true;
+  try { window.pet.uiBusy(true); } catch {}
   bubble.classList.add('hidden');
 }
 function closeRadial() {
   radial.classList.add('hidden');
   radialOpen = false;
+  try { window.pet.uiBusy(!!(todoPopOpen || sessListOpen || askActive || isInteracting())); } catch {}
 }
 function toggleRadial() {
   radialOpen ? closeRadial() : openRadial();
@@ -1371,3 +1426,16 @@ window.addEventListener('mousemove', (e) => {
 }, true);
 // 启动即默认穿透（透明区不挡），光标移到内容上时由上面的命中测试恢复
 setMouseIgnore(true);
+
+// ---------- 交互状态上报(领地模式避战用) ----------
+// 主进程无法区分「气泡 fitPopup 撑大的窗口」和「用户真的开着面板」,由渲染端
+// 每 700ms 对账一次,变化才上报。覆盖:选项面板交互/右键菜单/记事本/会话列表。
+let lastUiBusy = null;
+setInterval(() => {
+  const busy = !!(radialOpen || todoPopOpen || sessListOpen || askActive || isInteracting());
+  if (busy === lastUiBusy) return;
+  lastUiBusy = busy;
+  try { window.pet.uiBusy(busy); } catch {}
+}, 700);
+// 气泡、皮肤切换和窗口自适应都可能改变本体在透明窗里的局部位置。
+setInterval(reportPetVisualBounds, 500);

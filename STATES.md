@@ -160,6 +160,7 @@
 - 前端聚合梯子与本文件第 3 节优先级表一致:`waiting > 短暂态 > error > needsinput > sweeping > juggling > working > thinking > loafing > idle > sleeping`(见 `renderer/pet.js` applyStats)。
 - **loafing(摸鱼)**:adapter 合成态——工具结束(PostToolUse/SubagentStop)后 >5s 无事件的间隙。间隙里模型可能在推理/流式输出/事件丢失,不硬标注为「思考」;真思考走 UserPromptSubmit → thinking 事件通道。网络重试间隙由 transcript 巡检识别为 error,ESC 中断识别为 idle+中断徽标。
 - 状态机回归测试:`npm test`(`test/smoke.js` 后端链路 + `test/state-smoke.js` 渲染端,后者用 `test/dom-stub.js` 把真实 `pet.js` 跑在 Node 里)。
+- **领地模式(territory)**:`backend/territory.js` 发现别的桌宠 → 主进程编排「走过去把对方窗口顶到屏幕边上」;渲染端**全程复用现成情绪态**(spotted→`puzzled`、推挤→`excited`、victory→`happy`+彩带、defeat→`sad`),不新增状态词、不需要新素材。事件走 `pet:event {kind:'territory', phase}`。
 
 ---
 
