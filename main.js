@@ -125,6 +125,7 @@ function createPetWindows() {
   const duo = config.get().petMode === 'duo';
   petWin = makePetWindow(duo ? 'claude' : 'all');
   petWinCodex = duo ? makePetWindow('codex') : null;
+  log('main', `pet windows: ${duo ? 'duo (claude+codex)' : 'single (all)'}`);
 }
 
 function makePetWindow(agent) {
@@ -483,6 +484,8 @@ function bootBackend() {
   } else {
     codexWatch = createCodexWatch({
       core,
+      // 开发/E2E 可用 OCTOPUS_CODEX_DIR 指到假目录，不碰真实 ~/.codex
+      sessionsDir: process.env.OCTOPUS_CODEX_DIR || undefined,
       onRateLimits: (rl) => { codexLimits = rl; scheduleEmit(); },
     });
     codexWatch.start();

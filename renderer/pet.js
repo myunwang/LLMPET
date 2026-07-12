@@ -160,7 +160,8 @@ let elic = null;      // elicitation 渲染态：{ key, questions, qIdx, answers
 // 此时别重渲面板、别改小章鱼状态，免得打断你思考/选择。面板一关就自动解除。
 const isInteracting = () => askActive && (askHover || document.activeElement === askText || !!(askText && askText.value) || (elic && elic.selected != null));
 
-const rlog = (tag, msg) => { try { window.pet.petLog(tag, msg); } catch {} }; // 把 UI 决策写日志，便于自检
+// 把 UI 决策写日志，便于自检；双宠模式给 tag 带上身份前缀（claude:state / codex:state）
+const rlog = (tag, msg) => { try { window.pet.petLog((AGENT === 'all' ? '' : AGENT + ':') + tag, msg); } catch {} };
 const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // 带上 sessionId：否则同一项目下两个并行会话若问了同样的问题，会共用一个 key，
 // 答掉一个就把另一个也标记成 answered 吞掉。choice 各构造处都带 sessionId。
