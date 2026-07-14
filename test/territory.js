@@ -5,7 +5,7 @@
 // Run: node test/territory.js
 
 const assert = require('assert');
-const { createTerritory, parsePresence, parseScan, scanCandidateScore, nearestEdgeTarget, edgeAwayFromPet, atEdge, windowTargetForVisual, visualAtEdge, interpolateFrame, standX, DEFAULT_RIVALS } = require('../backend/territory');
+const { createTerritory, parsePresence, parseScan, scanCandidateScore, nearestEdgeTarget, edgeAwayFromPet, atEdge, windowTargetForVisual, visualAtEdge, visualShiftMatches, interpolateFrame, standX, DEFAULT_RIVALS } = require('../backend/territory');
 
 let failures = 0;
 const pending = [];
@@ -117,6 +117,11 @@ check('本体右缘贴边才算完成', () => {
   assert(visualAtEdge({ x: 1300, y: 0, w: 140, h: 140 }, WA));
   assert(!visualAtEdge({ x: 1100, y: 0, w: 140, h: 140 }, WA));
 });
+check('视觉补推身份忽略纵向 7px 晃动，但水平走开会失效', () => {
+  const record = { windowX: 1156, windowY: 357, windowW: 356, windowH: 320 };
+  assert(visualShiftMatches(record, { x: 1156, y: 364, w: 356, h: 320 }));
+  assert(!visualShiftMatches(record, { x: 1146, y: 357, w: 356, h: 320 }));
+});
 
 console.log('[T3c] 同一进度源的逐帧跟随插值');
 check('progress=0/0.5/1 与目标拖拽轨迹严格同相', () => {
@@ -162,6 +167,8 @@ function mockHooks(over) {
     getPetBounds: () => ({ x: 0, y: 0, width: 320, height: 340 }),
     tweenPetTo: async () => {},
     getWorkArea: () => WA,
+    clearRivalVisual: async () => ({ ok: true }),
+    warpRivalVisual: async () => ({ ok: true }),
     assertTop: () => { calls.assertTop++; },
     relaxTop: () => { calls.relaxTop++; },
     emit: () => { calls.emitted++; },
@@ -250,6 +257,106 @@ check('defeat:AXPosition 无效+软件指针也推不动 → 拔河认怂', asyn
   const t = createTerritory(hooks);
   await t.tick();
   assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'defeat']);
+});
+
+check('ChatGPT 校准拖拽重置 HIDIdleTime → 不误判用户活跃，继续推到边缘', async () => {
+  const phases = [];
+  let rivalX = 800;
+  let idleChecks = 0;
+  let dragCalls = 0;
+  const world = {
+    presence: () => '',
+    windows: () => `ChatGPT|42|${rivalX}|300|356|320\n`,
+    move: () => { throw new Error('ChatGPT 应走拖拽路径'); },
+  };
+  const { hooks } = mockHooks({
+    rivalNames: () => [],
+    hostRivalNames: () => ['ChatGPT'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => (++idleChecks <= 2 ? 999 : 0.1),
+    dragRival: async (_rival, targetX, _rx, _ry, _ms, onProgress) => {
+      dragCalls++;
+      rivalX = targetX;
+      if (onProgress) onProgress(1);
+      return { ok: true };
+    },
+    runOsa: fakeOsa(world),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert(dragCalls >= 2, `应先校准再正式推边，实际拖拽 ${dragCalls} 次`);
+  assert(phases.includes('victory'), `应完成推边，实际 phases=${phases.join(',')}`);
+  const visualRight = rivalX + 356 * 0.65 - 70 + 140;
+  assert(Math.abs(visualRight - (WA.x + WA.width)) <= 12,
+    `可见本体应贴右边，实际 right=${visualRight}`);
+});
+
+check('ChatGPT 透明外框被系统 clamp → WindowServer 补齐可见本体最后 55px', async () => {
+  const phases = [];
+  let rivalX = 800;
+  let visualShift = 0;
+  const outerRightLimit = WA.x + WA.width - 356;
+  const world = {
+    presence: () => '',
+    windows: () => `ChatGPT|42|${rivalX}|300|356|320\n`,
+    move: () => { throw new Error('ChatGPT 应走拖拽路径'); },
+  };
+  const { hooks } = mockHooks({
+    rivalNames: () => [],
+    hostRivalNames: () => ['ChatGPT'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => 999,
+    dragRival: async (_rival, targetX, _rx, _ry, _ms, onProgress) => {
+      rivalX = Math.min(targetX, outerRightLimit);
+      if (onProgress) onProgress(1);
+      return { ok: true };
+    },
+    warpRivalVisual: async (_rival, dx) => {
+      visualShift = dx;
+      return { ok: true };
+    },
+    runOsa: fakeOsa(world),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert(phases.includes('victory'), `透明外框贴边后应补推胜利，实际 phases=${phases.join(',')}`);
+  assert(Math.abs(visualShift - 54.6) < 1,
+    `应补齐约 55px 透明留白，实际 shift=${visualShift}`);
+  const visibleRight = rivalX + visualShift + 356 * 0.65 - 70 + 140;
+  assert(Math.abs(visibleRight - (WA.x + WA.width)) <= 1,
+    `可见本体应精确贴边，实际 right=${visibleRight}`);
+});
+
+check('ChatGPT 外框已在边缘且 Octopus 刚重启 → 不抢鼠标，直接恢复视觉贴边', async () => {
+  const phases = [];
+  const outerRightLimit = WA.x + WA.width - 356;
+  let visualShift = 0;
+  let dragCalls = 0;
+  const world = {
+    presence: () => '',
+    windows: () => `ChatGPT|42|${outerRightLimit}|300|356|320\n`,
+    move: () => { throw new Error('ChatGPT 应走视觉补推路径'); },
+  };
+  const { hooks } = mockHooks({
+    rivalNames: () => [],
+    hostRivalNames: () => ['ChatGPT'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    userIdleSeconds: async () => 0,
+    dragRival: async () => { dragCalls++; return { ok: true }; },
+    warpRivalVisual: async (_rival, dx) => {
+      if (Math.abs(dx) > 1) visualShift = dx;
+      return { ok: true };
+    },
+    runOsa: fakeOsa(world),
+  });
+  const t = createTerritory(hooks);
+  await t.tick();
+  assert.strictEqual(dragCalls, 0, '外框已贴边时不应再接管鼠标校准');
+  assert(Math.abs(visualShift - 54.6) < 1, `应恢复约 55px 视觉补偿，实际 ${visualShift}`);
+  assert(phases.includes('victory'), `应直接胜利，实际 phases=${phases.join(',')}`);
 });
 
 check('用户手上有活(输入空闲<2s)→ 软件光标不出手,静默 abort 撤退', async () => {

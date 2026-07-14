@@ -25,7 +25,11 @@ for item in main.js preload.js package.json backend renderer assets shared hook;
   cp -R "$ROOT/$item" "$RESOURCES/app/"
 done
 
-/usr/bin/swiftc -O "$ROOT/backend/drag-window.swift" -o "$RESOURCES/drag-window"
+/usr/bin/swiftc -O "$ROOT/backend/drag-window.swift" \
+  -F /System/Library/PrivateFrameworks \
+  -framework SkyLight \
+  -framework ApplicationServices \
+  -o "$RESOURCES/drag-window"
 chmod +x "$RESOURCES/drag-window"
 cp "$ROOT/assets/icon.icns" "$RESOURCES/icon.icns"
 
