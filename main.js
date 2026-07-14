@@ -299,9 +299,6 @@ function bootTerritory() {
     // 注意:不能拿 customSize 当「用户在交互」—— 气泡的 fitPopup 也会设它,
     // 发现入侵者时自己冒的气泡就把驱逐战吓停了。用渲染端上报的 uiBusy。
     canScan: () => !!(petWin && !petWin.isDestroyed() && petWin.isVisible() && !uiBusy),
-    canMove: () => {
-      try { return systemPreferences.isTrustedAccessibilityClient(false); } catch { return false; }
-    },
     // 用户来正事了(面板/菜单开着/有待授权)→ 立刻停手回家
     shouldAbort: () => !(petWin && !petWin.isDestroyed() && petWin.isVisible()) || uiBusy
       || !!(permissions && permissions.getPending().length > 0),
@@ -346,12 +343,13 @@ function bootTerritory() {
   territory.start();
 }
 
-let lastPermDialogAt = 0; // 引导框节流:连点「巡视」不该连环弹窗
+let lastPermDialogAt = 0; // 引导框节流:授权缓存未刷新时也不能反复骚扰
 function ensureTerritoryPermission() {
   if (process.platform !== 'darwin') return false;
   let trusted = false;
   try { trusted = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
-  if (!trusted && Date.now() - lastPermDialogAt > 60 * 1000) {
+  log('territory', `accessibility preflight trusted=${trusted}`);
+  if (!trusted && Date.now() - lastPermDialogAt > 15 * 60 * 1000) {
     lastPermDialogAt = Date.now();
     // 推别人的窗口要走辅助功能 API;prompt=true 弹系统引导框并把本 app 加入列表
     try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
@@ -359,8 +357,8 @@ function ensureTerritoryPermission() {
       type: 'info',
       message: '巡视桌宠需要「辅助功能」权限',
       detail: '小章鱼需要移动对方的窗口，才能把它顶到屏幕边上。\n' +
-        '请在 系统设置 → 隐私与安全性 → 辅助功能 里勾选本应用(octopus/Electron)。\n' +
-        '授权后无需重启，重新点击「巡视」即可。',
+        '请在 系统设置 → 隐私与安全性 → 辅助功能 里勾选 Octopus。\n' +
+        '首次授权后如果本轮仍提示，请完全退出 Octopus 再重新打开一次。',
     }).catch(() => {});
   }
   return trusted;
@@ -369,11 +367,14 @@ function ensureTerritoryPermission() {
 function runTerritoryNow() {
   if (process.platform !== 'darwin' || !territory) return;
   // 没权限也照跑:定律①(进程检测+抬层级)不需要辅助功能,只有推窗需要。
-  // 引导框由 ensureTerritoryPermission 弹(带节流);巡视结果先演完再提示缺权限。
-  const trusted = ensureTerritoryPermission();
+  // 权限提醒以实际 osascript/AX 操作结果为准，不能捕获点击瞬间的旧值并在
+  // 用户中途完成授权后仍强制冒 noperm。
+  const trustedBefore = ensureTerritoryPermission();
   territory.runNow()
-    .then(() => {
-      if (!trusted) sendPet('pet:event', { kind: 'territory', phase: 'noperm', ts: Date.now() });
+    .then((result) => {
+      let trustedAfter = false;
+      try { trustedAfter = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
+      log('territory', `manual patrol result=${result} trustedBefore=${trustedBefore} trustedAfter=${trustedAfter}`);
     })
     .catch((e) => log('territory', 'manual scan failed:', e.message));
 }

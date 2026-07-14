@@ -40,7 +40,14 @@ if ! /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST" 2>/dev/null; th
   /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST"
 fi
 
+# 第一阶段正常深签 Electron 的全部嵌套 Framework/Helper；第二阶段只重签顶层
+# Octopus 并写入稳定 designated requirement。不能把自定义 requirement 和
+# --deep 放在同一条命令里，否则它会错误套到所有 Electron 子组件上。
 codesign --force --deep --sign - "$APP"
+# ad-hoc 默认 requirement 是每次构建都变化的 CDHash，导致辅助功能列表虽然
+# 仍显示已勾选，新包却被 TCC 当成另一个应用。固定顶层 Bundle ID 后只需授权一次。
+codesign --force --sign - \
+  --requirements '=designated => identifier "com.octopus.pet"' "$APP"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "$APP"

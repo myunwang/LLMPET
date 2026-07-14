@@ -215,6 +215,7 @@ check('victory:发现对手 → ontop/spotted/march → 一步步推到屏幕边
   let rivalX = 700;
   const { hooks } = mockHooks({
     rivalNames: () => ['BongoCat'],
+    canMove: () => { throw new Error('扫描成功后不应再读取可能滞后的权限缓存'); },
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
     userIdleSeconds: async () => 999,

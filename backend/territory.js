@@ -780,7 +780,6 @@ function createTerritory(hooks) {
     }
 
     // ── 定律②:驱逐战(要能看到对方的宠物窗才打得起来)
-    const now = Date.now();
     for (const scanned of rivals) {
       let r = scanned;
       if (/chatgpt/i.test(r.name)) {
@@ -796,13 +795,9 @@ function createTerritory(hooks) {
       }
       const wa = hooks.getWorkArea(r);
       if (rivalAtEdge(r, wa)) continue; // 可见本体贴边才算完成，不看透明外框
-      if (hooks.canMove && !hooks.canMove()) {
-        if (now - lastPermNag > 60 * 1000) {
-          lastPermNag = now;
-          hooks.emit({ kind: 'territory', phase: 'noperm', ts: now });
-        }
-        return 'noperm';
-      }
+      // scan() 已经实际通过 System Events 读到了窗口；不要再用 Electron
+      // 可能滞后的 TCC 缓存值二次拦截。真正移动失败时 moveRival 会按实际
+      // -25211/not authorized 错误发 noperm。
       await runEpisode(r);
       return 'episode'; // 一次只打一架
     }
