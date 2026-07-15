@@ -29,6 +29,7 @@ done
   -F /System/Library/PrivateFrameworks \
   -framework SkyLight \
   -framework ApplicationServices \
+  -framework AppKit \
   -o "$RESOURCES/drag-window"
 chmod +x "$RESOURCES/drag-window"
 cp "$ROOT/assets/icon.icns" "$RESOURCES/icon.icns"
