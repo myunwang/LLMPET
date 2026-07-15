@@ -363,6 +363,35 @@ function visualShiftMatches(record, rival) {
     && Math.abs(record.windowH - rival.h) <= 3;
 }
 
+function visualShiftOffset(record, rival) {
+  return {
+    dx: Number.isFinite(record && record.targetWindowX)
+      ? record.targetWindowX - rival.x
+      : Number(record && record.dx) || 0,
+    dy: Number(record && record.dy) || 0,
+  };
+}
+
+function parseWarpHelperLine(line) {
+  const text = String(line || '').trim();
+  const progress = /^progress\|([0-9.]+)$/.exec(text);
+  if (progress) return { type: 'progress', progress: Math.min(1, Math.max(0, Number(progress[1]))) };
+  if (/^stable\|/.test(text)) return { type: 'stable' };
+  if (/^warped\|/.test(text)) return { type: 'warped' };
+  if (/^released\|user=1$/.test(text)) return { type: 'user-release' };
+  if (/^unwarped\|/.test(text)) return { type: 'unwarped' };
+  return { type: 'other' };
+}
+
+const MAX_WARP_RECOVERY_ATTEMPTS = 2;
+function warpHoldNeedsRecovery(entry) {
+  return !!entry
+    && entry.confirmedStable === true
+    && entry.stopping !== true
+    && entry.userReleased !== true
+    && (Number(entry.recoveryAttempt) || 0) < MAX_WARP_RECOVERY_ATTEMPTS;
+}
+
 function interpolateFrame(from, to, progress) {
   const p = Math.min(1, Math.max(0, Number(progress) || 0));
   return {
@@ -482,10 +511,9 @@ function createTerritory(hooks) {
       if (visualShiftMatches(shifted, rival)) {
         // helper 会抵消 ChatGPT 自己对逻辑 x 的更新，把合成层窗口持续钉在
         // targetWindowX。这里也必须用动态差值，不能沿用开战时的旧 dx。
-        visual.x += Number.isFinite(shifted.targetWindowX)
-          ? shifted.targetWindowX - rival.x
-          : shifted.dx;
-        visual.y += shifted.dy;
+        const offset = visualShiftOffset(shifted, rival);
+        visual.x += offset.dx;
+        visual.y += offset.dy;
       } else if (shifted) {
         // 窗口轮廓改变说明原宠物窗已被替换，旧补偿不能沿用。
         visualShiftByPid.delete(rival.pid);
@@ -540,6 +568,7 @@ function createTerritory(hooks) {
     if (!helper.ok) return helper;
     const previous = activeWarps.get(rival.pid);
     if (previous) {
+      previous.stopping = true;
       try { previous.child.kill('SIGKILL'); } catch {}
       activeWarps.delete(rival.pid);
       visualShiftByPid.delete(rival.pid);
@@ -563,6 +592,7 @@ function createTerritory(hooks) {
     if (!helper.ok) return helper;
     const previous = activeWarps.get(rival.pid);
     if (previous) {
+      previous.stopping = true;
       try { previous.child.kill('SIGKILL'); } catch {}
     }
     return new Promise((resolve) => {
@@ -576,7 +606,14 @@ function createTerritory(hooks) {
         args.push(options.pointerStart.x, options.pointerStart.y);
       }
       const child = spawn(helper.bin, args.map(String));
-      const entry = { child, rival: { ...rival }, dx, dy };
+      const entry = {
+        child, rival: { ...rival }, dx, dy,
+        targetWindowX: rival.x + dx,
+        recoveryAttempt: Number(options.recoveryAttempt) || 0,
+        confirmedStable: false,
+        stopping: false,
+        userReleased: false,
+      };
       activeWarps.set(rival.pid, entry);
       let settled = false;
       let stderr = '';
@@ -584,6 +621,7 @@ function createTerritory(hooks) {
       const startTimer = setTimeout(() => {
         if (!settled) {
           settled = true;
+          entry.stopping = true;
           try { child.kill('SIGKILL'); } catch {}
           resolve({ ok: false, error: 'window warp startup timed out' });
         }
@@ -594,18 +632,20 @@ function createTerritory(hooks) {
         const lines = lineBuf.split('\n');
         lineBuf = lines.pop() || '';
         for (const line of lines) {
-          const progress = /^progress\|([0-9.]+)$/.exec(line.trim());
-          if (progress && options.onProgress) {
-            options.onProgress(Math.min(1, Math.max(0, Number(progress[1]))));
+          const message = parseWarpHelperLine(line);
+          if (message.type === 'progress' && options.onProgress) {
+            options.onProgress(message.progress);
           }
           // warped 只表示动画最后一帧写入成功；旧实现此刻就报 victory，
           // 但 helper 可能随即因 ChatGPT 自身走动而退出并清除。必须等连续
           // 4 次维持成功后由 stable 给出真正的完成证明。
-          if (!settled && /^stable\|/.test(line.trim())) {
+          if (!settled && message.type === 'stable') {
+            entry.confirmedStable = true;
             settled = true;
             clearTimeout(startTimer);
             resolve({ ok: true });
           }
+          if (message.type === 'user-release') entry.userReleased = true;
         }
       });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
@@ -622,9 +662,46 @@ function createTerritory(hooks) {
         if (!settled) {
           settled = true;
           resolve({ ok: false, error: stderr.trim() || `window warp exited ${code}` });
+        } else if (warpHoldNeedsRecovery(entry)) {
+          recoverWarpHold(entry).catch((err) => {
+            log('territory', 'compositor hold recovery error:', String(err && err.message || err).slice(0, 240));
+          });
         }
       });
     });
+  }
+
+  async function recoverWarpHold(entry) {
+    await wait(120);
+    if (activeWarps.has(entry.rival.pid)) return;
+    const observed = await scanDetailed();
+    if (!observed.ok) {
+      log('territory', 'compositor hold recovery scan failed:', String(observed.error || '').slice(0, 240));
+      return;
+    }
+    const current = observed.rivals.find((candidate) => candidate.pid === entry.rival.pid);
+    if (!current) {
+      log('territory', `compositor hold ended: "${entry.rival.name}" is gone`);
+      return;
+    }
+    const attempt = entry.recoveryAttempt + 1;
+    const dx = entry.targetWindowX - current.x;
+    log('territory', `recovering compositor hold for "${entry.rival.name}" (attempt ${attempt})`);
+    const recovered = await warpRivalVisual(current, dx, entry.dy, {
+      durationMs: 180,
+      recoveryAttempt: attempt,
+    });
+    if (!recovered || !recovered.ok) {
+      log('territory', 'compositor hold recovery failed:', String(recovered && recovered.error || '').slice(0, 240));
+      return;
+    }
+    visualShiftByPid.set(current.pid, {
+      dx, dy: entry.dy,
+      targetWindowX: entry.targetWindowX,
+      windowX: current.x, windowY: current.y,
+      windowW: current.w, windowH: current.h,
+    });
+    log('territory', `compositor hold recovered for "${entry.rival.name}"`);
   }
 
   async function applyVisualShift(rival, dx, dy = 0) {
@@ -1344,6 +1421,7 @@ function createTerritory(hooks) {
     }
     activeDrags.clear();
     for (const [pid, entry] of activeWarps) {
+      entry.stopping = true;
       try { entry.child.kill('SIGKILL'); } catch {}
       if (dragHelperBin) {
         const r = entry.rival;
@@ -1380,11 +1458,14 @@ module.exports = {
   visualAtEdge,
   visualAtEdgeInDirection,
   visualShiftMatches,
+  visualShiftOffset,
   interpolateFrame,
   chatGPTVisualBounds,
   chatGPTDragCandidates,
   parseDragHelperResult,
   parseProbeHelperResult,
+  parseWarpHelperLine,
+  warpHoldNeedsRecovery,
   standX,
   DEFAULT_RIVALS,
   HOST_RIVALS,
