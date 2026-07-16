@@ -119,12 +119,32 @@ check('SessionStart→prompt→tool→complete 全链路', () => {
   assert.strictEqual(core.updates[1].state, 'thinking');
   assert.strictEqual(core.updates[3].state, 'working');
   assert.strictEqual(core.updates[3].fields.toolName, 'Bash');
+  // 工具结果落盘 = 模型在琢磨下一步 → thinking（状态要跟着 Codex 的 working⇄thinking 走）
+  assert.strictEqual(core.updates[4].state, 'thinking');
   assert.strictEqual(core.updates[5].state, 'attention');
   assert.strictEqual(core.updates[5].fields.assistantLastOutput, '测试全绿 ✅');
   assert.ok(core.updates.every((u) => u.fields.agentId === 'codex'));
   assert.strictEqual(core.ctx.length, 1);
   assert.strictEqual(core.ctx[0].cu.percent, 10);
   assert.strictEqual(limits.usedPercent, 12);
+});
+
+check('working⇄thinking 跟随：reasoning/agent_reasoning → thinking，再开工具 → working', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-2026-07-11T05-30-00-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B));
+  fs.appendFileSync(fp,
+    line({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command' } }) +
+    line({ type: 'response_item', payload: { type: 'function_call_output' } }) +
+    line({ type: 'event_msg', payload: { type: 'agent_reasoning', text: '想一想…' } }) +
+    line({ type: 'response_item', payload: { type: 'reasoning' } }) +
+    line({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command' } }));
+  w.tick();
+  const states = core.updates.slice(1).map((u) => u.state); // 掐掉 SessionStart
+  assert.deepStrictEqual(states, ['working', 'thinking', 'thinking', 'thinking', 'working']);
 });
 
 check('turn_aborted → TurnAborted(idle)；approval → Notification', () => {

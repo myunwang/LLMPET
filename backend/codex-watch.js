@@ -12,8 +12,9 @@
 //   session_meta            → SessionStart(idle)   仅运行期间新建的文件
 //   user_message            → UserPromptSubmit(thinking) + 情绪嗅探
 //   task_started            → TaskStarted(thinking) 清完成徽标
-//   function_call / custom_tool_call / web_search_call → PreToolUse(working)
-//   *_output / patch_apply_end / mcp_tool_call_end     → PostToolUse(working)
+//   function_call / custom_tool_call / web_search_call → PreToolUse(working=工具在跑)
+//   *_output / patch_apply_end / mcp_tool_call_end     → PostToolUse(thinking=琢磨下一步)
+//   reasoning / agent_reasoning                        → thinking
 //   task_complete            → Stop(attention) + assistant_last_output → 庆祝+气泡
 //   turn_aborted             → TurnAborted(idle) → 「中断」徽标
 //   context_compacted        → PreCompact(sweeping)
@@ -262,6 +263,10 @@ function createCodexWatch(deps) {
 
     if (type === 'compacted') { update(t, 'sweeping', 'PreCompact'); return; }
 
+    // rollout 是「事项完成才落盘」：一行的含义是“这件事刚做完、下一件开始了”。
+    // 所以 function_call 落盘 = 工具正在跑(working)；*_output 落盘 = 工具跑完、
+    // 模型开始琢磨下一步(thinking)；reasoning 落盘 = 想完了马上要动手（很快被
+    // 下一个 function_call 顶掉）。这样宠物状态才跟得上 Codex UI 的 working⇄thinking。
     if (type === 'response_item') {
       const pt = p.type;
       if (pt === 'function_call' || pt === 'custom_tool_call') {
@@ -271,9 +276,10 @@ function createCodexWatch(deps) {
         t.lastTool = 'WebSearch';
         update(t, 'working', 'PreToolUse', { toolName: 'WebSearch' });
       } else if (pt === 'function_call_output' || pt === 'custom_tool_call_output') {
-        update(t, 'working', 'PostToolUse', { toolName: t.lastTool || null });
+        update(t, 'thinking', 'PostToolUse', { toolName: t.lastTool || null });
+      } else if (pt === 'reasoning') {
+        update(t, 'thinking', 'Reasoning');
       }
-      // message/reasoning：正文与思考不改状态（agent_message/token_count 已覆盖）
       return;
     }
 
@@ -322,17 +328,22 @@ function createCodexWatch(deps) {
       case 'context_compacted':
         update(t, 'sweeping', 'PreCompact');
         break;
+      // *_end = 工具刚跑完 → 模型接下来在想（与 *_output 同语义，映射 thinking）
       case 'patch_apply_end':
         if (p.success === false) update(t, 'error', 'PostToolUseFailure', { toolName: 'Edit' });
-        else update(t, 'working', 'PostToolUse', { toolName: 'Edit' });
+        else update(t, 'thinking', 'PostToolUse', { toolName: 'Edit' });
         break;
       case 'mcp_tool_call_end':
-        update(t, 'working', 'PostToolUse', {
+        update(t, 'thinking', 'PostToolUse', {
           toolName: (p.invocation && p.invocation.tool) ? String(p.invocation.tool) : 'Tool',
         });
         break;
       case 'web_search_end':
-        update(t, 'working', 'PostToolUse', { toolName: 'WebSearch' });
+        update(t, 'thinking', 'PostToolUse', { toolName: 'WebSearch' });
+        break;
+      // agent_reasoning：一段思考文本产出完毕，回合仍在推进 → thinking
+      case 'agent_reasoning':
+        update(t, 'thinking', 'Reasoning');
         break;
       case 'token_count': {
         const cu = toContextUsage(p.info);
