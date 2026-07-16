@@ -50,6 +50,24 @@ function render(s) {
     $('budget-wrap').classList.add('hidden');
   }
 
+  // Codex 套餐额度条（rollout 的 rate_limits；没有 Codex 活动时整块隐藏）
+  const rl = s.codexLimits;
+  if (rl && rl.usedPercent != null) {
+    $('codex-wrap').classList.remove('hidden');
+    const pct = Math.max(0, Math.min(100, rl.usedPercent));
+    $('codex-pct').textContent = pct.toFixed(0) + '%';
+    const cfill = $('codex-fill');
+    cfill.style.width = pct + '%';
+    cfill.classList.toggle('warn', pct >= 80);
+    const bits = [];
+    if (rl.resetsAt) bits.push(timeStr(rl.resetsAt) + ' 重置');
+    if (rl.secondaryUsedPercent != null) bits.push('周窗口 ' + Math.round(rl.secondaryUsedPercent) + '%');
+    if (rl.planType) bits.push(rl.planType + ' 套餐');
+    $('codex-foot').textContent = bits.join(' · ');
+  } else {
+    $('codex-wrap').classList.add('hidden');
+  }
+
   // token 明细
   $('t-in').textContent = fmt(s.today.input);
   $('t-out').textContent = fmt(s.today.output);
@@ -210,6 +228,12 @@ function renderCal(daily) {
   if (cr) cr.innerHTML = calSummary;
 }
 
+// 会话来源小图标：Claude 橙 burst / Codex 绿终端块（与桌宠 HUD 同款）
+const AGENT_ICON = {
+  claude: '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>',
+  codex: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#10a37f"/><path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+};
+
 function renderSessList(sessions) {
   const el = $('sess-list');
   if (!sessions.length) {
@@ -228,7 +252,9 @@ function renderSessList(sessions) {
         : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || '等你回复')
         : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
         : escapeHtml(m.label);
-      return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
+      const icon = AGENT_ICON[s.agent] || AGENT_ICON.claude;
+      const who = s.agent === 'codex' ? 'Codex' : 'Claude';
+      return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-agent" title="${who}">${icon}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
     })
     .join('');
 }

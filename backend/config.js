@@ -21,6 +21,9 @@ const DEFAULTS = Object.freeze({
   permHook: true,         // whether the blocking permission HTTP hook is active
   territory: false,       // 领地模式:发现别的桌宠就顶到屏幕边上(macOS,需辅助功能权限)
   territoryRivals: [],    // 用户自定义的对手进程名特征(叠加在内置名单上)
+  petMode: 'single',      // 'single' 一只宠监控全部后端 | 'duo' Claude/Codex 各一只
+  skinCodex: 'cat',       // 双宠模式里 Codex 宠的形象（和主形象错开才认得出谁是谁）
+  petPositionCodex: null, // {x,y} | null — Codex 宠的落脚点
 });
 
 let cache = null;
@@ -42,6 +45,11 @@ function sanitize(raw) {
       .filter((s) => typeof s === 'string' && s.trim())
       .map((s) => s.trim().slice(0, 64)) // 单条封顶:超长字符串没有匹配意义,还会拖慢 osascript
       .slice(0, 30);
+  }
+  if (raw.petMode === 'duo' || raw.petMode === 'single') out.petMode = raw.petMode;
+  if (['mascot', 'pixel', 'cat'].includes(raw.skinCodex)) out.skinCodex = raw.skinCodex;
+  if (raw.petPositionCodex && Number.isFinite(raw.petPositionCodex.x) && Number.isFinite(raw.petPositionCodex.y)) {
+    out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }
   return out;
 }

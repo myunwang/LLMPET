@@ -86,6 +86,9 @@
         <span id="chip-window" title="近5小时消耗">5h $0.000</span>
       </div>
 
+      <!-- 双宠模式的名牌：这只宠盯的是哪个后端（单宠模式隐藏） -->
+      <div id="agent-tag" class="agent-tag hidden"></div>
+
       <!-- 记事本：有待办时章鱼举起它，点击看 todolist + 操作 -->
       <div id="notepad" class="notepad hidden" title="待办清单">
         <span class="np-icon">📋</span>
@@ -102,6 +105,7 @@
         <div class="sl-scroll" id="sl-rows"></div>
         <div class="sl-foot">
           <button id="sl-new">🚀 新开 Claude</button>
+          <button id="sl-new-codex" class="hidden">🛰️ 新开 Codex</button>
           <button id="sl-panel">📊 详情</button>
         </div>
       </div>

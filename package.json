@@ -11,7 +11,7 @@
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js"
   },
   "devDependencies": {
     "electron": "^33.2.0"

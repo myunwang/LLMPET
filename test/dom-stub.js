@@ -167,6 +167,9 @@ function createStubWorld() {
     isFinite,
     parseInt,
     parseFloat,
+    // pet.js 启动即读 ?agent=（双宠身份）；沙箱按单宠(all)跑
+    URLSearchParams,
+    location: { search: '' },
   };
   sandbox.globalThis = sandbox;
   return { sandbox, elements: byId, handlers, calls, clock, document, window };

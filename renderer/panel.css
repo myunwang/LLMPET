@@ -60,6 +60,8 @@ html, body {
 .bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; }
 .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #e8a06d, #d97757); border-radius: 6px; transition: width 0.4s ease; }
 .bar-fill.warn { background: linear-gradient(90deg, #e8896b, #c9472b); }
+.bar-fill.codex { background: linear-gradient(90deg, #35c99e, #10a37f); }
+.bar-fill.codex.warn { background: linear-gradient(90deg, #e8896b, #c9472b); }
 
 /* 区块 */
 .block { padding: 8px 16px; }
@@ -142,6 +144,8 @@ html, body {
 
 /* 进行中的任务 */
 .row.sess { align-items: center; gap: 8px; }
+.sess-agent { width: 13px; height: 13px; flex-shrink: 0; display: inline-flex; }
+.sess-agent svg { width: 100%; height: 100%; }
 .sess-proj { color: #ffd8bf; font-size: 12px; flex-shrink: 0; }
 .sess-op { color: #a9826f; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
 .badge { font-size: 10px; padding: 2px 7px; border-radius: 7px; color: #fff; flex-shrink: 0; }

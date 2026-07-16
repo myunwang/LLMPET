@@ -31,6 +31,16 @@
         </div>
       </section>
 
+      <!-- Codex 套餐窗口用量（有 Codex 会话时显示；来自 rollout 的 rate_limits） -->
+      <section id="codex-wrap" class="budget hidden">
+        <div class="budget-head">
+          <span>🛰️ Codex 额度（5h 窗口）</span>
+          <span id="codex-pct">0%</span>
+        </div>
+        <div class="bar"><div id="codex-fill" class="bar-fill codex"></div></div>
+        <div class="stat-foot" id="codex-foot"></div>
+      </section>
+
       <section id="budget-wrap" class="budget hidden">
         <div class="budget-head">
           <span>5h 预算</span>

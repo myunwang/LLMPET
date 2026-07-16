@@ -224,6 +224,25 @@ html, body {
 @keyframes chipFlash { 0% { background: #d97757; } 100% { background: rgba(61,42,32,0.82); } }
 .chip-sep { opacity: 0.5; }
 
+/* ---------- 双宠模式名牌：这只宠盯哪个后端（Claude 橙 / Codex 绿） ---------- */
+.agent-tag {
+  margin-top: 4px;
+  padding: 2px 9px 2px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  border-radius: 10px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  pointer-events: none; /* 纯标签：不能挡命中测试，否则会让身下的宠物点不到 */
+}
+.agent-tag.hidden { display: none; }
+.agent-tag .at-ic { width: 13px; height: 13px; display: inline-flex; }
+.agent-tag .at-ic svg { width: 100%; height: 100%; }
+.agent-tag.claude { background: rgba(217, 119, 87, 0.22); color: #ffb495; border: 1px solid rgba(217, 119, 87, 0.45); }
+.agent-tag.codex { background: rgba(16, 163, 127, 0.2); color: #7fe0c3; border: 1px solid rgba(16, 163, 127, 0.45); }
+
 /* ---------- 皮肤切换：默认图标款章鱼（mascot），可切像素怪兽（pixel）/ 月薪喵（cat） ---------- */
 #pixel { display: none; }
 #cat { display: none; }

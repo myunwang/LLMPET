@@ -19,13 +19,21 @@ const TOOL_ICON = {
   Read: '📖', Bash: '⚙️', Grep: '🔍', Glob: '🔍',
   WebSearch: '🌐', WebFetch: '🌐', Task: '🤖', Agent: '🤖',
   TodoWrite: '✅',
+  // Codex 专属工具（codex-watch 归一化后的词）；exec/apply_patch 等已映射到上面的既有词
+  Js: '🧮', Wait: '⏳',
 };
 const TOOL_LABEL = {
   Edit: '编辑文件', MultiEdit: '编辑文件', Write: '写文件', NotebookEdit: '编辑笔记本',
   Read: '读取文件', Bash: '运行命令', Grep: '搜索代码', Glob: '查找文件',
   WebSearch: '联网搜索', WebFetch: '抓取网页', Task: '派出子 agent', Agent: '派出子 agent',
   TodoWrite: '更新待办',
+  Js: '跑 JS 代码', Wait: '等命令输出',
 };
+
+// core 的 agentId → 前端的 agent 短词（会话行图标 / 事件路由按这个分流）
+function agentOf(entry) {
+  return entry && entry.agentId === 'codex' ? 'codex' : 'claude';
+}
 
 function toolIcon(tool) { return TOOL_ICON[tool] || '🔧'; }
 function toolLabel(tool) { return TOOL_LABEL[tool] || tool || '处理中'; }
@@ -203,12 +211,13 @@ function buildElicitationChoice(perm, entry) {
 
 // "Claude asked something / wants a reply" → read-only context + 去回复 button.
 function buildContinueChoice(entry) {
+  const who = agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
   return {
     kind: 'continue',
     sessionId: entry.id,
     project: projectName(entry),
     header: '',
-    question: entry.assistantLastOutput ? clip(entry.assistantLastOutput, 120) : 'Claude 在等你回复',
+    question: entry.assistantLastOutput ? clip(entry.assistantLastOutput, 120) : `${who} 在等你回复`,
     options: [],
     multi: false,
     allowInput: false,
@@ -271,6 +280,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 
     return {
       project: projectName(e),
+      agent: agentOf(e),
       state,
       reason,
       idleMs: e.idleMs,
@@ -358,6 +368,8 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     idleMs: snapshot.idleMs,
     bg: { running: 0, zombie: 0, total: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
+    // Codex 套餐配额（5h/周窗口 used%）——Codex 没有逐 token 价目，配额比 $ 更真实
+    codexLimits: (opts && opts.codexLimits) || null,
     ts: snapshot.ts,
   };
 }
@@ -445,6 +457,9 @@ function activityToEvents(act) {
     default:
       break;
   }
+  // 每个事件都带上来源 agent：双宠模式按它把事件路由到对应的桌宠窗口
+  const agent = agentOf(session);
+  for (const ev of out) ev.agent = agent;
   return out;
 }
 
@@ -462,6 +477,7 @@ function countRecentOps(session) {
 module.exports = {
   buildPetStats,
   activityToEvents,
+  agentOf,
   buildPermChoice,
   buildElicitationChoice,
   buildPlanChoice,
