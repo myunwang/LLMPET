@@ -4,6 +4,8 @@
 
 共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。整个项目以 **MIT** 开源，仅对接 Claude Code 的公开 hook 接口。
 
+**贡献者**：[@james6666-max](https://github.com/james6666-max) — Windows 平台支持：「去回复」窗口聚焦、终端 pid 链解析与缓存、electron-builder 打包链路、CI Windows 测试矩阵（[PR #6](https://github.com/myunwang/LLMPET/pull/6)）。欢迎更多 PR！
+
 ### 月薪喵皮肤 × 状态
 
 | 表情 | 状态 | 什么时候出现 |
