@@ -1344,7 +1344,11 @@ const MENU = [
   { ic: 'doc',    label: '日志', act: () => window.pet.openLog() },
   { ic: 'search', label: '巡视', when: () => territorySupported, act: () => window.pet.territoryRunNow() },
   { ic: 'bell',   label: '静音', act: () => window.pet.toggleMute() },
-  { ic: 'power',  label: '退出', act: () => window.pet.quit() },
+  // 双宠模式下「退出」只收起自己这只（独立事件，另一只照常干活）；
+  // 整个 app 的退出走托盘。单宠模式保持原语义：退出 app。
+  AGENT === 'all'
+    ? { ic: 'power', label: '退出', act: () => window.pet.quit() }
+    : { ic: 'power', label: '收起', act: () => window.pet.closePet() },
 ];
 
 function toggleSkin() {

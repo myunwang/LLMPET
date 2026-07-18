@@ -173,21 +173,29 @@ function makePetWindow(agent) {
 
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
   const st = { agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true };
-  petState.set(win.webContents.id, st);
-  win.on('closed', () => { petState.delete(win.webContents.id); });
+  // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
+  // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
+  const wcId = win.webContents.id;
+  petState.set(wcId, st);
+  win.on('closed', () => {
+    petState.delete(wcId);
+    if (petWin === win) petWin = null;
+    if (petWinCodex === win) petWinCodex = null;
+  });
 
+  // 注意读 st.agent 而非闭包 agent：单宠⇄双宠切换时主宠原地重载、身份会变
   win.on('moved', () => {
     if (st.customSize) return; // only persist the resting position
     if (win === petWin && (petGuided || petFrameGuided)) return; // 领地走位不算用户拖拽
     if (win.isDestroyed()) return;
     const b = win.getBounds();
-    config.save(agent === 'codex'
+    config.save(st.agent === 'codex'
       ? { petPositionCodex: { x: b.x, y: b.y } }
       : { petPosition: { x: b.x, y: b.y } });
   });
   win.webContents.on('did-finish-load', () => {
-    sendWin(win, 'pet:config', frontendConfig(agent));
-    if (core) sendWin(win, 'pet:stats', buildStats(agent));
+    sendWin(win, 'pet:config', frontendConfig(st.agent));
+    if (core) sendWin(win, 'pet:stats', buildStats(st.agent));
   });
   return win;
 }
@@ -415,13 +423,22 @@ function hardenWindow(win) {
 function sendWin(win, channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
-// sendPet = 发给主宠（领地/授权等主宠专属通道沿用它）
-function sendPet(channel, payload) { sendWin(petWin, channel, payload); }
+// 任一存活的宠物窗口：主宠被单独收起后，授权卡等重要消息兜底投递到还活着的那只
+function firstAlivePetWin() {
+  if (petWin && !petWin.isDestroyed()) return petWin;
+  if (petWinCodex && !petWinCodex.isDestroyed()) return petWinCodex;
+  return null;
+}
+// sendPet = 发给主宠（领地/授权等主宠专属通道沿用它）；主宠不在则兜底
+function sendPet(channel, payload) { sendWin(firstAlivePetWin(), channel, payload); }
 function sendPanel(channel, payload) { sendWin(panelWin, channel, payload); }
 
-// 事件按来源 agent 分流：双宠模式 codex 事件归 Codex 宠，其余归主宠。
+// 事件按来源 agent 分流：双宠模式 codex 事件归 Codex 宠（不在了就兜底主路），其余归主宠。
 function sendPetEvent(ev) {
-  if (petWinCodex && ev && ev.agent === 'codex') { sendWin(petWinCodex, 'pet:event', ev); return; }
+  if (ev && ev.agent === 'codex' && petWinCodex && !petWinCodex.isDestroyed()) {
+    sendWin(petWinCodex, 'pet:event', ev);
+    return;
+  }
   sendPet('pet:event', ev);
 }
 
@@ -556,7 +573,7 @@ function bootBackend() {
       // A parked permission needs the user's eyes. In menubar mode (or if the pet
       // was hidden) the ask panel would render into an invisible window and CC
       // would hang until the park times out — so surface the pet window first.
-      try { if (petWin && !petWin.isDestroyed() && !petWin.isVisible()) petWin.show(); } catch {}
+      try { const w = firstAlivePetWin(); if (w && !w.isVisible()) w.show(); } catch {}
       sendPetEvent({ kind, project: choice.project, reason, sessionId: entry.sessionId, choice, agent: 'claude', ts: Date.now() });
       scheduleEmit();
     },
@@ -651,6 +668,12 @@ function registerIpc() {
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
   ipcMain.on('quit-app', () => app.quit());
+  // 双宠模式：收起自己这只（独立事件——另一只和 app 都不受影响）；
+  // 托盘「显示桌宠」或勾选「Codex 桌宠」随时找回来。
+  ipcMain.on('close-pet', (e) => {
+    const st = stateOfSender(e.sender);
+    if (st && st.win && !st.win.isDestroyed()) st.win.close();
+  });
 
   ipcMain.on('launch-claude', () => {
     launchClaude({}).then((r) => {
@@ -772,15 +795,36 @@ function applySkin(skin, agent) {
   refreshTrayMenu();
 }
 
-// 单宠 ⇄ 双宠切换：销毁重建宠物窗口（窗口少、状态简单，重建比原地迁移可靠）
+// 补齐当前 petMode 应有的窗口（被单独收起的宠从托盘找回来）。主宠身份变化
+// (all⇄claude)时原地重载渲染器——不销毁窗口，位置不动、Codex 宠不闪。
+function ensurePetWindows() {
+  const duo = config.get().petMode === 'duo';
+  const primaryAgent = duo ? 'claude' : 'all';
+  if (!petWin || petWin.isDestroyed()) {
+    petWin = makePetWindow(primaryAgent);
+  } else {
+    const st = petState.get(petWin.webContents.id);
+    if (st && st.agent !== primaryAgent) {
+      st.agent = primaryAgent;
+      st.customSize = null; st.visualRect = null; st.uiBusy = false; st.mouseIgnoring = true;
+      petWin.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent: primaryAgent } });
+      applyPetSize(st);
+    }
+  }
+  if (duo) {
+    if (!petWinCodex || petWinCodex.isDestroyed()) petWinCodex = makePetWindow('codex');
+  } else if (petWinCodex) {
+    const gone = petWinCodex;
+    petWinCodex = null;
+    try { if (!gone.isDestroyed()) gone.destroy(); } catch {}
+  }
+}
+
+// 单宠 ⇄ 双宠切换（托盘复选「Codex 桌宠」）：勾选出现、取消隐藏
 function applyPetMode(petMode) {
   if (config.get().petMode === petMode) return;
   config.save({ petMode });
-  for (const st of petStates()) { try { st.win.destroy(); } catch {} }
-  petState.clear();
-  petWin = null;
-  petWinCodex = null;
-  createPetWindows();
+  ensurePetWindows();
   if (config.get().mode === 'menubar') { for (const st of petStates()) st.win.hide(); }
   broadcastConfig();
   refreshTrayMenu();
@@ -802,7 +846,7 @@ function buildTray() {
   tray = new Tray(img || nativeImage.createEmpty());
   tray.setToolTip('Octopus — Claude Code / Codex 桌宠');
   refreshTrayMenu();
-  tray.on('click', () => { for (const st of petStates()) st.win.show(); });
+  tray.on('click', () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); });
 }
 
 function refreshTrayMenu() {
@@ -816,13 +860,12 @@ function refreshTrayMenu() {
   const skinCodex = cfg.skinCodex || 'cat';
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '📊 详情面板', click: openPanel },
-    { label: '🐙 显示桌宠', click: () => { for (const st of petStates()) st.win.show(); } },
+    { label: '🐙 显示桌宠', click: () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); } },
+    // 复选开关：勾上 = 双宠（Codex 分身出现），取消 = 单宠（一只盯全部后端）
+    { label: '🛰️ Codex 桌宠', type: 'checkbox', checked: petMode === 'duo',
+      click: () => applyPetMode(config.get().petMode === 'duo' ? 'single' : 'duo') },
     { type: 'separator' },
     { label: '⚙️ 设置', enabled: false },
-    { label: '　分身', submenu: [
-      { label: '单宠 · 一只盯全部后端', type: 'radio', checked: petMode === 'single', click: () => applyPetMode('single') },
-      { label: '双宠 · Claude / Codex 各一只', type: 'radio', checked: petMode === 'duo', click: () => applyPetMode('duo') },
-    ] },
     { label: petMode === 'duo' ? '　形象（Claude 宠）' : '　形象', submenu: [
       { label: '章鱼', type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
       { label: '像素怪兽', type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },

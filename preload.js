@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('pet', {
   territoryRunNow: () => ipcRenderer.send('territory-run-now'),
   territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),
+  // 双宠模式：只收起自己这只宠（独立事件，另一只和 app 不受影响）
+  closePet: () => ipcRenderer.send('close-pet'),
   // 手动拖动窗口
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
