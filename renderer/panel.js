@@ -326,6 +326,8 @@ window.pet.onConfig((cfg) => {
   if (!cfg) return;
   config = { ...config, ...cfg };
   applyConfigUI();
+  // Round 8: provider info comes via pet:config (frontendConfig), not pet:stats
+  if (cfg.providers) applyProviderUI(cfg.providers);
 });
 
 $('close').addEventListener('click', () => window.pet.closePanel());
@@ -350,6 +352,48 @@ document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     window.pet.setBudget(config.budget5h);
   });
 }
+
+// Round 8: Provider 切换（Claude / CodeWhale / 双开）
+function applyProviderUI(providerInfo) {
+  if (!providerInfo) return;
+  const active = providerInfo.active || [];
+  const all = providerInfo.all || [];
+  // 决定当前选中态：单选 claude/codewhale，或双开 all
+  let current = 'all';
+  if (active.length === 1) current = active[0];
+  else if (active.length === 0) current = '';
+
+  document.querySelectorAll('#provider-seg .seg-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.provider === current);
+  });
+
+  const statusEl = $('provider-status');
+  if (statusEl) {
+    const parts = [];
+    if (all.includes('claude')) parts.push(active.includes('claude') ? '✅ Claude' : '⚪ Claude');
+    if (all.includes('codewhale')) parts.push(active.includes('codewhale') ? '✅ CodeWhale' : '⚪ CodeWhale');
+    if (providerInfo.cwHooksInstalled) parts.push('· CW hooks 已装');
+    statusEl.textContent = parts.join('  ') || '未配置';
+  }
+}
+
+// 监听 pet:stats 中的 provider 信息
+const _origRender = render;
+render = function(s) {
+  _origRender(s);
+  if (s && s.providers) applyProviderUI(s.providers);
+};
+
+document.querySelectorAll('#provider-seg .seg-btn').forEach((b) =>
+  b.addEventListener('click', () => {
+    const p = b.dataset.provider;
+    let ids;
+    if (p === 'all') ids = ['claude', 'codewhale'];
+    else ids = [p];
+    document.querySelectorAll('#provider-seg .seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+    if (window.pet && window.pet.setProviders) window.pet.setProviders(ids);
+  })
+);
 
 // 视图切换：24h / 日历
 document.querySelectorAll('.view-tabs .vt').forEach((b) =>

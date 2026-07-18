@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('pet', {
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),
   toggleMute: () => ipcRenderer.send('toggle-mute'),
+  // Round 8: provider list toggle
+  setProviders: (ids) => ipcRenderer.send('set-providers', ids),
   territoryRunNow: () => ipcRenderer.send('territory-run-now'),
   territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),
@@ -29,8 +31,12 @@ contextBridge.exposeInMainWorld('pet', {
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
   // 唤起 Claude 客户端
   launchClaude: () => ipcRenderer.send('launch-claude'),
+  // 唤起 CodeWhale 客户端
+  launchCodewhale: () => ipcRenderer.send('launch-codewhale'),
   // 原生授权：通过本地 HTTP server 回 CC 决策（allow/deny），不需按键/Accessibility
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
+  // Round 7: CodeWhale 权限决策路由到独立 IPC channel
+  decideCwPermission: (permId, behavior) => ipcRenderer.send('cw-permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
   // 左键主操作（非待处理情形）：由后端决定聚焦会话 / 开面板 / 新开 CLI

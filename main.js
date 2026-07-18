@@ -17,6 +17,15 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dia
 try { app.setName('octopus'); } catch {}
 try { app.setAppUserModelId('com.octopus.pet'); } catch {}
 
+// W4: Windows transparent-window fix. On some GPUs, a transparent + frameless
+// BrowserWindow renders with a black/gray background due to a Chromium compositing
+// bug (electron/electron#40515). Disabling HW acceleration before app.ready fixes
+// it. The CPU cost is negligible for a desktop pet (simple GIF/SVG animations).
+// macOS/Linux keep GPU compositing (better animation smoothness, no known bug).
+if (process.platform === 'win32') {
+  try { app.disableHardwareAcceleration(); } catch {}
+}
+
 const config = require('./backend/config');
 const { log, LOG_PATH } = require('./backend/log');
 const { createCore } = require('./backend/core');
@@ -30,6 +39,7 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude } = require('./backend/launch');
 const transport = require('./backend/transport');
+const { getActiveProviders, getActiveIds, is_active, ALL_IDS, invalidate } = require('./providers');
 
 const PRELOAD = path.join(__dirname, 'preload.js');
 const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
@@ -42,6 +52,8 @@ let core = null;
 let metering = null;
 let pricingSync = null;
 let permissions = null;
+let cwPermissions = null;  // CodeWhale permission holder (Round 6)
+let cwMetering = null;     // CodeWhale metering (Round 7-b)
 let server = null;
 let stopWatcher = null;
 let territory = null;
@@ -70,8 +82,31 @@ function frontendConfig() {
     permHook: c.permHook,
     territory: c.territory,
     territorySupported: process.platform === 'darwin', // 渲染端据此隐藏「巡视」菜单
+    // Round 8: provider info for the panel UI.
+    // Round 9-b: cwHooksInstalled reflects whether our TOML entries are
+    // currently present in ~/.codewhale/config.toml (read fresh each call).
+    providers: {
+      active: getActiveIds(),
+      all: getAllProviderIds(),
+      cwHooksInstalled: getCwHookStatus(),
+    },
   };
 }
+
+// Round 9-b: probe codewhale hook registration status.
+// Safe to call even when codewhale provider is inactive or config.toml absent.
+function getCwHookStatus() {
+  try {
+    const cw = require('./providers/codewhale');
+    if (typeof cw.markerPresent === 'function') return !!cw.markerPresent();
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Round 8: convenience alias for the renderer.
+function getAllProviderIds() { return ALL_IDS; }
 
 // ── window geometry ───────────────────────────────────────────────────────────
 // customSize is set by the renderer to fit an open popup exactly (dynamic
@@ -83,6 +118,11 @@ function targetSize() {
   return { w: BASE_W, h: BASE_H };
 }
 
+// Stable anchor for the pet window's bottom-center, set when the user drags
+// or on first placement. applyPetSize() resizes around this anchor instead of
+// recomputing from current bounds (which jitters when popups open/close).
+let petAnchor = null; // { cx, bottom } in screen coords, or null = use current bounds
+
 function applyPetSize() {
   if (!petWin || petWin.isDestroyed()) return;
   const { w } = targetSize();
@@ -93,16 +133,17 @@ function applyPetSize() {
   try {
     const wa = screen.getDisplayMatching(b).workArea;
     h = Math.min(h, wa.height);
-    const cx = b.x + b.width / 2;
-    const bottom = b.y + b.height;
-    let x = Math.round(cx - w / 2);
-    let y = Math.round(bottom - h);
+    // Use stable anchor if available; otherwise seed it from current bounds.
+    if (!petAnchor) petAnchor = { cx: b.x + b.width / 2, bottom: b.y + b.height };
+    let x = Math.round(petAnchor.cx - w / 2);
+    let y = Math.round(petAnchor.bottom - h);
     x = Math.min(Math.max(x, wa.x), wa.x + wa.width - w);
     y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
     petWin.setBounds({ x, y, width: w, height: h });
   } catch {
-    const bottom = b.y + b.height;
-    petWin.setBounds({ x: b.x, y: Math.round(bottom - h), width: w, height: h });
+    const bottom = petAnchor ? petAnchor.bottom : (b.y + b.height);
+    const cx = petAnchor ? petAnchor.cx : (b.x + b.width / 2);
+    petWin.setBounds({ x: Math.round(cx - w / 2), y: Math.round(bottom - h), width: w, height: h });
   }
 }
 
@@ -309,60 +350,24 @@ function bootTerritory() {
 }
 
 let lastPermDialogAt = 0; // 引导框节流:授权缓存未刷新时也不能反复骚扰
-let axGrantWatchTimer = null; // 引导用户去设置后轮询复检授权,到位即自动开跑
-const AX_SETTINGS_URL =
-  'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
-
-function isAxTrusted() {
-  if (process.platform !== 'darwin') return false;
-  try { return systemPreferences.isTrustedAccessibilityClient(false); } catch { return false; }
-}
-
-// 引导用户点开「辅助功能」设置后,不再让他「退出重开」——轮询复检,一旦授权到位
-// 就自动巡视一次并给出成功反馈。限时 90s / 已授权即停,避免常驻定时器。
-function startAxGrantWatch() {
-  if (axGrantWatchTimer) return;
-  const deadline = Date.now() + 90 * 1000;
-  axGrantWatchTimer = setInterval(() => {
-    if (isAxTrusted()) {
-      clearInterval(axGrantWatchTimer);
-      axGrantWatchTimer = null;
-      log('territory', 'accessibility granted — auto patrol');
-      sendPet('pet:event', { kind: 'territory', phase: 'granted', ts: Date.now() });
-      if (territory) territory.runNow().catch((e) => log('territory', 'post-grant scan failed:', e.message));
-    } else if (Date.now() > deadline) {
-      clearInterval(axGrantWatchTimer);
-      axGrantWatchTimer = null;
-    }
-  }, 1500);
-  if (axGrantWatchTimer.unref) axGrantWatchTimer.unref();
-}
-
 function ensureTerritoryPermission() {
   if (process.platform !== 'darwin') return false;
-  const trusted = isAxTrusted();
+  let trusted = false;
+  try { trusted = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
   log('territory', `accessibility preflight trusted=${trusted}`);
-  if (trusted) return true;
-  if (Date.now() - lastPermDialogAt <= 15 * 60 * 1000) return false;
-  lastPermDialogAt = Date.now();
-  // prompt=true 让系统把本 app 加入「辅助功能」列表(即便还没勾选),用户到设置里
-  // 才有可勾的条目。
-  try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
-  dialog.showMessageBox({
-    type: 'info',
-    message: '巡视桌宠需要「辅助功能」权限',
-    detail: '小章鱼要移动别的桌宠窗口，才能把闯进地盘的它顶到屏幕边上。\n' +
-      '点「打开辅助功能设置」，在列表里勾选 Octopus 即可——授权成功会自动开始巡视，不用退出重开。',
-    buttons: ['打开辅助功能设置', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  }).then(({ response }) => {
-    if (response === 0) {
-      shell.openExternal(AX_SETTINGS_URL).catch(() => {});
-      startAxGrantWatch();
-    }
-  }).catch(() => {});
-  return false;
+  if (!trusted && Date.now() - lastPermDialogAt > 15 * 60 * 1000) {
+    lastPermDialogAt = Date.now();
+    // 推别人的窗口要走辅助功能 API;prompt=true 弹系统引导框并把本 app 加入列表
+    try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
+    dialog.showMessageBox({
+      type: 'info',
+      message: '巡视桌宠需要「辅助功能」权限',
+      detail: '小章鱼需要移动对方的窗口，才能把它顶到屏幕边上。\n' +
+        '请在 系统设置 → 隐私与安全性 → 辅助功能 里勾选 Octopus。\n' +
+        '首次授权后如果本轮仍提示，请完全退出 Octopus 再重新打开一次。',
+    }).catch(() => {});
+  }
+  return trusted;
 }
 
 function runTerritoryNow() {
@@ -412,8 +417,81 @@ function sendPanel(channel, payload) {
 
 function buildStats() {
   const snapshot = core.buildSnapshot();
-  const meter = metering ? metering.getStats() : null;
-  return adapter.buildPetStats(snapshot, permissions.getPending(), meter, { lastOps: recentOps.slice(0, 30) });
+  let meter = metering ? metering.getStats() : null;
+  // Round 7-b: merge CodeWhale metering into Claude metering.
+  if (cwMetering) {
+    const cw = cwMetering.getStats();
+    meter = mergeMetering(meter, cw);
+  }
+  // Round 6: merge CodeWhale pending permissions into the same pending list.
+  const allPending = permissions.getPending();
+  if (cwPermissions) {
+    const cwPending = cwPermissions.getPending().map((p) => ({
+      ...p,
+      isElicitation: false,
+      suggestions: [],
+    }));
+    allPending.push(...cwPending);
+  }
+  return adapter.buildPetStats(snapshot, allPending, meter, { lastOps: recentOps.slice(0, 30) });
+}
+
+// Round 7-b: merge CodeWhale metering stats into Claude metering stats.
+// Both use the same aggregate shape { today, window5h, byModel, hourly, daily }.
+function mergeMetering(claude, cw) {
+  if (!cw) return claude;
+  const c = claude || {};
+  // today: sum token/cost fields
+  const ct = c.today || {};
+  const cwt = cw.today || {};
+  const today = {
+    input: (ct.input || 0) + (cwt.input || 0),
+    output: (ct.output || 0) + (cwt.output || 0),
+    cacheCreate: (ct.cacheCreate || 0) + (cwt.cacheCreate || 0),
+    cacheRead: (ct.cacheRead || 0) + (cwt.cacheRead || 0),
+    tokens: (ct.tokens || 0) + (cwt.tokens || 0),
+    cost: (ct.cost || 0) + (cwt.cost || 0),
+    msgs: (ct.msgs || 0) + (cwt.msgs || 0),
+  };
+  // window5h: sum cost/tokens, keep earliest start/latest reset
+  const cw5 = c.window5h || {};
+  const cww5 = cw.window5h || {};
+  const window5h = {
+    cost: (cw5.cost || 0) + (cww5.cost || 0),
+    tokens: (cw5.tokens || 0) + (cww5.tokens || 0),
+    startTs: Math.min(cw5.startTs || Infinity, cww5.startTs || Infinity) || 0,
+    resetTs: Math.max(cw5.resetTs || 0, cww5.resetTs || 0),
+  };
+  // byModel: merge per-model entries
+  const byModel = { ...c.byModel };
+  for (const [model, v] of Object.entries(cw.byModel || {})) {
+    const prev = byModel[model] || { cost: 0, tokens: 0, msgs: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+    byModel[model] = {
+      cost: (prev.cost || 0) + (v.cost || 0),
+      tokens: (prev.tokens || 0) + (v.tokens || 0),
+      msgs: (prev.msgs || 0) + (v.msgs || 0),
+      input: (prev.input || 0) + (v.input || 0),
+      output: (prev.output || 0) + (v.output || 0),
+      cacheCreate: (prev.cacheCreate || 0) + (v.cacheCreate || 0),
+      cacheRead: (prev.cacheRead || 0) + (v.cacheRead || 0),
+    };
+  }
+  // hourly: element-wise sum (today's 24 bars)
+  const hourly = new Array(24).fill(0);
+  const ch = c.hourly || [];
+  const cwh = cw.hourly || [];
+  for (let i = 0; i < 24; i++) hourly[i] = (ch[i] || 0) + (cwh[i] || 0);
+  // daily: sum per-day cost/tokens/msgs
+  const daily = { ...c.daily };
+  for (const [k, v] of Object.entries(cw.daily || {})) {
+    const prev = daily[k] || { cost: 0, tokens: 0, msgs: 0 };
+    daily[k] = {
+      cost: (prev.cost || 0) + (v.cost || 0),
+      tokens: (prev.tokens || 0) + (v.tokens || 0),
+      msgs: (prev.msgs || 0) + (v.msgs || 0),
+    };
+  }
+  return { today, window5h, byModel, hourly, daily };
 }
 
 // Record operation/say events into the ring the panel renders as the op stream.
@@ -513,21 +591,49 @@ function bootBackend() {
   });
   server.start();
 
+  // Round 6: grab CodeWhale sub-modules from server for main.js wiring.
+  cwPermissions = server.getCwPermissions ? server.getCwPermissions() : null;
+  cwMetering = server.getCwMetering ? server.getCwMetering() : null;
+
   // Install hooks once the server has a port (defer so listen wins the race).
   // OCTOPUS_NO_HOOKS=1 skips touching ~/.claude/settings.json (dev/verify mode).
   setTimeout(() => {
     if (process.env.OCTOPUS_NO_HOOKS === '1') {
-      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude Code hook install');
+      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping all hook installs');
       return;
     }
     const port = server.getPort();
-    if (port) {
-      hooks.install(port);
-      stopWatcher = hooks.startWatcher(() => server.getPort());
-    } else {
+    if (!port) {
       log('main', 'server has no port — hooks not installed (ports busy?)');
+      return;
+    }
+    // Claude Code hooks (original behavior, always installed).
+    hooks.install(port);
+    stopWatcher = hooks.startWatcher(() => server.getPort());
+
+    // Round 6: CodeWhale TOML hooks (only if codewhale provider is active).
+    if (is_active('codewhale')) {
+      try {
+        const cwProvider = require('./providers/codewhale');
+        const result = cwProvider.installHooks();
+        log('main', 'CodeWhale hooks installed:', JSON.stringify(result));
+      } catch (e) {
+        log('main', 'CodeWhale hook install failed (non-fatal):', e.message);
+      }
     }
   }, 400);
+
+  // Round 6: Wire CodeWhale permission onAdded callback so the UI gets notified.
+  if (cwPermissions && typeof cwPermissions.setOnAdded === 'function') {
+    cwPermissions.setOnAdded((entry) => {
+      const lite = (() => { const s = core.getSession(entry.sessionId); return s ? toEntryLite(s) : null; })();
+      const choice = adapter.buildPermChoice(
+        { id: entry.id, sessionId: entry.sessionId, toolName: entry.toolName, toolInput: entry.toolInput, suggestions: [], provider: 'codewhale' }, lite);
+      try { if (petWin && !petWin.isDestroyed() && !petWin.isVisible()) petWin.show(); } catch {}
+      sendPet('pet:event', { kind: 'waiting', project: lite ? lite.project : null, reason: '授权(CW)', sessionId: entry.sessionId, choice, ts: Date.now() });
+      scheduleEmit();
+    });
+  }
 
   // Periodic refresh so idle→sleeping transitions + cost updates reach the UI.
   statsTimer = setInterval(emitStats, 4000);
@@ -552,7 +658,10 @@ function registerIpc() {
   ipcMain.on('set-win-pos', (_e, x, y) => {
     if (petWin && !petWin.isDestroyed() && Number.isFinite(x) && Number.isFinite(y)) {
       const b = petWin.getBounds();
-      petWin.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
+      const nx = Math.round(x), ny = Math.round(y);
+      petWin.setBounds({ x: nx, y: ny, width: b.width, height: b.height });
+      // Update the stable anchor so future resize keeps the new bottom-center.
+      petAnchor = { cx: nx + b.width / 2, bottom: ny + b.height };
     }
   });
 
@@ -574,6 +683,47 @@ function registerIpc() {
   ipcMain.on('set-skin', (_e, skin) => applySkin(skin));
   ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
+  // Round 8: provider toggle from panel.
+  // Round 9-a: live hook install/uninstall (no restart needed).
+  ipcMain.on('set-providers', (_e, ids) => {
+    if (!Array.isArray(ids)) return;
+    const prevActive = getActiveIds(); // capture BEFORE invalidate
+    config.save({ providers: ids });
+    invalidate(); // bust provider registry cache
+    broadcastConfig(); // immediate UI feedback for checkbox state
+    refreshTrayMenu();
+    log('main', 'providers changed to:', ids.join(', '));
+
+    // R9-a: live hook install/uninstall so users don't need to restart.
+    if (process.env.OCTOPUS_NO_HOOKS === '1') return;
+    const port = server && server.getPort ? server.getPort() : null;
+    if (!port) return;
+
+    const cwWasActive = prevActive.includes('codewhale');
+    const cwNowActive = is_active('codewhale');
+
+    if (!cwWasActive && cwNowActive) {
+      // Activate: install CW TOML hooks immediately.
+      try {
+        const cwProvider = require('./providers/codewhale');
+        const result = cwProvider.installHooks();
+        log('main', 'CodeWhale hooks installed (live):', JSON.stringify(result));
+      } catch (e) {
+        log('main', 'CodeWhale live hook install failed (non-fatal):', e.message);
+      }
+      broadcastConfig(); // refresh cwHooksInstalled indicator
+    } else if (cwWasActive && !cwNowActive) {
+      // Deactivate: uninstall CW TOML hooks (with backup).
+      try {
+        const cwProvider = require('./providers/codewhale');
+        const result = cwProvider.uninstallHooks({ backup: true });
+        log('main', 'CodeWhale hooks uninstalled (live):', JSON.stringify(result));
+      } catch (e) {
+        log('main', 'CodeWhale live hook uninstall failed (non-fatal):', e.message);
+      }
+      broadcastConfig(); // refresh cwHooksInstalled indicator
+    }
+  });
   ipcMain.on('territory-run-now', runTerritoryNow);
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
@@ -585,8 +735,23 @@ function registerIpc() {
     }).catch((e) => log('main', 'launch claude error:', e.message));
   });
 
+  ipcMain.on('launch-codewhale', () => {
+    try {
+      const cw = require('./providers/codewhale');
+      cw.launch({}).then((r) => {
+        if (!r.ok) log('main', 'launch codewhale failed:', r.message);
+      }).catch((e) => log('main', 'launch codewhale error:', e.message));
+    } catch (e) {
+      log('main', 'launch codewhale error:', e.message);
+    }
+  });
+
   ipcMain.on('permission-decide', (_e, permId, behavior) => {
     permissions.decide(permId, behavior);
+  });
+  // Round 6: CodeWhale permission decisions from the renderer.
+  ipcMain.on('cw-permission-decide', (_e, permId, behavior) => {
+    if (cwPermissions) cwPermissions.decide(permId, behavior);
   });
   ipcMain.on('focus-session', (_e, sessionId) => {
     focusSession(core.getSession(sessionId));
@@ -597,10 +762,20 @@ function registerIpc() {
   // this because only it knows pid liveness / headless / platform:
   //   • a focusable session exists  → focus the most relevant one
   //   • sessions exist but none focusable (no pid / closed / non-mac) → open panel
-  //   • no sessions at all → launch a fresh CLI
+  //   • no sessions at all → launch a fresh CLI (Claude or CodeWhale depending on active provider)
   ipcMain.on('primary-action', async () => {
     const all = core ? [...core.sessions.values()] : [];
-    if (!all.length) { launchClaude({}).catch(() => {}); return; }
+    if (!all.length) {
+      // Round 6: launch the first active provider's CLI.
+      const providers = getActiveProviders();
+      const p = providers && providers[0];
+      if (p && p.id !== 'claude' && typeof p.launch === 'function') {
+        p.launch({}).catch((e) => log('main', `launch ${p.id} error:`, e.message));
+      } else {
+        launchClaude({}).catch(() => {});
+      }
+      return;
+    }
     const focusables = all
       .filter((s) => !s.headless && s.sourcePid)
       .sort((a, b) => {
@@ -678,16 +853,26 @@ function applyBudget(v) {
 }
 
 // ── tray ──────────────────────────────────────────────────────────────────────
+const { getTrayIconPath, ensureTrayIcon } = require('./backend/tray-icon');
 function buildTray() {
   let img;
   try {
-    img = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
+    // W5: cross-platform icon — win32 prefers a generated multi-size .ico
+    // (better taskbar/DPI adaptation), darwin/linux use tray.png.
+    img = nativeImage.createFromPath(getTrayIconPath());
     if (process.platform === 'darwin') img.setTemplateImage(true);
   } catch {}
   tray = new Tray(img || nativeImage.createEmpty());
   tray.setToolTip('Octopus — Claude Code 桌宠');
   refreshTrayMenu();
   tray.on('click', () => { if (petWin) petWin.show(); });
+  // W5: on Windows, async-generate/refresh the .ico and live-swap the tray
+  // image. No-op on darwin/linux (ensureTrayIcon resolves null immediately).
+  ensureTrayIcon().then((icoPath) => {
+    if (icoPath && tray) {
+      try { tray.setImage(nativeImage.createFromPath(icoPath)); } catch {}
+    }
+  }).catch(() => {});
 }
 
 function refreshTrayMenu() {
@@ -728,6 +913,12 @@ function refreshTrayMenu() {
     { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
     { type: 'separator' },
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
+    ...(is_active('codewhale') ? [
+      { label: '🐋 唤起 CodeWhale', click: () => {
+        const cw = require('./providers/codewhale');
+        cw.launch({}).catch((e) => log('main', 'launch codewhale error:', e.message));
+      }},
+    ] : []),
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
     { label: '🧹 卸载 Claude 钩子', click: () => {
@@ -736,7 +927,7 @@ function refreshTrayMenu() {
       try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
       hooks.uninstall();
     } },
-    { label: '⏻ 退出', click: () => app.quit() },
+    { label: '🚪 退出', click: () => app.quit() },
   ]));
 }
 
@@ -811,6 +1002,7 @@ app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}
+  try { if (cwPermissions) cwPermissions.cleanup(); } catch {}  // Round 6
   try { if (server) server.stop(); } catch {}
   try { if (metering) metering.stop(); } catch {}
   try { if (pricingSync) pricingSync.stop(); } catch {}

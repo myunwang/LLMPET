@@ -184,3 +184,8 @@ html, body {
   border-radius: 6px; color: #ffd8bf; font-size: 12px; padding: 4px 6px; text-align: right;
 }
 .budget-input input:focus { outline: none; border-color: #d97757; }
+
+/* Round 8: Provider 切换区块 */
+#provider-block { padding: 10px 14px; }
+#provider-seg { display: flex; gap: 4px; margin-bottom: 6px; }
+.provider-status { font-size: 11px; color: #8a7367; padding-top: 2px; }

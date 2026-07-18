@@ -1,0 +1,441 @@
+{
+  "schema_version": 1,
+  "source": "bundled",
+  "fetched_at": "2026-07-06T00:00:00Z",
+  "ttl_secs": 315360000,
+  "entries": {
+    "deepseek-v4-pro": {
+      "id": "deepseek-v4-pro",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled",
+      "input_usd_per_million": 0.435,
+      "output_usd_per_million": 2.18,
+      "cache_read_usd_per_million": 0.003625,
+      "cache_write_usd_per_million": 0.435
+    },
+    "deepseek-v4-flash": {
+      "id": "deepseek-v4-flash",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled",
+      "input_usd_per_million": 0.14,
+      "output_usd_per_million": 0.28,
+      "cache_read_usd_per_million": 0.0028,
+      "cache_write_usd_per_million": 0.14
+    },
+    "gpt-5-codex": {
+      "id": "gpt-5-codex",
+      "context_window": 400000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 1.25,
+      "output_usd_per_million": 10.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "gpt-5.3-codex": {
+      "id": "gpt-5.3-codex",
+      "context_window": 400000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 1.75,
+      "output_usd_per_million": 14.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "gpt-5.6": {
+      "id": "gpt-5.6",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provider_model_id": "gpt-5.6-sol",
+      "provenance": "bundled"
+    },
+    "gpt-5.6-sol": {
+      "id": "gpt-5.6-sol",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "gpt-5.6-terra": {
+      "id": "gpt-5.6-terra",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "gpt-5.6-luna": {
+      "id": "gpt-5.6-luna",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "muse-spark-1.1": {
+      "id": "muse-spark-1.1",
+      "context_window": 1000000,
+      "max_output": 32000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "kimi-k2.7-code": {
+      "id": "kimi-k2.7-code",
+      "context_window": 262144,
+      "max_output": 32768,
+      "supports_reasoning": true,
+      "input_usd_per_million": 0.95,
+      "output_usd_per_million": 4.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "moonshotai/kimi-k2.7-code": {
+      "id": "moonshotai/kimi-k2.7-code",
+      "context_window": 262144,
+      "max_output": 32768,
+      "supports_reasoning": true,
+      "input_usd_per_million": 0.95,
+      "output_usd_per_million": 4.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "z-ai/glm-5.2": {
+      "id": "z-ai/glm-5.2",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "input_usd_per_million": 1.4,
+      "output_usd_per_million": 4.4,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "glm-5.2": {
+      "id": "glm-5.2",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "input_usd_per_million": 1.4,
+      "output_usd_per_million": 4.4,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "minimax/minimax-m3": {
+      "id": "minimax/minimax-m3",
+      "context_window": 1000000,
+      "max_output": 524288,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "minimax/minimax-m2.7": {
+      "id": "minimax/minimax-m2.7",
+      "context_window": 204800,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "input_usd_per_million": 0.3,
+      "output_usd_per_million": 1.2,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "minimax-m2.7": {
+      "id": "minimax-m2.7",
+      "context_window": 204800,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "input_usd_per_million": 0.3,
+      "output_usd_per_million": 1.2,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "qwen/qwen3.6-flash": {
+      "id": "qwen/qwen3.6-flash",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "trinity-large-thinking": {
+      "id": "trinity-large-thinking",
+      "context_window": 262144,
+      "max_output": 262144,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "trinity-mini": {
+      "id": "trinity-mini",
+      "context_window": 128000,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "claude-opus-4-8": {
+      "id": "claude-opus-4-8",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 5.0,
+      "output_usd_per_million": 25.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "claude-sonnet-5": {
+      "id": "claude-sonnet-5",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 3.0,
+      "output_usd_per_million": 15.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "claude-fable-5": {
+      "id": "claude-fable-5",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 10.0,
+      "output_usd_per_million": 50.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "claude-sonnet-4-6": {
+      "id": "claude-sonnet-4-6",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 3.0,
+      "output_usd_per_million": 15.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "claude-haiku-4-5": {
+      "id": "claude-haiku-4-5",
+      "context_window": 200000,
+      "max_output": 64000,
+      "supports_reasoning": false,
+      "input_usd_per_million": 1.0,
+      "output_usd_per_million": 5.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "step-3.7-flash": {
+      "id": "step-3.7-flash",
+      "context_window": 256000,
+      "max_output": 256000,
+      "supports_reasoning": false,
+      "input_usd_per_million": 0.2,
+      "output_usd_per_million": 1.15,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "fugu-ultra-20260615": {
+      "id": "fugu-ultra-20260615",
+      "context_window": 1000000,
+      "max_output": 131000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 5.0,
+      "output_usd_per_million": 30.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "fugu-ultra": {
+      "id": "fugu-ultra",
+      "context_window": 1000000,
+      "max_output": 131000,
+      "supports_reasoning": true,
+      "input_usd_per_million": 5.0,
+      "output_usd_per_million": 30.0,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "reasoning"
+      ],
+      "provenance": "bundled"
+    },
+    "mimo-v2.5-pro": {
+      "id": "mimo-v2.5-pro",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image",
+        "audio"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "mimo-v2.5-pro-ultraspeed": {
+      "id": "mimo-v2.5-pro-ultraspeed",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "modalities": [
+        "text"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "mimo-v2.5": {
+      "id": "mimo-v2.5",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "supports_reasoning": true,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [],
+      "provenance": "bundled"
+    },
+    "deepseek-chat": {
+      "id": "deepseek-chat",
+      "input_usd_per_million": 0.14,
+      "output_usd_per_million": 0.28,
+      "cache_read_usd_per_million": 0.0028,
+      "cache_write_usd_per_million": 0.14,
+      "provenance": "official-pricing"
+    },
+    "deepseek-reasoner": {
+      "id": "deepseek-reasoner",
+      "input_usd_per_million": 0.435,
+      "output_usd_per_million": 2.18,
+      "cache_read_usd_per_million": 0.003625,
+      "cache_write_usd_per_million": 0.435,
+      "provenance": "official-pricing"
+    }
+  }
+}

@@ -61,8 +61,11 @@ function buildCandidates(claude, workDir) {
     return [['osascript', ['-e', script]]];
   }
   if (plat === 'win32') {
+    // W3: wt.exe is an App Execution Alias (not a real .exe) — spawning it
+    // directly may ENOENT. Wrap in cmd.exe /c so the alias resolves inside a
+    // real shell context.
     return [
-      ['wt.exe', ['--', 'cmd.exe', '/k', `cd /d "${workDir}" && "${claude}"`]],
+      ['cmd.exe', ['/c', 'wt.exe', '--', 'cmd.exe', '/k', `cd /d "${workDir}" && "${claude}"`]],
       ['cmd.exe', ['/c', 'start', '', 'cmd.exe', '/k', `cd /d "${workDir}" && "${claude}"`]],
     ];
   }
@@ -85,4 +88,4 @@ async function launchClaude(opts = {}) {
   return { ok: false, message: 'could not open a terminal' };
 }
 
-module.exports = { launchClaude, findClaude };
+module.exports = { launchClaude, findClaude, buildCandidates, trySpawn };

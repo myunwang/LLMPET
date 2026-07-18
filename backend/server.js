@@ -71,7 +71,7 @@ function normContext(v) {
   const percent = Number(v.percent);
   if (Number.isFinite(percent)) out.percent = Math.max(0, Math.min(100, Math.round(percent)));
   else if (out.limit) out.percent = Math.max(0, Math.min(100, Math.round((used / out.limit) * 100)));
-  if (v.source === 'claude' || v.source === 'codex') out.source = v.source;
+  if (v.source === 'claude' || v.source === 'codex' || v.source === 'codewhale') out.source = v.source;
   return out;
 }
 
@@ -142,6 +142,24 @@ function createServer(deps) {
   const permissions = deps.permissions;
   const shouldDropForDnd = typeof deps.shouldDropForDnd === 'function' ? deps.shouldDropForDnd : () => false;
 
+  // CodeWhale metering (created lazily so Claude-only installs don't require it)
+  let cwMetering = null;
+  try {
+    const { createMeteringCodeWhale } = require('./metering-codewhale');
+    cwMetering = createMeteringCodeWhale();
+  } catch (e) {
+    // non-fatal: metering just stays zero
+  }
+
+  // CodeWhale permission bridge (separate from Claude's /permission endpoint)
+  let cwPermissions = null;
+  try {
+    const { createCodeWhalePermissions } = require('./codewhale-permission');
+    cwPermissions = createCodeWhalePermissions({ shouldDrop: shouldDropForDnd });
+  } catch (e) {
+    // non-fatal
+  }
+
   let server = null;
   let activePort = null;
 
@@ -171,7 +189,7 @@ function createServer(deps) {
         tmuxSocket: normTmuxSocket(data.tmux_socket),
         tmuxClient: normTmuxClient(data.tmux_client),
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
-        agentId: 'claude-code',
+        agentId: data.provider === 'codewhale' ? 'codewhale' : 'claude-code',
         headless: data.headless === true,
         transcriptPath: normTranscriptPath(data.transcript_path),
         model: typeof data.model === 'string' && data.model.trim() ? data.model.trim() : null,
@@ -193,6 +211,13 @@ function createServer(deps) {
       permissions.sweepForSessionEvent(sid, event);
 
       core.updateSession(sid, state, event, fields);
+
+      // CodeWhale metering: record turn_end (Stop) usage data.
+      // turn_end payload includes turn_usage + model (set by parseHookStdin).
+      if (cwMetering && data.provider === 'codewhale' && event === 'Stop' && data.turn_usage) {
+        try { cwMetering.recordTurnEnd(data); } catch {}
+      }
+
       res.writeHead(200, { [SERVER_HEADER]: SERVER_ID });
       res.end('ok');
     });
@@ -220,11 +245,45 @@ function createServer(deps) {
         toolInput: isElicit ? rawInput : truncateInput(rawInput),
         suggestions: Array.isArray(data.permission_suggestions) ? data.permission_suggestions : [],
         sessionId: data.session_id || 'default',
-        agentId: 'claude-code',
+        agentId: data.provider === 'codewhale' ? 'codewhale' : 'claude-code',
         headless: data.headless === true,
       };
       // permission module parks `res` and writes the decision later.
       permissions.addPermission(res, parsed);
+    });
+  }
+
+  // CodeWhale permission bridge: hook POSTs tool_call_before info here, we park
+  // the connection until the pet user clicks allow/deny, then return decision JSON.
+  function handleCwPermissionPost(req, res) {
+    readBody(req, MAX_PERMISSION_BODY_BYTES, (body) => {
+      if (body === null) {
+        try {
+          res.writeHead(200, { 'Content-Type': 'application/json', [SERVER_HEADER]: SERVER_ID });
+          res.end(JSON.stringify({ decision: 'allow' }));
+        } catch {}
+        return;
+      }
+      let data;
+      try { data = JSON.parse(body); } catch { res.writeHead(400); res.end('bad json'); return; }
+
+      if (!cwPermissions) {
+        // No permission module → allow (CodeWhale uses its own prompt)
+        res.writeHead(200, { 'Content-Type': 'application/json', [SERVER_HEADER]: SERVER_ID });
+        res.end(JSON.stringify({ decision: 'allow' }));
+        return;
+      }
+
+      const parsed = {
+        toolName: typeof data.tool_name === 'string' ? data.tool_name : 'Unknown',
+        toolInput: data.tool_input && typeof data.tool_input === 'object' ? truncateInput(data.tool_input) : {},
+        sessionId: data.session_id || 'default',
+        agentId: 'codewhale',
+        mode: typeof data.mode === 'string' ? data.mode : null,
+        model: typeof data.model === 'string' ? data.model : null,
+        workspace: typeof data.workspace === 'string' ? data.workspace : null,
+      };
+      cwPermissions.addPermission(res, parsed);
     });
   }
 
@@ -252,6 +311,7 @@ function createServer(deps) {
     }
     if (req.method === 'POST' && req.url === '/state') return handleStatePost(req, res);
     if (req.method === 'POST' && req.url === '/permission') return handlePermissionPost(req, res);
+    if (req.method === 'POST' && req.url === '/codewhale-permission') return handleCwPermissionPost(req, res);
     res.writeHead(404); res.end();
   }
 
@@ -312,7 +372,7 @@ function createServer(deps) {
     if (server) { try { server.close(); } catch {} server = null; }
   }
 
-  return { start, stop, getPort };
+  return { start, stop, getPort, getCwPermissions: () => cwPermissions, getCwMetering: () => cwMetering };
 }
 
 module.exports = { createServer, MAX_STATE_BODY_BYTES };

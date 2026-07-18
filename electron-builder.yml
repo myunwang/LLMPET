@@ -1,0 +1,85 @@
+# electron-builder 配置 — 跨平台打包（macOS / Windows / Linux）
+# 文档：https://www.electron.build/configuration
+#
+# 沙箱是 Linux，可在此跑 `npm run dist:linux` 生成 AppImage 验证编译产物。
+# 真机 macOS 跑 `npm run dist:mac`，Windows 跑 `npm run dist:win`。
+
+appId: com.octopus.pet
+productName: Octopus
+copyright: Copyright © 2025 myunwang
+
+directories:
+  output: dist
+  buildResources: build
+
+# 显式打包清单（与 scripts/package-mac.sh 一致），避免把 test/ docs/ 等打入产物
+files:
+  - main.js
+  - preload.js
+  - package.json
+  - backend/**
+  - renderer/**
+  - assets/**
+  - shared/**
+  - hook/**
+  - providers/**
+  - "!**/.DS_Store"
+  - "!**/*.md"
+  - "!test/**"
+  - "!docs/**"
+  - "!scripts/**"
+  - "!dist/**"
+
+# 生产依赖会被 electron-builder 自动 prune devDependencies；
+# png-to-ico 是运行时依赖，会被保留。
+extraMetadata:
+  main: main.js
+
+# hook/ + backend/ + providers/ 必须解包到 app.asar.unpacked/，
+# 因为 CodeWhale 用系统 node 执行 hook 脚本，系统 node 无法读取 asar 内的模块。
+# asar 内的 require('../backend/transport') 会自动重定向到 app.asar.unpacked/backend/transport.js。
+asar: true
+asarUnpack:
+  - hook/**
+  - backend/**
+  - providers/**
+  - shared/**
+
+mac:
+  category: public.app-category.developer-tools
+  icon: assets/icon.icns
+  # LSUIElement=true 让 app 不在 Dock 显示（与 scripts/package-mac.sh 一致）
+  extendInfo:
+    LSUIElement: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+win:
+  # Windows 打包图标需 ≥256x256。assets/icon-256.png 由 assets/mascot.png 缩放生成。
+  # 运行时托盘图标仍由 backend/tray-icon.js 从 tray@2x.png 动态生成 .ico。
+  icon: assets/icon-256.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Octopus
+
+linux:
+  icon: assets/tray@2x.png
+  category: Development
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: tar.gz
+      arch: [x64]

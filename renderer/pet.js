@@ -1303,6 +1303,7 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
     const op = b.dataset.op;
     if (op === 'panel') window.pet.openPanel();
     else if (op === 'claude') window.pet.launchClaude();
+    else if (op === 'codewhale') { try { window.pet.launchCodewhale(); } catch {} }
     else if (op === 'log') window.pet.openLog();
     closeTodoPop();
   });

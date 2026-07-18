@@ -47,7 +47,7 @@ const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUs
 // ALIVE stays visible (never auto-slept or removed) — so every open Claude
 // session keeps showing. We only retire sessions whose terminal is gone, or that
 // have been silent far too long.
-const WORKING_STALE_MS = 5 * 60 * 1000;   // stuck working/thinking → drop to idle (keep visible)
+const WORKING_STALE_MS = 2 * 60 * 1000;   // stuck working/thinking → drop to idle (keep visible)
 const CWD_ACTIVE_MS = 10 * 60 * 1000;     // 同 cwd 近期活跃窗口：期间新 SessionStart 视为进入既有工作，不欢迎
 const DETACHED_REMOVE_MS = 30 * 1000;     // terminal pid dead → remove after a short grace
 const SESSION_STALE_MS = 30 * 60 * 1000;  // no live terminal + this idle → remove; ended (sleeping) → remove

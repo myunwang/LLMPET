@@ -11,33 +11,19 @@
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
-    "package:win": "electron-builder --win",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js"
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js",
+    "test:windows": "node test/windows-adapt.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "sharp": "^0.35.3"
   },
-  "build": {
-    "appId": "com.myunwang.octopus",
-    "productName": "Octopus",
-    "asar": false,
-    "files": [
-      "main.js",
-      "preload.js",
-      "backend/**",
-      "renderer/**",
-      "assets/**",
-      "shared/**",
-      "hook/**"
-    ],
-    "win": {
-      "target": ["nsis", "zip"],
-      "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+  "dependencies": {
+    "png-to-ico": "^3.0.2"
   }
 }

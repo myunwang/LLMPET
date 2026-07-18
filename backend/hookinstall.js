@@ -23,6 +23,18 @@ const { buildPermissionUrl, resolveNodeBin, PORTS, BASE_PORT } = require('./tran
 
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
 const HOOK_SCRIPT = path.join(__dirname, '..', 'hook', 'octopus-hook.js');
+const HOOK_MARKER = 'octopus-hook.js';
+
+// When inside an asar archive, hook/ is unpacked to app.asar.unpacked/hook/.
+// System node (used by Claude Code to run hooks) cannot read asar virtual
+// paths, so point the command at the real filesystem path.
+function resolveHookScriptPath() {
+  const p = HOOK_SCRIPT;
+  if (p.includes('.asar' + path.sep)) {
+    return p.replace(/\.asar([\\/])/, '.asar.unpacked$1');
+  }
+  return p;
+}
 const MARKER = 'octopus-hook.js';
 const STATE_TIMEOUT_S = 5;
 const PERMISSION_TIMEOUT_S = 600;
@@ -54,7 +66,7 @@ function writeAtomic(obj) {
 }
 
 function commandHook(nodeBin, event) {
-  const cmd = `"${nodeBin}" "${HOOK_SCRIPT}" ${event}`;
+  const cmd = `"${nodeBin}" "${resolveHookScriptPath()}" ${event}`;
   if (process.platform === 'win32') {
     return { type: 'command', shell: 'powershell', command: `& ${cmd}`, timeout: STATE_TIMEOUT_S };
   }

@@ -21,6 +21,7 @@ const DEFAULTS = Object.freeze({
   permHook: true,         // whether the blocking permission HTTP hook is active
   territory: false,       // 领地模式:发现别的桌宠就顶到屏幕边上(macOS,需辅助功能权限)
   territoryRivals: [],    // 用户自定义的对手进程名特征(叠加在内置名单上)
+  providers: ['claude'],  // Round 8: active agent providers (['claude'] | ['codewhale'] | ['claude','codewhale'])
 });
 
 let cache = null;
@@ -42,6 +43,14 @@ function sanitize(raw) {
       .filter((s) => typeof s === 'string' && s.trim())
       .map((s) => s.trim().slice(0, 64)) // 单条封顶:超长字符串没有匹配意义,还会拖慢 osascript
       .slice(0, 30);
+  }
+  // Round 8: providers field — array of valid provider ids.
+  if (Array.isArray(raw.providers)) {
+    const valid = ['claude', 'codewhale'];
+    out.providers = raw.providers
+      .filter((s) => typeof s === 'string' && valid.includes(s))
+      .filter((s, i, arr) => arr.indexOf(s) === i); // de-dup
+    if (!out.providers.length) out.providers = ['claude']; // never empty
   }
   return out;
 }
