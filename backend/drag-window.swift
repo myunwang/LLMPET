@@ -462,6 +462,51 @@ if windowCommand == "--inspect-pid" && CommandLine.arguments.count >= 3 {
   exit(0)
 }
 
+// 新版 Codex 桌宠(243x253)接受 AXPosition 写入,但 System Events 的
+// AXPosition setter 对它静默 no-op,只有直调 AX C API 才真正生效。
+// 用法: --move-window pid ew eh nx ny → 按预期尺寸(±24)找 AX 窗,写入新
+// 位置,等一拍后读回。输出 "moved|旧x|旧y|新x|新y";找不到匹配窗输出 gone。
+if windowCommand == "--move-window" && CommandLine.arguments.count >= 7 {
+  guard AXIsProcessTrusted(),
+        let pid = Int32(CommandLine.arguments[2]),
+        let expectedW = Double(CommandLine.arguments[3]),
+        let expectedH = Double(CommandLine.arguments[4]),
+        let nx = Double(CommandLine.arguments[5]),
+        let ny = Double(CommandLine.arguments[6]) else {
+    fputs("bad --move-window arguments or accessibility permission missing\n", stderr)
+    exit(2)
+  }
+  var bestWindow: AXUIElement?
+  var bestScore = Double.infinity
+  for window in axWindows(pid: pid) {
+    guard let size = axSize(window, kAXSizeAttribute as CFString) else { continue }
+    let score = abs(size.width - expectedW) + abs(size.height - expectedH)
+    guard score <= 24, score < bestScore else { continue }
+    bestScore = score
+    bestWindow = window
+  }
+  guard let window = bestWindow,
+        let before = axPoint(window, kAXPositionAttribute as CFString) else {
+    print("gone")
+    exit(0)
+  }
+  var target = CGPoint(x: nx, y: ny)
+  guard let value = AXValueCreate(.cgPoint, &target) else {
+    fputs("could not build AXValue\n", stderr)
+    exit(4)
+  }
+  let result = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+  guard result == .success else {
+    fputs("AXPosition write failed: \(result.rawValue)\n", stderr)
+    exit(5)
+  }
+  // 写入是异步应用的,立即读会拿到旧值;等一拍再读真实落点。
+  usleep(250_000)
+  let after = axPoint(window, kAXPositionAttribute as CFString) ?? target
+  print("moved|\(before.x)|\(before.y)|\(after.x)|\(after.y)")
+  exit(0)
+}
+
 if windowCommand == "--preview-pointer" && CommandLine.arguments.count >= 4 {
   guard let x = Double(CommandLine.arguments[2]),
         let y = Double(CommandLine.arguments[3]) else {
@@ -760,6 +805,11 @@ if windowCommand == "--isolated-drag-pid" && CommandLine.arguments.count >= 12 {
   }
   let durationMs = max(180, min(1500,
     Double(CommandLine.arguments[11]) ?? 520))
+  // Codex 机器人桌宠的窗口对 AX hit-test 永远隐身(冷查/hover 后都解析不到),
+  // 但 WindowServer 的真实 HID 事件路由是通的——drag 实测能移动它。对这类
+  // 目标跳过命中门,成功与否交给 JS 侧的 AX frame 位移复核。
+  let skipHitGate = CommandLine.arguments.count > 12
+    && CommandLine.arguments[12] == "nogate"
   let steps = max(12, Int(durationMs / 16))
   let source = CGEventSource(stateID: .hidSystemState)
   guard let original = CGEvent(source: nil)?.location else {
@@ -821,15 +871,19 @@ if windowCommand == "--isolated-drag-pid" && CommandLine.arguments.count >= 12 {
   post(.mouseMoved, start)
   usleep(35_000)
   let expected = CGRect(x: expectedX, y: expectedY, width: expectedW, height: expectedH)
-  guard matchingHitWindow(at: start, pid: targetPid, expected: expected) else {
-    let restoreResults = restoreCursor()
-    cursorRestored = restoreResults.0 == .success
-      && restoreResults.1 == .success && restoreResults.2 == .success
-    print("hit|target=0")
-    print("restore|warp=\(restoreResults.0.rawValue)|associate=\(restoreResults.1.rawValue)|show=\(restoreResults.2.rawValue)")
-    exit(7)
+  if skipHitGate {
+    print("hit|target=skipped")
+  } else {
+    guard matchingHitWindow(at: start, pid: targetPid, expected: expected) else {
+      let restoreResults = restoreCursor()
+      cursorRestored = restoreResults.0 == .success
+        && restoreResults.1 == .success && restoreResults.2 == .success
+      print("hit|target=0")
+      print("restore|warp=\(restoreResults.0.rawValue)|associate=\(restoreResults.1.rawValue)|show=\(restoreResults.2.rawValue)")
+      exit(7)
+    }
+    print("hit|target=1")
   }
-  print("hit|target=1")
   post(.leftMouseDown, start)
   mouseIsDown = true
   usleep(80_000)

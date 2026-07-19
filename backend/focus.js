@@ -6,9 +6,11 @@
 // Our hook reports source_pid as the terminal process plus a pid_chain. On macOS
 // we activate the GUI app that owns one of those pids via System Events, and we
 // return whether a process was ACTUALLY matched (osascript exits 0 even when no
-// process matched, so we check its stdout). Windows/Linux focus needs native
-// helpers and is a known gap for v1 — focusSession returns false there so the
-// caller can fall back (e.g. open the panel).
+// process matched, so we check its stdout). On Windows we probe the pid chain
+// for a process that owns a top-level window (WindowsTerminal / conhost apps /
+// VS Code) and bring it to the foreground via user32. Linux focus needs native
+// helpers and is a known gap — focusSession returns false there so the caller
+// can fall back (e.g. open the panel).
 
 const { execFile } = require('child_process');
 const { log } = require('./log');
@@ -38,10 +40,48 @@ async function activateMacPid(pid) {
   return runOsascript(script);
 }
 
+// Windows: one PowerShell run tries every candidate pid in order and focuses
+// the first one that owns a top-level window. SetForegroundWindow from a
+// background process is throttled by Windows, so we also call
+// SwitchToThisWindow as a fallback (it emulates the Alt-Tab path).
+function activateWinPids(pids) {
+  const list = pids.filter((p) => Number.isInteger(p) && p > 0);
+  if (!list.length) return Promise.resolve(false);
+  const script = [
+    "Add-Type -Namespace W -Name U -MemberDefinition '",
+    '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);',
+    '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int cmd);',
+    '[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
+    '[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool alt);',
+    "'",
+    `foreach ($id in @(${list.join(',')})) {`,
+    '  $p = Get-Process -Id $id -ErrorAction SilentlyContinue',
+    '  if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {',
+    '    $h = $p.MainWindowHandle',
+    '    if ([W.U]::IsIconic($h)) { [W.U]::ShowWindowAsync($h, 9) | Out-Null }',
+    '    [W.U]::SetForegroundWindow($h) | Out-Null',
+    '    [W.U]::SwitchToThisWindow($h, $true)',
+    '    Write-Output ("ok|" + $id)',
+    '    exit 0',
+    '  }',
+    '}',
+    "Write-Output 'none'",
+  ].join('\n');
+  return new Promise((resolve) => {
+    execFile('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { timeout: 5000, windowsHide: true },
+      (err, stdout) => {
+        const m = /^ok\|(\d+)$/m.exec(String(stdout || ''));
+        resolve(!err && m ? parseInt(m[1], 10) : false);
+      });
+  });
+}
+
 // Returns true if it actually focused a window for this session.
 async function focusSession(session) {
   if (!session) return false;
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
     log('focus', `focusSession: ${process.platform} not supported yet`);
     return false;
   }
@@ -49,6 +89,18 @@ async function focusSession(session) {
   const candidates = [];
   if (session.sourcePid) candidates.push(session.sourcePid);
   if (Array.isArray(session.pidChain)) for (const p of session.pidChain) candidates.push(p);
+
+  if (process.platform === 'win32') {
+    const ordered = [...new Set(candidates)];
+    const focused = await activateWinPids(ordered);
+    if (focused) {
+      log('focus', `focused pid ${focused} for session ${String(session.id).slice(-6)}`);
+      return true;
+    }
+    log('focus', `could not focus session ${String(session.id).slice(-6)} (pids ${ordered.join(',') || 'none'})`);
+    return false;
+  }
+
   for (const pid of candidates) {
     if (seen.has(pid)) continue;
     seen.add(pid);

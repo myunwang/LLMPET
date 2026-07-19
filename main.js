@@ -362,24 +362,60 @@ function bootTerritory() {
 }
 
 let lastPermDialogAt = 0; // 引导框节流:授权缓存未刷新时也不能反复骚扰
+let axGrantWatchTimer = null; // 引导用户去设置后轮询复检授权,到位即自动开跑
+const AX_SETTINGS_URL =
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
+
+function isAxTrusted() {
+  if (process.platform !== 'darwin') return false;
+  try { return systemPreferences.isTrustedAccessibilityClient(false); } catch { return false; }
+}
+
+// 引导用户点开「辅助功能」设置后,不再让他「退出重开」——轮询复检,一旦授权到位
+// 就自动巡视一次并给出成功反馈。限时 90s / 已授权即停,避免常驻定时器。
+function startAxGrantWatch() {
+  if (axGrantWatchTimer) return;
+  const deadline = Date.now() + 90 * 1000;
+  axGrantWatchTimer = setInterval(() => {
+    if (isAxTrusted()) {
+      clearInterval(axGrantWatchTimer);
+      axGrantWatchTimer = null;
+      log('territory', 'accessibility granted — auto patrol');
+      sendPet('pet:event', { kind: 'territory', phase: 'granted', ts: Date.now() });
+      if (territory) territory.runNow().catch((e) => log('territory', 'post-grant scan failed:', e.message));
+    } else if (Date.now() > deadline) {
+      clearInterval(axGrantWatchTimer);
+      axGrantWatchTimer = null;
+    }
+  }, 1500);
+  if (axGrantWatchTimer.unref) axGrantWatchTimer.unref();
+}
+
 function ensureTerritoryPermission() {
   if (process.platform !== 'darwin') return false;
-  let trusted = false;
-  try { trusted = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
+  const trusted = isAxTrusted();
   log('territory', `accessibility preflight trusted=${trusted}`);
-  if (!trusted && Date.now() - lastPermDialogAt > 15 * 60 * 1000) {
-    lastPermDialogAt = Date.now();
-    // 推别人的窗口要走辅助功能 API;prompt=true 弹系统引导框并把本 app 加入列表
-    try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
-    dialog.showMessageBox({
-      type: 'info',
-      message: '巡视桌宠需要「辅助功能」权限',
-      detail: '小章鱼需要移动对方的窗口，才能把它顶到屏幕边上。\n' +
-        '请在 系统设置 → 隐私与安全性 → 辅助功能 里勾选 Octopus。\n' +
-        '首次授权后如果本轮仍提示，请完全退出 Octopus 再重新打开一次。',
-    }).catch(() => {});
-  }
-  return trusted;
+  if (trusted) return true;
+  if (Date.now() - lastPermDialogAt <= 15 * 60 * 1000) return false;
+  lastPermDialogAt = Date.now();
+  // prompt=true 让系统把本 app 加入「辅助功能」列表(即便还没勾选),用户到设置里
+  // 才有可勾的条目。
+  try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
+  dialog.showMessageBox({
+    type: 'info',
+    message: '巡视桌宠需要「辅助功能」权限',
+    detail: '小章鱼要移动别的桌宠窗口，才能把闯进地盘的它顶到屏幕边上。\n' +
+      '点「打开辅助功能设置」，在列表里勾选 Octopus 即可——授权成功会自动开始巡视，不用退出重开。',
+    buttons: ['打开辅助功能设置', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    if (response === 0) {
+      shell.openExternal(AX_SETTINGS_URL).catch(() => {});
+      startAxGrantWatch();
+    }
+  }).catch(() => {});
+  return false;
 }
 
 function runTerritoryNow() {

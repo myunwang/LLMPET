@@ -131,7 +131,7 @@ function buildBody(event, p) {
   // Terminal ownership for focus + headless detection.
   if (FOCUS_EVENTS.has(event)) {
     try {
-      const r = pidwalk.resolve();
+      const r = pidwalk.resolve(process.ppid, 10, sid);
       if (r.sourcePid) body.source_pid = r.sourcePid;
       if (r.pidChain && r.pidChain.length) body.pid_chain = r.pidChain;
       if (r.editor) body.editor = r.editor;

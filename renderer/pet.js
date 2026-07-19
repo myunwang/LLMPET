@@ -1109,6 +1109,12 @@ window.pet.onEvent((ev) => {
         case 'noperm':
           showBubble('🔒 想把入侵者顶走，但还没有「辅助功能」权限（系统设置 → 隐私与安全性 → 辅助功能）', 7000);
           break;
+        case 'granted':
+          // 用户在设置里勾上「辅助功能」后主进程轮询到位，自动接着巡视——
+          // 给个明确的成功反馈，闭合"点开设置→授权→开跑"这条链。
+          transient('happy', 2800, '🎉 辅助功能已授权，这就去巡视地盘！', 3400);
+          SOUND.greet();
+          break;
         case 'searching':
           showBubble('🔎 正在巡视桌面，找找有没有别的桌宠…', 2400);
           break;

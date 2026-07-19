@@ -9,7 +9,7 @@ const {
   createTerritory, parsePresence, parseScan, scanCandidateScore,
   nearestEdgeTarget, edgeAwayFromPet, atEdge, atEdgeInDirection,
   windowTargetForVisual, visualAtEdge, visualAtEdgeInDirection,
-  visualShiftMatches, visualShiftOffset, interpolateFrame, chatGPTVisualBounds,
+  visualShiftMatches, visualShiftOffset, interpolateFrame, chatGPTShape, chatGPTVisualBounds,
   chatGPTDragCandidates, parseDragHelperResult, parseProbeHelperResult,
   parseIsolatedDragHelperResult, parseWarpHelperLine, warpHoldNeedsRecovery,
   standX, DEFAULT_RIVALS,
@@ -73,6 +73,37 @@ check('ChatGPT 轮廓评分优于不合理小窗', () => {
 });
 check('只有 ChatGPT 小 popup 时硬过滤，不误认成桌宠', () => {
   assert.deepStrictEqual(parseScan('ChatGPT|42|500|300|180|120\n', []), []);
+});
+check('新版 Codex 机器人桌宠(243x253)也被识别为对手(老狗轮廓仍并存)', () => {
+  const out = 'ChatGPT|70292|936|68|768|912\nChatGPT|70292|1155|459|345|54\nChatGPT|70292|1265|259|243|253\n';
+  const r = parseScan(out, []);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].w, 243);
+  assert.strictEqual(r[0].h, 253);
+});
+check('chatGPTShape:两种桌宠轮廓都认,Activity 条和主窗都拒', () => {
+  assert.strictEqual(chatGPTShape(356, 320), 'dog');
+  assert.strictEqual(chatGPTShape(243, 253), 'codex');
+  assert.strictEqual(chatGPTShape(345, 54), null);
+  assert.strictEqual(chatGPTShape(768, 912), null);
+});
+check('Codex 机器人视觉本体:居中,无 placement 翻转', () => {
+  const wa = { x: 0, y: 25, width: 1512, height: 920 };
+  const rival = { name: 'ChatGPT', pid: 70292, x: 1265, y: 259, w: 243, h: 253 };
+  const v = chatGPTVisualBounds(rival, wa);
+  assert.strictEqual(Math.round(v.x), 1265 + 81);
+  assert.strictEqual(Math.round(v.y), 259 + 80);
+  assert.strictEqual(Math.round(v.w), 80);
+  assert.strictEqual(Math.round(v.h), 100);
+});
+check('Codex 机器人拖拽候选以窗口中心起手,learned 优先', () => {
+  const wa = { x: 0, y: 25, width: 1512, height: 920 };
+  const rival = { name: 'ChatGPT', pid: 70292, x: 100, y: 100, w: 243, h: 253 };
+  const fresh = chatGPTDragCandidates(rival, wa);
+  assert.deepStrictEqual(fresh[0], [0.5, 0.51]);
+  const learned = chatGPTDragCandidates(rival, wa, [0.42, 0.51]);
+  assert.deepStrictEqual(learned[0], [0.42, 0.51]);
+  assert(!learned.slice(1).some(([x, y]) => x === 0.42 && y === 0.51));
 });
 
 console.log('[T2] nearestEdgeTarget：推向更近的水平边');
@@ -244,6 +275,9 @@ check('ChatGPT 独占 HID 租约只有完整还原鼠标后才接受成功', () 
   assert(!parseIsolatedDragHelperResult(good.replace('button|left=0', 'button|left=1'), 0).ok);
   assert(!parseIsolatedDragHelperResult(good.replace('cursor|100|200|100|200', 'cursor|100|200|120|200'), 0).ok);
   assert(parseIsolatedDragHelperResult('hit|target=0\n', 7).miss);
+  // Codex 机器人窗口对 AX hit-test 隐身,helper 以 nogate 跳过命中门;
+  // 其余还原/隔离证明仍必须完整。
+  assert(parseIsolatedDragHelperResult(good.replace('hit|target=1', 'hit|target=skipped'), 0).ok);
 });
 check('回归：warped 最后一帧不能报胜利，必须等 stable 保持证明', () => {
   assert.strictEqual(parseWarpHelperLine('progress|1').type, 'progress');

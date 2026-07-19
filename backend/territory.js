@@ -69,6 +69,22 @@ const CHATGPT_MASCOT = {
   visiblePadX: 14,
 };
 
+// 新版 ChatGPT 把桌宠换成了 Codex 机器人("Codex Pet Mascot Effect" 窗口,
+// 243x253),进程名仍是 ChatGPT。与老狗桌宠不同,机器人本体基本居中、没有
+// 四象限 placement。本体范围来自实机截图的像素分割(约 80x100,左右边距
+// ~81/82,上下 ~80/73)。两套轮廓并存:老版本装的还是 356x320 狗桌宠。
+const CODEX_VIEWPORT = { w: 243, h: 253 };
+const CODEX_MASCOT = { left: 81, top: 80, width: 80, height: 100 };
+
+// ChatGPT 名下窗口的桌宠轮廓判定:'dog'(老 356x320) | 'codex'(新 243x253)
+// | null(通知/设置等杂窗)。同进程还有 345x54 的 Activity Stack 条,两套轮廓
+// 都不匹配,天然被排除。
+function chatGPTShape(w, h) {
+  if (Math.abs(w - CHATGPT_VIEWPORT.w) + Math.abs(h - CHATGPT_VIEWPORT.h) <= 24) return 'dog';
+  if (Math.abs(w - CODEX_VIEWPORT.w) + Math.abs(h - CODEX_VIEWPORT.h) <= 24) return 'codex';
+  return null;
+}
+
 function chatGPTPlacement(rival, wa, dir = 0) {
   const end = dir === 1 || (dir === 0
     && rival.x + rival.w / 2 >= wa.x + wa.width / 2);
@@ -78,6 +94,18 @@ function chatGPTPlacement(rival, wa, dir = 0) {
 }
 
 function chatGPTVisualBounds(rival, wa, dir = 0, learned = null) {
+  if (chatGPTShape(rival.w, rival.h) === 'codex') {
+    // Codex 机器人居中且无 placement 翻转,learned anchor 与几何无关。
+    const sx = rival.w / CODEX_VIEWPORT.w;
+    const sy = rival.h / CODEX_VIEWPORT.h;
+    return {
+      ...rival,
+      x: rival.x + CODEX_MASCOT.left * sx,
+      y: rival.y + CODEX_MASCOT.top * sy,
+      w: CODEX_MASCOT.width * sx,
+      h: CODEX_MASCOT.height * sy,
+    };
+  }
   const placement = chatGPTPlacement(rival, wa, dir);
   if (learned) {
     const xEnd = 272 / CHATGPT_VIEWPORT.w;
@@ -102,7 +130,14 @@ function chatGPTVisualBounds(rival, wa, dir = 0, learned = null) {
   };
 }
 
-function chatGPTDragCandidates(_rival, _wa, learned = null) {
+function chatGPTDragCandidates(rival, _wa, learned = null) {
+  if (rival && chatGPTShape(rival.w, rival.h) === 'codex') {
+    // 机器人居中:窗口中心即躯干。已校准锚点优先,再沿中轴补几个候选。
+    const defaults = [[0.5, 0.51], [0.5, 0.62], [0.5, 0.4], [0.42, 0.51], [0.58, 0.51]];
+    return learned
+      ? [learned, ...defaults.filter(([x, y]) => x !== learned[0] || y !== learned[1])]
+      : defaults;
+  }
   // 112x121 默认 mascot 的四个稳定中心。中心像素在当前 57 个动画状态帧中
   // 都是不透明的。placement 具有历史粘滞，不能用透明外框所在半区猜测；
   // 首次按 ChatGPT 默认 top-end，之后从上次实测点开始逐轴翻转。
@@ -160,9 +195,11 @@ const SCAN_SCRIPT = [
   'end run',
 ].join('\n');
 
-// 一步推挤:在目标进程里挑「体型 ≤ maxSide 中最小」的窗口(= 宠物窗,永远不会
-// 碰同进程的大主窗),先读它当前位置(对方可能自己挪回来了),再 set,再回读落点。
-// 返回 "旧x|旧y|新x|新y";进程没了/没有宠物体型的窗口返回 "gone"。
+// 一步推挤:在目标进程里挑宠物窗,先读它当前位置(对方可能自己挪回来了),
+// 再 set,再回读落点。返回 "旧x|旧y|新x|新y";进程没了/没有宠物体型的窗口
+// 返回 "gone"。选窗规则:传入预期尺寸(ew/eh>0)时按轮廓最近匹配(同进程可能
+// 还有 0x0 backing、状态条、popup 等更小杂窗,绝不能按"最小面积"误选);
+// 未传时保持旧的「体型 ≤ maxSide 中最小」行为。
 // 注意变量名避开 AppleScript 保留字(by/at/of…都不能当变量)。
 const MOVE_SCRIPT = [
   'on run argv',
@@ -170,20 +207,40 @@ const MOVE_SCRIPT = [
   '  set nx to (item 2 of argv) as integer',
   '  set ny to (item 3 of argv) as integer',
   '  set maxSide to (item 4 of argv) as integer',
+  '  set ew to 0',
+  '  set eh to 0',
+  '  if (count of argv) is greater than or equal to 6 then',
+  '    set ew to (item 5 of argv) as integer',
+  '    set eh to (item 6 of argv) as integer',
+  '  end if',
   '  tell application "System Events"',
-  '    set procs to (every process whose unix id is thePid)',
-  '    if (count of procs) is 0 then return "gone"',
+  // 同名进程(如僵尸 ChatGPT 实例)存在时,`item 1 of (every process whose …)`
+  // 的引用可能按名字重解析到错误进程(0 窗)。必须用 repeat 遍历过滤结果,
+  // 循环变量的引用才稳定指向匹配到的那个进程。
+  '    set found to 0',
   '    set bestWin to missing value',
-  '    set bestArea to 0',
-  '    repeat with w in (every window of (item 1 of procs))',
-  '      set {pw, ph} to size of w',
-  '      if pw is less than or equal to maxSide and ph is less than or equal to maxSide then',
-  '        if bestWin is missing value or (pw * ph) < bestArea then',
-  '          set bestWin to w',
-  '          set bestArea to pw * ph',
-  '        end if',
-  '      end if',
+  '    set bestScore to 999999',
+  '    repeat with p in (every process whose unix id is thePid)',
+  '      set found to 1',
+  '      try',
+  '        repeat with w in (every window of p)',
+  '          set {pw, ph} to size of w',
+  '          if pw is greater than 0 and ph is greater than 0 and pw is less than or equal to maxSide and ph is less than or equal to maxSide then',
+  '            if ew is greater than 0 then',
+  '              set theScore to (pw - ew) * (pw - ew) + (ph - eh) * (ph - eh)',
+  '            else',
+  '              set theScore to pw * ph',
+  '            end if',
+  '            if bestWin is missing value or theScore < bestScore then',
+  '              set bestWin to w',
+  '              set bestScore to theScore',
+  '            end if',
+  '          end if',
+  '        end repeat',
+  '      end try',
   '    end repeat',
+  '    if found is 0 then return "gone"',
+  '    if ew is greater than 0 and bestScore > 576 then return "gone"',
   '    if bestWin is missing value then return "gone"',
   '    set {oldX, oldY} to position of bestWin',
   // 透明/无标题栏 Electron 窗口对 System Events 的普通 `position` setter
@@ -203,21 +260,27 @@ const RAISE_SCRIPT = [
   '  set targetW to (item 2 of argv) as integer',
   '  set targetH to (item 3 of argv) as integer',
   '  tell application "System Events"',
-  '    set procs to (every process whose unix id is thePid)',
-  '    if (count of procs) is 0 then return "gone"',
+  // 同上:同名进程共存时 item 1 引用会重解析错进程,必须 repeat 遍历。
+  '    set found to 0',
   '    set bestWin to missing value',
   '    set bestScore to 999999',
-  '    repeat with w in (every window of (item 1 of procs))',
-  '      set {pw, ph} to size of w',
-  '      set dw to pw - targetW',
-  '      if dw < 0 then set dw to -dw',
-  '      set dh to ph - targetH',
-  '      if dh < 0 then set dh to -dh',
-  '      if (dw + dh) < bestScore then',
-  '        set bestWin to w',
-  '        set bestScore to dw + dh',
-  '      end if',
+  '    repeat with p in (every process whose unix id is thePid)',
+  '      set found to 1',
+  '      try',
+  '        repeat with w in (every window of p)',
+  '          set {pw, ph} to size of w',
+  '          set dw to pw - targetW',
+  '          if dw < 0 then set dw to -dw',
+  '          set dh to ph - targetH',
+  '          if dh < 0 then set dh to -dh',
+  '          if (dw + dh) < bestScore then',
+  '            set bestWin to w',
+  '            set bestScore to dw + dh',
+  '          end if',
+  '        end repeat',
+  '      end try',
   '    end repeat',
+  '    if found is 0 then return "gone"',
   '    if bestWin is missing value then return "gone"',
   '    if bestScore > 48 then return "gone"',
   '    perform action "AXRaise" of bestWin',
@@ -285,10 +348,10 @@ function parseScan(out, excludePids, maxSize) {
     const r = { name: name.trim(), pid: +pid, x: +x, y: +y, w: +w, h: +h };
     if (!r.name || !Number.isFinite(r.pid) || !Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
     if (!(r.w > 0) || !(r.h > 0) || r.w > cap || r.h > cap) continue;
-    // ChatGPT 同进程还有通知、设置、快捷面板等小窗。桌宠外框稳定为
-    // 356x320；硬过滤轮廓，不能只给 popup 一个较差分数后仍把它当宠物。
-    if (/chatgpt/i.test(r.name)
-        && Math.abs(r.w - CHATGPT_VIEWPORT.w) + Math.abs(r.h - CHATGPT_VIEWPORT.h) > 24) continue;
+    // ChatGPT 同进程还有通知、设置、快捷面板等小窗。桌宠外框只有两种:
+    // 老狗 356x320 / 新 Codex 机器人 243x253;硬过滤轮廓,不能只给 popup
+    // 一个较差分数后仍把它当宠物。
+    if (/chatgpt/i.test(r.name) && !chatGPTShape(r.w, r.h)) continue;
     if ((excludePids || []).includes(r.pid)) continue;
     const prev = best.get(r.pid);
     if (!prev || scanCandidateScore(r) < scanCandidateScore(prev)) best.set(r.pid, r);
@@ -298,10 +361,12 @@ function parseScan(out, excludePids, maxSize) {
 
 function scanCandidateScore(r) {
   if (/chatgpt/i.test(r.name)) {
-    // Codex/ChatGPT 桌宠实机外框稳定为 356×320。优先轮廓匹配，而非同进程
+    // 优先轮廓匹配(离两种已知桌宠外框哪个都行,取更近的),而非同进程
     // 面积更小的通知、设置面板或瞬时 popup。
-    const shape = Math.abs(r.w - 356) + Math.abs(r.h - 320);
-    return shape;
+    return Math.min(
+      Math.abs(r.w - CHATGPT_VIEWPORT.w) + Math.abs(r.h - CHATGPT_VIEWPORT.h),
+      Math.abs(r.w - CODEX_VIEWPORT.w) + Math.abs(r.h - CODEX_VIEWPORT.h),
+    );
   }
   return r.w * r.h;
 }
@@ -428,7 +493,7 @@ function parseIsolatedDragHelperResult(stdout, code) {
     return { ok: false, miss: true, error: 'isolated drag point did not hit target window' };
   }
   if (code !== 0) return { ok: false, miss: false, error: `isolated drag helper exited ${code}` };
-  if (!/^hit\|target=1$/m.test(out)
+  if (!/^hit\|target=(1|skipped)$/m.test(out)
       || !/^isolation\|afterCapture=1\|associate=0$/m.test(out)
       || !/^restore\|warp=0\|associate=0\|show=0$/m.test(out)
       || !/^button\|left=0$/m.test(out)
@@ -849,8 +914,9 @@ function createTerritory(hooks) {
     };
   }
 
-  async function moveRival(pid, x, y) {
-    const res = await osa(MOVE_SCRIPT, [pid, Math.round(x), Math.round(y), MAX_RIVAL_SIZE]);
+  async function moveRival(pid, x, y, expectedW = 0, expectedH = 0) {
+    const res = await osa(MOVE_SCRIPT, [pid, Math.round(x), Math.round(y), MAX_RIVAL_SIZE,
+      Math.round(expectedW), Math.round(expectedH)]);
     if (!res.ok) return { error: res.err };
     if (res.out === 'gone') return { gone: true };
     const [bx, by, ax, ay] = res.out.split('|').map(Number);
@@ -1006,10 +1072,13 @@ function createTerritory(hooks) {
     const sx = rival.x + rival.w * rx;
     const sy = rival.y + rival.h * ry;
     const ex = sx + (targetX - rival.x);
+    // Codex 机器人窗口对 AX hit-test 隐身(冷查/hover 后都命不中),但真实
+    // HID 拖拽有效——跳过 helper 的命中门,由调用方的 AX frame 位移复核兜底。
+    const gateArgs = chatGPTShape(rival.w, rival.h) === 'codex' ? ['nogate'] : [];
     return new Promise((resolve) => {
       const child = spawn(helper.bin, [
         '--isolated-drag-pid', rival.pid, rival.x, rival.y, rival.w, rival.h,
-        sx, sy, ex, sy, durationMs,
+        sx, sy, ex, sy, durationMs, ...gateArgs,
       ].map(String));
       child._octopusTransport = 'isolated-hid';
       child._octopusTarget = { pid: rival.pid, x: sx, y: sy };
@@ -1116,6 +1185,9 @@ function createTerritory(hooks) {
   }
 
   async function finishClampedVisualEdge(current, dir, maxTravel = 0) {
+    // Codex 机器人:窗口只是特效/追踪层,compositor warp 只会把"雾"挪到边上,
+    // 机器人本体纹丝不动。它的本体可以被真实拖拽到贴边,不适用视觉补偿。
+    if (chatGPTShape(current.w, current.h) === 'codex') return null;
     const currentWa = hooks.getWorkArea(current);
     if (!atEdgeInDirection(current, currentWa, dir, 3)) return null;
     // 必须忽略已有内存偏移，计算透明外框相对于可见本体的绝对补偿。
@@ -1239,13 +1311,19 @@ function createTerritory(hooks) {
     let dragTried = false;
     for (let i = 0; i < 80; i++) {
       if (hooks.shouldAbort()) return 'abort';
-      // 对方可能被推过显示器边界:每步按它当前所在屏重算工作区和目标边
+      // 对方可能被推过显示器边界:每步按它当前所在屏重算工作区和目标边。
+      // ChatGPT/Codex 这类透明外框宠物按可见本体贴边换算(AXPosition 实测
+      // 接受越界坐标,窗口可以超出屏幕让本体正好贴边),其余按窗口外框。
       wa = hooks.getWorkArea(rival);
-      targetX = dir === 1 ? wa.x + wa.width - rival.w : wa.x;
+      targetX = /chatgpt/i.test(rival.name)
+        ? windowTargetForVisual(rival, rivalVisualBounds(rival, true, dir), wa, dir)
+        : (dir === 1 ? wa.x + wa.width - rival.w : wa.x);
       const stepTarget = dir === 1
         ? Math.min(targetX, rival.x + 76)
         : Math.max(targetX, rival.x - 76);
-      const r = await moveRival(rival.pid, stepTarget, rival.y);
+      // 按扫描确认的宠物窗轮廓定向选窗:同进程的杂窗(状态条/popup/0x0
+      // backing)绝不能被"最小面积"规则误选为推挤目标。
+      const r = await moveRival(rival.pid, stepTarget, rival.y, rival.w, rival.h);
       if (r.gone) {
         log('territory', `rival "${rival.name}" vanished mid-push — counts as a win`);
         return 'victory';
@@ -1384,6 +1462,9 @@ function createTerritory(hooks) {
       await hooks.tweenPetTo(sx, sy, Math.min(2600, Math.max(700, dist / 0.6)));
       if (hooks.shouldAbort()) return;
 
+      // ChatGPT 系桌宠(老狗/新 Codex)的屏幕位置都是 app 内部状态:AXPosition
+      // 写它们的窗口要么无效(狗),要么只挪动特效层"雾"(Codex 的 Mascot Effect
+      // 窗)。唯一有效的是隔离 HID 真实拖拽,由 physicalPush 统一处理。
       outcome = /chatgpt/i.test(rival.name)
         ? await physicalPush({ ...rival }, dir, { ...pet, x: sx, y: sy })
         : await pushLoop({ ...rival }, dir, targetX, wa, { ...pet, x: sx, y: sy });
@@ -1554,6 +1635,7 @@ module.exports = {
   visualShiftMatches,
   visualShiftOffset,
   interpolateFrame,
+  chatGPTShape,
   chatGPTVisualBounds,
   chatGPTDragCandidates,
   parseDragHelperResult,
