@@ -20,5 +20,9 @@ const shadow = /box-shadow\s*:\s*([^;]+);/.exec(finalRule);
 
 assert(shadow, 'final .ask rule must define its depth treatment explicitly');
 assert(/^inset\b/.test(shadow[1].trim()), '.ask must not use an outer shadow inside the transparent pet window');
+assert(/overflow-x\s*:\s*hidden\s*;/.test(finalRule), '.ask must never expose a horizontal scrollbar');
+assert(/scrollbar-width\s*:\s*none\s*;/.test(finalRule), 'native popup scrollbar must stay hidden');
+assert(/\.ask::-webkit-scrollbar\s*\{[^}]*width\s*:\s*0\s*;[^}]*height\s*:\s*0\s*;/s.test(css), 'popup scrollbar must take no visible space');
+assert(/\.ask-sess[^}]*overflow-wrap\s*:\s*anywhere\s*;/s.test(css), 'long session and option text must wrap inside the card');
 
 console.log('popup style checks passed');

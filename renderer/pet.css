@@ -683,7 +683,8 @@ body.skin-cat #cat { display: flex; }
 /* ── Needs Input / 授权卡片（重做，深色，对齐参考项目）──────────── */
 .ask {
   position: absolute; top: 12px; left: 12px; right: 12px;
-  max-height: calc(100vh - 30px); overflow-y: auto; z-index: 32; -webkit-app-region: no-drag;
+  max-height: calc(100vh - 30px); overflow-y: auto; overflow-x: hidden;
+  z-index: 32; -webkit-app-region: no-drag;
   background: rgba(26, 26, 29, 0.985);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 18px;
@@ -694,11 +695,11 @@ body.skin-cat #cat { display: flex; }
   padding: 16px 16px 14px;
   color: #f2f2f5;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  scrollbar-width: none;
   margin: 0;
 }
 .ask.hidden { display: none; }
-.ask::-webkit-scrollbar { width: 8px; }
-.ask::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.ask::-webkit-scrollbar { width: 0; height: 0; }
 
 .ask-head { margin-bottom: 12px; }
 .ask-label { font-size: 17px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
@@ -711,6 +712,7 @@ body.skin-cat #cat { display: flex; }
 .ask-q { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.5; }
 .ask-hint { font-size: 12px; color: #86868c; margin: 6px 0 12px; }
 .ask-hint:empty { display: none; }
+.ask-sess, .ask-q, .ask-ol, .ask-od { overflow-wrap: anywhere; word-break: break-word; }
 
 .ask-opts { display: flex; flex-direction: column; gap: 9px; }
 /* 单选卡片：左侧 radio + 标题 + 描述 */
