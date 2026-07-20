@@ -118,6 +118,7 @@ const sleepEl = document.getElementById('sleep');
 const propEl = document.getElementById('prop');
 const sidekickEl = document.getElementById('sidekick');
 const askEl = document.getElementById('ask');
+const askScroll = document.getElementById('ask-scroll');
 const askLabel = document.getElementById('ask-label');
 const askSess = document.getElementById('ask-sess');
 const askQhead = document.getElementById('ask-qhead');
@@ -245,7 +246,8 @@ function showAskPanel() {
   if (sessListOpen) closeSessList(); // 卡片优先于会话列表
 
   const sess = c.sessionId ? ' · #' + String(c.sessionId).slice(-3) : '';
-  askSess.textContent = (c.project || '?') + sess;
+  const queue = askQueue.length > 1 ? `${askIdx + 1}/${askQueue.length} · ` : '';
+  askSess.textContent = queue + (c.project || '?') + sess;
 
   if (c.kind === 'ask') {
     if (!elic || elic.key !== choiceKey(c)) {
@@ -264,10 +266,11 @@ function showAskPanel() {
   lastAskSig = askQueue.map(choiceKey).join(',');
   askActive = true;
   rlog('ask', 'show ' + (c.kind || '') + ': ' + String(c.question || '').slice(0, 36));
-  fitPopup(askEl); // 富卡片：动态定高 + 440 宽
+  fitPopup(askEl); // 富卡片：固定头尾、中部滚动，动态定高 + 520 宽
 }
 
 function clearAskBody() {
+  askScroll.scrollTop = 0;
   askOpts.innerHTML = '';
   askOpts.classList.remove('perm-row');
   askQhead.textContent = '';

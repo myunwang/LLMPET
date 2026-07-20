@@ -19,21 +19,25 @@
           <div class="ask-label" id="ask-label">Needs Input</div>
           <div class="ask-sess" id="ask-sess"></div>
         </div>
-        <div class="ask-card">
-          <div class="ask-qhead" id="ask-qhead"></div>
-          <div class="ask-q" id="ask-q"></div>
-          <div class="ask-hint" id="ask-hint"></div>
-          <div class="ask-opts" id="ask-opts"></div>
-          <div class="ask-other hidden" id="ask-input-row">
-            <input id="ask-text" type="text" placeholder="输入自定义回答…" />
+        <div class="ask-scroll" id="ask-scroll">
+          <div class="ask-card">
+            <div class="ask-qhead" id="ask-qhead"></div>
+            <div class="ask-q" id="ask-q"></div>
+            <div class="ask-hint" id="ask-hint"></div>
+            <div class="ask-opts" id="ask-opts"></div>
+            <div class="ask-other hidden" id="ask-input-row">
+              <input id="ask-text" type="text" placeholder="输入自定义回答…" />
+            </div>
           </div>
         </div>
-        <div class="ask-page" id="ask-page"></div>
-        <div class="ask-foot" id="ask-foot">
-          <button class="ask-btn primary" id="ask-submit">Submit Answer</button>
-          <button class="ask-btn" id="ask-back">Back</button>
+        <div class="ask-toolbar">
+          <div class="ask-page" id="ask-page"></div>
+          <div class="ask-foot" id="ask-foot">
+            <button class="ask-btn" id="ask-back">Back</button>
+            <button class="ask-btn primary" id="ask-submit">Submit Answer</button>
+          </div>
+          <button class="ask-term" id="ask-term">💬 Go to Terminal</button>
         </div>
-        <button class="ask-term" id="ask-term">💬 Go to Terminal</button>
       </div>
 
       <!-- 思考指示器（thinking 状态：填补 Claude 在想、没输出的空档） -->

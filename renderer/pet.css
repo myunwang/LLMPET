@@ -684,7 +684,8 @@ body.skin-cat #cat { display: flex; }
 .ask {
   position: absolute; top: 12px; left: 12px; right: 12px;
   max-width: none;
-  max-height: min(calc(100vh - 210px), 520px); overflow-y: auto; overflow-x: hidden;
+  max-height: min(calc(100vh - 210px), 520px); overflow: hidden;
+  display: flex; flex-direction: column; gap: 0;
   z-index: 32; -webkit-app-region: no-drag;
   background: rgba(26, 26, 29, 0.985);
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -693,42 +694,53 @@ body.skin-cat #cat { display: flex; }
      blur is clipped at the window edge and becomes a solid-looking side bar
      on some GPU/display combinations. Keep the depth cue inside the surface. */
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  padding: 16px 16px 14px;
+  padding: 13px 13px 12px;
   color: #f2f2f5;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
   margin: 0;
 }
 .ask.hidden { display: none; }
-.ask::-webkit-scrollbar { width: 6px; height: 0; }
-.ask::-webkit-scrollbar-track, .ask::-webkit-scrollbar-corner { background: transparent; }
-.ask::-webkit-scrollbar-thumb {
+.ask-scroll {
+  min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding-right: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+.ask-scroll::-webkit-scrollbar { width: 6px; height: 0; }
+.ask-scroll::-webkit-scrollbar-track, .ask-scroll::-webkit-scrollbar-corner { background: transparent; }
+.ask-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.24);
   border: 1px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;
 }
 
-.ask-head { margin-bottom: 12px; }
-.ask-label { font-size: 17px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
-.ask-sess { font-size: 12px; color: #86868c; margin-top: 2px; font-family: ui-monospace, Menlo, monospace; }
+.ask-head {
+  display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+  padding: 1px 2px 9px; margin-bottom: 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+}
+.ask-label { font-size: 15.5px; font-weight: 700; color: #fff; letter-spacing: 0.1px; white-space: nowrap; }
+.ask-sess {
+  min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: #8d8d94; font-family: ui-monospace, Menlo, monospace; text-align: right;
+}
 
 .ask-card { background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 13px; padding: 14px; margin-bottom: 12px; }
-.ask-qhead { font-size: 13px; font-weight: 700; color: #d7d7dd; margin-bottom: 6px; }
+  border-radius: 12px; padding: 11px; margin: 0; }
+.ask-qhead { font-size: 12.5px; font-weight: 700; color: #d7d7dd; margin-bottom: 4px; }
 .ask-qhead:empty { display: none; }
-.ask-q { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.5; }
-.ask-hint { font-size: 12px; color: #86868c; margin: 6px 0 12px; }
+.ask-q { font-size: 14px; font-weight: 700; color: #fff; line-height: 1.42; }
+.ask-hint { font-size: 11.5px; color: #86868c; margin: 4px 0 9px; }
 .ask-hint:empty { display: none; }
-.ask-sess, .ask-q, .ask-ol, .ask-od { overflow-wrap: anywhere; word-break: break-word; }
+.ask-q, .ask-ol, .ask-od { overflow-wrap: anywhere; word-break: break-word; }
 
-.ask-opts { display: flex; flex-direction: column; gap: 9px; }
+.ask-opts { display: flex; flex-direction: column; gap: 7px; }
 /* 单选卡片：左侧 radio + 标题 + 描述 */
 .ask-opt {
-  display: flex; flex-direction: row; gap: 11px; align-items: flex-start; text-align: left;
+  display: flex; flex-direction: row; gap: 9px; align-items: flex-start; text-align: left;
   background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px; padding: 13px 14px; cursor: pointer; width: 100%;
+  border-radius: 11px; padding: 10px 11px; cursor: pointer; width: 100%;
   transition: border-color 0.12s, background 0.12s;
 }
 .ask-opt:hover { background: rgba(255, 255, 255, 0.06); }
@@ -739,7 +751,7 @@ body.skin-cat #cat { display: flex; }
 .ask-opt.sel .ask-radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #d97757; }
 .ask-ot { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ask-ol { font-size: 13.5px; font-weight: 600; color: #fff; }
-.ask-od { font-size: 12px; color: #9a9aa0; line-height: 1.55; }
+.ask-od { font-size: 11.5px; color: #9a9aa0; line-height: 1.42; }
 
 /* 授权模式：allow/deny 作为强按钮 */
 .ask-opt.act { align-items: center; justify-content: flex-start; font-weight: 700; }
@@ -747,7 +759,7 @@ body.skin-cat #cat { display: flex; }
 .ask-opt.allow.sel, .ask-opt.allow:hover { border-color: #34c759; background: rgba(52, 199, 89, 0.12); }
 .ask-opt.deny.sel, .ask-opt.deny:hover { border-color: #ff5a52; background: rgba(255, 90, 82, 0.12); }
 
-.ask-other { margin-top: 10px; }
+.ask-other { margin-top: 8px; }
 .ask-other.hidden { display: none; }
 .ask-other input { width: 100%; box-sizing: border-box; background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; padding: 9px 11px; color: #fff; font-size: 13px; }
@@ -760,12 +772,17 @@ body.skin-cat #cat { display: flex; }
   75% { transform: translateX(4px); }
 }
 
-.ask-page { text-align: center; font-size: 11.5px; color: #7a7a80; margin-bottom: 10px; }
+.ask-toolbar {
+  display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
+  padding-top: 9px; margin-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+}
+.ask-page { min-width: 30px; text-align: center; font-size: 11px; color: #85858c; white-space: nowrap; }
 .ask-page:empty { display: none; }
 
-.ask-foot { display: flex; gap: 8px; margin-bottom: 8px; }
+.ask-foot { display: flex; gap: 7px; flex: 1 1 auto; min-width: 0; }
 .ask-foot.hidden { display: none; }
-.ask-btn { flex: 1; font-size: 13px; font-weight: 700; border: none; border-radius: 11px; padding: 11px 0; cursor: pointer;
+.ask-btn { flex: 1; min-width: 64px; font-size: 12px; font-weight: 700; border: none; border-radius: 9px; padding: 9px 10px; cursor: pointer; white-space: nowrap;
   background: rgba(255, 255, 255, 0.08); color: #e8e8ec; }
 .ask-btn:hover { background: rgba(255, 255, 255, 0.15); }
 .ask-btn.primary { background: #c15f3f; color: #fff; }
@@ -773,8 +790,8 @@ body.skin-cat #cat { display: flex; }
 .ask-btn.primary.disabled { background: rgba(193, 95, 63, 0.4); color: rgba(255, 255, 255, 0.6); cursor: default; }
 .ask-btn.hidden { display: none; }
 
-.ask-term { width: 100%; font-size: 12.5px; font-weight: 600; color: #c2c2c8; cursor: pointer;
-  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 11px; padding: 10px 0; }
+.ask-term { flex: 0 0 auto; width: auto; font-size: 11.5px; font-weight: 600; color: #c2c2c8; cursor: pointer; white-space: nowrap;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 9px; padding: 8px 10px; }
 .ask-term:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
 /* 授权按钮强化：允许=实心绿，拒绝=红边，并排 */
