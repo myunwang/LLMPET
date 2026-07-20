@@ -12,7 +12,7 @@
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
     "package:win": "electron-builder --win",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js && node test/popup-style.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",

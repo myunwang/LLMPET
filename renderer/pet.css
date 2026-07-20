@@ -706,7 +706,10 @@ body.skin-cat #cat { display: flex; }
   background: rgba(26, 26, 29, 0.985);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 18px;
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  /* This surface sits only 12px inside a transparent BrowserWindow. An outer
+     blur is clipped at the window edge and becomes a solid-looking side bar
+     on some GPU/display combinations. Keep the depth cue inside the surface. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   padding: 16px 16px 14px;
   color: #f2f2f5;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
