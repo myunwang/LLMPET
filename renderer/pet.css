@@ -683,7 +683,8 @@ body.skin-cat #cat { display: flex; }
 /* ── Needs Input / 授权卡片（重做，深色，对齐参考项目）──────────── */
 .ask {
   position: absolute; top: 12px; left: 12px; right: 12px;
-  max-height: calc(100vh - 30px); overflow-y: auto; overflow-x: hidden;
+  max-width: none;
+  max-height: min(calc(100vh - 210px), 520px); overflow-y: auto; overflow-x: hidden;
   z-index: 32; -webkit-app-region: no-drag;
   background: rgba(26, 26, 29, 0.985);
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -695,11 +696,19 @@ body.skin-cat #cat { display: flex; }
   padding: 16px 16px 14px;
   color: #f2f2f5;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
   margin: 0;
 }
 .ask.hidden { display: none; }
-.ask::-webkit-scrollbar { width: 0; height: 0; }
+.ask::-webkit-scrollbar { width: 6px; height: 0; }
+.ask::-webkit-scrollbar-track, .ask::-webkit-scrollbar-corner { background: transparent; }
+.ask::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
 
 .ask-head { margin-bottom: 12px; }
 .ask-label { font-size: 17px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
@@ -790,8 +799,9 @@ body.skin-cat #cat { display: flex; }
   max-height: calc(100vh - 224px);
 }
 
-/* 动态定高配套：max-height 略小于「窗口高 - bottom(200)」即可，避免裁切刚好测好的内容 */
-.sesslist, .ask, .todopop { max-height: calc(100vh - 210px); }
+/* 动态定高配套：问答卡片单独封顶，避免长任务把桌面纵向占满。 */
+.sesslist, .todopop { max-height: calc(100vh - 210px); }
+.ask { max-height: min(calc(100vh - 210px), 520px); }
 /* 会话名换行（最多 2 行）而不是省略号截断 */
 .sl-name {
   white-space: normal;

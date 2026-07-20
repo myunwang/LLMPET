@@ -161,23 +161,39 @@ const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
 
 // 动态定高：弹层贴 pet 上方(bottom:200)，把窗口高度调到刚好容纳内容，
-// 避免固定大窗口留白 / 顶屏被下移。w=440 让会话名有地方换行不截断。
-const POPUP_W = 440;
+// 避免固定大窗口留白 / 顶屏被下移。先扩到目标宽度再量高度：如果在基础
+// 320px 窄窗里先测，长文本会被过度换行，错误地把弹层撑到整屏高。
+const POPUP_W = 520;
 const POPUP_BOTTOM = 200;
+const ASK_VIEWPORT_MAX_H = 520;
+let fitPopupSeq = 0;
 function fitPopup(el) {
   if (!el) return;
+  const seq = ++fitPopupSeq;
   requestAnimationFrame(() => {
-    // 关键：先临时去掉 max-height 再量，否则 scrollHeight 会被「当前小窗口算出的
-    // max-height」钳住（鸡生蛋问题）→ 窗口永远只长一点点、列表只剩 1 行+滚动条。
-    const prev = el.style.maxHeight;
-    el.style.maxHeight = 'none';
-    const h = el.scrollHeight; // 真实内容高度
-    el.style.maxHeight = prev;
-    const winH = Math.max(340, POPUP_BOTTOM + h + 24);
-    try { window.pet.setPetSize(POPUP_W, winH); } catch {}
+    const measure = () => {
+      if (seq !== fitPopupSeq) return;
+      // 关键：先临时去掉 max-height 再量，否则 scrollHeight 会被「当前小窗口算出的
+      // max-height」钳住（鸡生蛋问题）→ 窗口永远只长一点点、列表只剩 1 行+滚动条。
+      const prev = el.style.maxHeight;
+      el.style.maxHeight = 'none';
+      const contentH = el.scrollHeight;
+      el.style.maxHeight = prev;
+      const viewportH = el === askEl ? Math.min(contentH, ASK_VIEWPORT_MAX_H) : contentH;
+      const winH = Math.max(340, POPUP_BOTTOM + viewportH + 24);
+      try { window.pet.setPetSize(POPUP_W, winH); } catch {}
+    };
+
+    if (Math.abs((window.innerWidth || 0) - POPUP_W) > 2) {
+      // 第一拍只扩宽，第二拍在正确的横向排版下测真实高度。
+      try { window.pet.setPetSize(POPUP_W, Math.max(340, window.innerHeight || 340)); } catch {}
+      requestAnimationFrame(() => requestAnimationFrame(measure));
+    } else {
+      measure();
+    }
   });
 }
-function resetPetSize() { try { window.pet.setPetSize(0, 0); } catch {} }
+function resetPetSize() { fitPopupSeq++; try { window.pet.setPetSize(0, 0); } catch {} }
 
 // 从快照重建队列（多任务都在、且标明项目）
 function refreshAsk(stats) {
