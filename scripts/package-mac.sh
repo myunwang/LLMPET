@@ -9,7 +9,7 @@ ELECTRON_APP="$ROOT/node_modules/electron/dist/Electron.app"
 RESOURCES="$APP/Contents/Resources"
 
 if [[ ! -d "$ELECTRON_APP" ]]; then
-  echo "Electron runtime not found. Run npm install first." >&2
+  echo "Electron runtime not found. Run npm ci first." >&2
   exit 1
 fi
 
@@ -21,7 +21,7 @@ mkdir -p "$RESOURCES/app"
 
 # 显式清单拷贝(而非"整仓排除法"):仓库里以后加的文档/素材目录不会被误打进 app。
 # hook/ 是安装进 ~/.claude/settings.json 的钩子脚本,shared/ 是主/渲染两端共用的状态表。
-for item in main.js preload.js package.json backend renderer assets shared hook; do
+for item in main.js preload.js package.json backend renderer assets shared hook providers; do
   cp -R "$ROOT/$item" "$RESOURCES/app/"
 done
 
@@ -38,7 +38,7 @@ PLIST="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName Octopus" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Octopus" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.octopus.pet" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(node -e 'console.log(require(process.argv[1]).version)' "$ROOT/package.json")" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "$PLIST"
 if ! /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST" 2>/dev/null; then

@@ -6,8 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Mirrors hook/octopus-hook.js structure but adapted for CodeWhale differences:
-//   • 8 events (session_start/end, message_submit, tool_call_before, turn_end,
-//     subagent_spawn/complete, on_error)
+//   • 10 registered events, including tool_call_after and mode_change
 //   • tool_call_before: reads ENV VARS (DEEPSEEK_TOOL_*), NOT stdin (R2.2)
 //   • All other events: read stdin JSON (same as Claude)
 //   • PATH is NOT stripped (R2.5) — no resolveNodeBin needed
@@ -19,9 +18,9 @@
 //   3. Print decision JSON to stdout → CodeWhale reads it
 //   4. Exit 0
 //
-// If the pet server is unreachable, print nothing (CodeWhale treats empty stdout
-// as Allow, falling through to its own permission prompt).  This ensures the pet
-// never blocks the user when it's not running.
+// If the pet server is unreachable or returns an invalid response, emit an
+// explicit `ask` decision. Empty stdout can be interpreted as Allow by some
+// CodeWhale versions, so fail-open behavior is never used for permissions.
 //
 // Must be fast and never throw — CodeWhale waits on it.
 
@@ -30,43 +29,61 @@ const transport = require('../backend/transport');
 const codewhale = require('../providers/codewhale');
 
 const STDIN_READ_TIMEOUT_MS = 300;
+const STDIN_MAX_BYTES = 1024 * 1024;
 
 // ── stdin reader (for non-tool_call_before events) ──────────────────────────
 function readStdin() {
   return new Promise((resolve) => {
     const chunks = [];
+    let bytes = 0;
+    let tooLarge = false;
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
       let payload = {};
       try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        if (raw.trim()) payload = JSON.parse(raw);
+        if (!tooLarge) {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          if (raw.trim()) payload = JSON.parse(raw);
+        }
       } catch {}
       resolve(payload);
     };
-    process.stdin.on('data', (c) => chunks.push(c));
+    process.stdin.on('data', (c) => {
+      if (tooLarge) return;
+      bytes += c.length;
+      if (bytes > STDIN_MAX_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        finish();
+        return;
+      }
+      chunks.push(c);
+    });
     process.stdin.on('end', finish);
     process.stdin.on('error', finish);
     setTimeout(finish, STDIN_READ_TIMEOUT_MS);
   });
 }
 
-// ── tool_call_before: read stdin JSON (primary) + env vars (fallback) ──────
-// R2.2 said "env vars only" but CodeWhale 0.9.0 ALSO sends JSON on stdin with
-// session_id, workspace, model, etc. We read stdin FIRST (consistent with
-// other events), then supplement with env vars for tool_name/tool_input.
-async function readToolCallBeforePayload() {
-  // 1. Read stdin JSON (has session_id, workspace, model, etc.)
-  const stdinPayload = await readStdin();
-  // 2. Read env vars (tool_name, tool_input come from env)
-  const envPayload = {
-    tool_name: process.env.DEEPSEEK_TOOL_NAME || process.env.CODEWHALE_TOOL_NAME || '',
-    tool_input_json: process.env.DEEPSEEK_TOOL_ARGS || process.env.CODEWHALE_TOOL_ARGS || '',
+// ── tool_call_before: build payload from env vars (R2.2) ──────────────────
+// W14 (version compatibility): CodeWhale may rename env vars across versions
+// (DEEPSEEK_* → CODEWHALE_*). We check both prefixes defensively so the hook
+// keeps working even if CodeWhale renames its env vars in a future update.
+function readToolCallBeforeEnv() {
+  // Try DEEPSEEK_* (current) first, then CODEWHALE_* (future-proofing)
+  const env = process.env;
+  const sid = env.DEEPSEEK_SESSION_ID || env.CODEWHALE_SESSION_ID || '';
+  return {
+    session_id: sid,
+    workspace: env.DEEPSEEK_WORKSPACE || env.CODEWHALE_WORKSPACE || '',
+    mode: env.DEEPSEEK_MODE || env.CODEWHALE_MODE || '',
+    model: env.DEEPSEEK_MODEL || env.CODEWHALE_MODEL || '',
+    total_tokens: 0,
+    tool_name: env.DEEPSEEK_TOOL_NAME || env.CODEWHALE_TOOL_NAME || '',
+    tool_input_json: env.DEEPSEEK_TOOL_ARGS || env.CODEWHALE_TOOL_ARGS || '',
   };
-  // Merge: stdin takes priority for session/workspace/model; env for tool info
-  return { ...envPayload, ...stdinPayload };
 }
 
 // ── Permission bridge (Round 3) ────────────────────────────────────────────
@@ -77,17 +94,28 @@ async function readToolCallBeforePayload() {
 // The server's AUTO_CLOSE_MS (480s) handles this.  Our HTTP timeout (590s)
 // is a safety net in case the server hangs without responding.
 const CW_PERM_HTTP_TIMEOUT_MS = 590 * 1000;
+const CW_PERM_RESPONSE_MAX_BYTES = 16 * 1024;
+const VALID_DECISIONS = new Set(['allow', 'deny', 'ask']);
 
 function tryParseJson(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
 function postCodeWhalePermission(body, callback) {
-  const port = transport.readRuntimePort();
-  if (!port) { callback(null); return; }
+  let settled = false;
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    callback(value);
+  };
+
+  const runtime = transport.readRuntimeConfig();
+  if (!runtime) { finish(null); return; }
+  const { port, token } = runtime;
 
   // Parse tool_input_json string (from DEEPSEEK_TOOL_ARGS env var) into an object
-  // for the permission endpoint.  If parsing fails, send empty object.
+  // for the permission endpoint. If parsing fails, send an empty object; the
+  // displayed tool name/session still remain available to the user.
   let toolInput = {};
   if (typeof body.tool_input_json === 'string' && body.tool_input_json.trim()) {
     const parsed = tryParseJson(body.tool_input_json);
@@ -115,30 +143,65 @@ function postCodeWhalePermission(body, callback) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload),
+        [transport.TOKEN_HEADER]: token,
       },
     },
     (res) => {
+      // runtime.json is user-writable state. Verify the responding process is
+      // actually Octopus before trusting an allow/deny decision.
+      if (res.statusCode !== 200 || !transport.headerIsOurs(res)) {
+        res.resume();
+        finish(null);
+        return;
+      }
       const chunks = [];
-      res.on('data', (c) => chunks.push(c));
+      let bytes = 0;
+      let oversized = false;
+      res.on('data', (c) => {
+        bytes += c.length;
+        if (bytes > CW_PERM_RESPONSE_MAX_BYTES) {
+          oversized = true;
+          chunks.length = 0;
+          return;
+        }
+        if (!oversized) chunks.push(c);
+      });
       res.on('end', () => {
+        if (oversized) { finish(null); return; }
         try {
           const raw = Buffer.concat(chunks).toString('utf8');
           const obj = JSON.parse(raw);
-          // Validate: must have a string "decision" field
-          if (obj && typeof obj.decision === 'string' && obj.decision) {
-            callback(obj);
+          const decision = obj && typeof obj.decision === 'string'
+            ? obj.decision.toLowerCase().trim() : '';
+          if (VALID_DECISIONS.has(decision)) {
+            finish({ ...obj, decision });
           } else {
-            callback(null);
+            finish(null);
           }
         } catch {
-          callback(null);
+          finish(null);
         }
       });
+      res.on('error', () => finish(null));
     }
   );
-  req.on('error', () => callback(null));
-  req.on('timeout', () => { req.destroy(); callback(null); });
+  req.on('error', () => finish(null));
+  req.on('timeout', () => { req.destroy(); finish(null); });
   req.end(payload);
+}
+
+
+function safeAsk(reason) {
+  return {
+    decision: 'ask',
+    reason: reason || 'Octopus is unavailable; use CodeWhale permission prompt',
+  };
+}
+
+function writeDecision(decision) {
+  const safe = decision && VALID_DECISIONS.has(decision.decision)
+    ? decision : safeAsk('Invalid Octopus permission response');
+  try { process.stdout.write(JSON.stringify(safe) + '\n'); } catch {}
 }
 
 // ── Non-TCB event handler (unchanged from Round 2) ────────────────────────
@@ -157,35 +220,52 @@ function handleOtherEvent(event) {
 
 // ── tool_call_before handler (Round 3: permission bridge) ──────────────────
 function handleToolCallBefore() {
-  readToolCallBeforePayload().then((payload) => {
-    let body;
-    try {
-      body = codewhale.parseHookStdin('tool_call_before', payload);
-    } catch { body = null; }
-    if (!body) process.exit(0);
+  const payload = readToolCallBeforeEnv();
+  let body;
+  try {
+    body = codewhale.parseHookStdin('tool_call_before', payload);
+  } catch { body = null; }
 
-    // 1. Fire state update (non-blocking) so the pet shows "working" state.
-    //    Don't wait for callback — we need to proceed to permission bridge.
-    transport.postState(body);
-
-    // 2. Block on permission bridge — the server parks this connection until
-    //    the pet user clicks allow/deny, then returns the decision JSON.
-    postCodeWhalePermission(body, (decision) => {
-      if (!decision) {
-        // Server unreachable or bad response → print nothing.
-        // CodeWhale treats empty stdout as Allow (R2.2: "空 stdout → Allow"),
-        // so the user sees CodeWhale's own permission prompt.  This is the
-        // correct behavior when the pet is not running.
+  // W14 (version compatibility): if env vars gave no session_id, try reading
+  // stdin as a fallback. CodeWhale's current version doesn't write stdin for
+  // TCB, but a future version might — this keeps us forward-compatible.
+  // Also: if session_id is missing entirely, we cannot safely associate the
+  // decision with a session, so explicitly fall back to CodeWhale's own prompt.
+  if (!body || !body.session_id) {
+    readStdin().then((stdinPayload) => {
+      let mergedBody = body;
+      if (stdinPayload && typeof stdinPayload.session_id === 'string' && stdinPayload.session_id) {
+        // Merge stdin session_id into the env-based payload and re-parse
+        const merged = Object.assign({}, payload, stdinPayload);
+        try { mergedBody = codewhale.parseHookStdin('tool_call_before', merged); } catch { mergedBody = body; }
+      }
+      if (!mergedBody || !mergedBody.session_id) {
+        writeDecision(safeAsk('Missing CodeWhale session id'));
         process.exit(0);
       }
-      // Print the decision JSON to stdout for CodeWhale to consume.
-      // Valid values: allow, deny, ask (R2.2).
-      try {
-        process.stdout.write(JSON.stringify(decision) + '\n');
-      } catch {}
+      proceedWithTcb(mergedBody);
+    }).catch(() => {
+      writeDecision(safeAsk('Unable to read CodeWhale hook input'));
       process.exit(0);
     });
-  }).catch(() => process.exit(0));
+  } else {
+    proceedWithTcb(body);
+  }
+}
+
+function proceedWithTcb(body) {
+  // 1. Fire state update (non-blocking) so the pet shows "working" state.
+  //    Don't wait for callback — we need to proceed to permission bridge.
+  transport.postState(body);
+
+  // 2. Block on permission bridge — the server parks this connection until
+  //    the pet user clicks allow/deny, then returns the decision JSON.
+  postCodeWhalePermission(body, (decision) => {
+    // Server unreachable, spoofed, oversized, malformed, or timed out → ask.
+    // Never emit empty stdout for a permission event because that can fail open.
+    writeDecision(decision || safeAsk('Octopus permission service unavailable'));
+    process.exit(0);
+  });
 }
 
 function main() {
@@ -200,4 +280,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { readToolCallBeforePayload, postCodeWhalePermission };
+module.exports = { readToolCallBeforeEnv, postCodeWhalePermission, safeAsk, writeDecision, VALID_DECISIONS };

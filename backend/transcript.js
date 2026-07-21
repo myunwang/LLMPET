@@ -209,4 +209,4 @@ function promptTitle(prompt) {
   return null;
 }
 
-module.exports = { readTail, lastAssistantText, contextUsage, apiError, apiErrorAfter, sessionTitle, promptTitle, clean, hasHistory, interruptedAfter };
+module.exports = { readTail, lastAssistantText, contextUsage, apiError, apiErrorAfter, sessionTitle, promptTitle, clean, textFromContent, hasHistory, interruptedAfter };

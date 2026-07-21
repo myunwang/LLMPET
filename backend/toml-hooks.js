@@ -1,120 +1,133 @@
 'use strict';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TOML merge-safe hook installer for CodeWhale.
-// ─────────────────────────────────────────────────────────────────────────────
+// Merge-safe CodeWhale hook installer.
 //
-// Handles ~/.codewhale/config.toml — ONLY the [[hooks.hooks]] array.
-// Strategy mirrors backend/hookinstall.js (Claude JSON version):
-//   • ONLY touches entries whose `command` contains our marker string.
-//   • All other TOML content (tables, values, comments) preserved byte-for-byte.
-//   • Atomic write (tmp + rename).
-//   • Uninstall backs up first.
-//
-// TOML parsing is intentionally line-based and minimal — we only need to
-// identify and manipulate [[hooks.hooks]] array entries. A full TOML parser
-// would be massive overkill and a dependency risk.
-//
-// Source schema (R2.8):
-//   [hooks]
-//   enabled = true
-//   [[hooks.hooks]]
-//   event = "tool_call_before"
-//   command = "node /abs/codewhale-hook.js tool_call_before"
-//   timeout_secs = 600
-//   background = false
-//   continue_on_error = false
-//   name = "octopus"
-//   # condition = ... (optional, we don't set this)
+// Only [[hooks.hooks]] entries whose `command` contains our marker are changed.
+// Other tables, comments, ordering, and line endings are preserved. Writes use a
+// same-directory temporary file followed by rename so readers never see a
+// partially-written config.
 
 const fs = require('fs');
 const path = require('path');
 const codewhale = require('../providers/codewhale');
+const { readTextBoundedSync } = require('./safe-json');
 
-const MARKER = codewhale.hookMarker;                    // 'codewhale-hook.js'
+const MARKER = codewhale.hookMarker;
+const ANY_TABLE_RE = /^\s*\[(?:\[)?[^\]]/;
+const FIELD_RE = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/;
+const MAX_CONFIG_BYTES = 16 * 1024 * 1024;
 
-// Path is read dynamically from the provider each call, NOT cached at require time.
-// This allows callers to override codewhale.dirs.settingsFile before calling.
+function tableHeaderBody(line) {
+  if (typeof line !== 'string') return null;
+  const hash = line.indexOf('#');
+  const body = (hash >= 0 ? line.slice(0, hash) : line).trim();
+  return body || null;
+}
+
+function isHookArrayHeader(line) {
+  return tableHeaderBody(line) === '[[hooks.hooks]]';
+}
+
+function isHooksTableHeader(line) {
+  return tableHeaderBody(line) === '[hooks]';
+}
+
 function getSettingsPath() {
   return codewhale.dirs.settingsFile;
 }
 
-// ── Line-level TOML parsing ──────────────────────────────────────────────────
-// We parse just enough to find and manipulate [[hooks.hooks]] entries.
-// Each entry is an object { _lines: [lineNumbers], _startLine, _endLine, key: value, ... }
-// and we track the line ranges so we can splice the file accurately.
-
-// Find the line index of the last [[hooks.hooks]] header, or -1.
-function findLastHooksHooksArrayLine(lines) {
-  let last = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\[\[hooks\.hooks\]\]\s*$/.test(lines[i])) last = i;
+function toRecords(raw) {
+  const records = [];
+  let offset = 0;
+  const re = /([^\r\n]*)(\r\n|\n|\r|$)/g;
+  let match;
+  while ((match = re.exec(raw)) !== null) {
+    if (match[0] === '' && match.index === raw.length) break;
+    records.push({
+      content: match[1],
+      ending: match[2],
+      start: offset,
+      end: offset + match[0].length,
+    });
+    offset += match[0].length;
+    if (match[2] === '') break;
   }
-  return last;
+  return records;
 }
 
-// Find the line index of [hooks] header, or -1.
-function findHooksTableLine(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\[hooks\]\s*$/.test(lines[i])) return i;
+function dominantEol(records) {
+  const counts = new Map();
+  for (const r of records) {
+    if (!r.ending) continue;
+    counts.set(r.ending, (counts.get(r.ending) || 0) + 1);
   }
-  return -1;
+  let best = '\n';
+  let max = -1;
+  for (const [ending, count] of counts) {
+    if (count > max) { best = ending; max = count; }
+  }
+  return best;
 }
 
-// Parse a single [[hooks.hooks]] entry starting at `startLine`.
-// Returns { startLine, endLine, fields: {key: value, ...} } where endLine
-// is the last NON-BLANK line of the entry (exclusive of trailing blanks and
-// the next header/EOF). Trailing blank lines are NOT part of the entry —
-// they belong to the inter-entry separator and must be preserved as-is
-// during removal/insertion to avoid corrupting neighbouring entries.
-function parseEntry(lines, startLine) {
+function parseEntry(records, startLine) {
   const fields = {};
-  let i = startLine + 1; // skip the [[hooks.hooks]] line itself
-  let lastNonBlank = startLine; // the header line itself counts
-  while (i < lines.length) {
-    const line = lines[i];
-    // Next table/array header or EOF ends this entry
-    if (/^\s*\[/.test(line)) break;
-    // Key = value (simple string/number/bool)
-    const m = line.match(/^(\w+)\s*=\s*(.+)$/);
-    if (m) {
-      fields[m[1]] = m[2].trim();
-      lastNonBlank = i;
-    } else if (line.trim() !== '') {
-      // Non-empty, non-key line (e.g. comment) — still part of entry
-      lastNonBlank = i;
-    }
+  let i = startLine + 1;
+  while (i < records.length) {
+    const line = records[i].content;
+    if (ANY_TABLE_RE.test(line)) break;
+    const m = line.match(FIELD_RE);
+    if (m && !line.trimStart().startsWith('#')) fields[m[1]] = m[2];
     i++;
   }
-  return { startLine, endLine: lastNonBlank, fields };
+  return { startLine, endLine: i - 1, endExclusive: i, fields };
 }
 
-// Check if a parsed entry is "ours" (command contains our marker).
+function findEntries(records) {
+  const entries = [];
+  for (let i = 0; i < records.length; i++) {
+    if (!isHookArrayHeader(records[i].content)) continue;
+    const entry = parseEntry(records, i);
+    entries.push(entry);
+    i = Math.max(i, entry.endLine);
+  }
+  return entries;
+}
+
+function unquoteTomlString(raw) {
+  if (typeof raw !== 'string') return '';
+  const t = raw.trim();
+  if (t.startsWith('"') && t.endsWith('"')) {
+    try { return JSON.parse(t); } catch { return t.slice(1, -1); }
+  }
+  if (t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1);
+  return t;
+}
+
 function isOurEntry(entry) {
-  const cmd = entry.fields.command || '';
-  return cmd.includes(MARKER);
+  return unquoteTomlString(entry && entry.fields && entry.fields.command).includes(MARKER);
 }
 
-// Serialize an entry object back to TOML lines.
-function entryToToml(fields) {
-  const out = ['[[hooks.hooks]]'];
-  // Deterministic key order
+function tomlString(value) {
+  // TOML basic strings support the JSON escapes used for the values produced
+  // here. This safely handles quotes, backslashes, controls, and apostrophes.
+  return JSON.stringify(String(value));
+}
+
+function entryToToml(fields, eol = '\n') {
+  const lines = ['[[hooks.hooks]]'];
   const order = ['event', 'command', 'timeout_secs', 'background', 'continue_on_error', 'name', 'condition'];
-  for (const k of order) {
-    if (fields[k] !== undefined) out.push(`${k} = ${fields[k]}`);
+  for (const key of order) {
+    if (fields[key] !== undefined) lines.push(`${key} = ${fields[key]}`);
   }
-  // Any extra keys
-  for (const k of Object.keys(fields)) {
-    if (!order.includes(k)) out.push(`${k} = ${fields[k]}`);
+  for (const key of Object.keys(fields)) {
+    if (!order.includes(key)) lines.push(`${key} = ${fields[key]}`);
   }
-  return out;
+  return lines.join(eol);
 }
 
-// ── Atomic file ops ──────────────────────────────────────────────────────────
 function readConfig() {
   try {
-    const raw = fs.readFileSync(getSettingsPath(), 'utf8');
-    return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    return readTextBoundedSync(getSettingsPath(), MAX_CONFIG_BYTES);
   } catch (err) {
     if (err.code === 'ENOENT') return null;
     throw new Error(`read config.toml: ${err.message}`);
@@ -122,140 +135,108 @@ function readConfig() {
 }
 
 function writeAtomic(content) {
-  const dir = path.dirname(getSettingsPath());
-  fs.mkdirSync(dir, { recursive: true });
+  const target = getSettingsPath();
+  const dir = path.dirname(target);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch {}
   const tmp = path.join(dir, `.config.${process.pid}.${Date.now()}.tmp`);
-  fs.writeFileSync(tmp, content, 'utf8');
-  fs.renameSync(tmp, getSettingsPath());
+  let mode = 0o600;
+  try { mode = fs.statSync(target).mode & 0o777; } catch {}
+  try {
+    fs.writeFileSync(tmp, content, { encoding: 'utf8', mode });
+    fs.renameSync(tmp, target);
+    try { fs.chmodSync(target, mode); } catch {}
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw err;
+  }
 }
 
-// ── Core: register hooks ─────────────────────────────────────────────────────
-// Reads config.toml, finds/removes our old entries, appends new ones,
-// writes atomically. Returns {added, updated, skipped}.
+function removeRanges(raw, records, ranges) {
+  if (!ranges.length) return raw;
+  const spans = ranges
+    .map((r) => ({ start: records[r.startLine].start, end: records[r.endLine].end }))
+    .sort((a, b) => b.start - a.start);
+  let out = raw;
+  for (const span of spans) out = out.slice(0, span.start) + out.slice(span.end);
+  return out;
+}
+
+function insertionOffset(raw, records, entries, hooksTableLine) {
+  if (entries.length) {
+    // Insert before the next table, i.e. after the complete final hook entry.
+    const last = entries[entries.length - 1];
+    return last.endExclusive < records.length ? records[last.endExclusive].start : raw.length;
+  }
+  if (hooksTableLine >= 0) return records[hooksTableLine].end;
+  return raw.length;
+}
+
+function makeHookBlock(eol) {
+  return codewhale.hookTomlSchema.entries.map((entry) => {
+    const fields = {
+      event: tomlString(entry.event),
+      command: tomlString(entry.command),
+    };
+    if (entry.timeout_secs != null) fields.timeout_secs = entry.timeout_secs;
+    if (entry.background != null) fields.background = entry.background;
+    if (entry.continue_on_error != null) fields.continue_on_error = entry.continue_on_error;
+    if (entry.name) fields.name = tomlString(entry.name);
+    return entryToToml(fields, eol);
+  }).join(eol + eol);
+}
+
 function registerHooks() {
-  const entries = codewhale.hookTomlSchema.entries;
-  let raw = readConfig();
-  const lines = raw ? raw.split('\n') : [];
+  const original = readConfig();
+  let raw = original === null ? '' : original;
+  const originalRecords = toRecords(raw);
+  const oldEntries = findEntries(originalRecords);
+  const ours = oldEntries.filter(isOurEntry);
+  const oldEvents = new Set(ours.map((e) => unquoteTomlString(e.fields.event)));
 
-  // 1. Remove our existing entries (track line ranges)
-  const ourRanges = [];
-  const parsed = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\[\[hooks\.hooks\]\]\s*$/.test(lines[i])) {
-      const entry = parseEntry(lines, i);
-      parsed.push(entry);
-      if (isOurEntry(entry)) {
-        ourRanges.push({ start: entry.startLine, end: entry.endLine });
-      }
-    }
-  }
+  raw = removeRanges(raw, originalRecords, ours);
+  let records = toRecords(raw);
+  const eol = dominantEol(records);
+  let hooksTableLine = records.findIndex((r) => isHooksTableHeader(r.content));
+  let entries = findEntries(records);
 
-  // 2. Build new file without our old entries (from bottom up to preserve indices)
-  const removeSet = new Set();
-  for (const r of ourRanges) {
-    for (let i = r.start; i <= r.end; i++) removeSet.add(i);
-  }
-  let newLines = lines.filter((_, i) => !removeSet.has(i));
-
-  // 3. Ensure [hooks] table header exists (add if missing)
-  let hooksLine = findHooksTableLine(newLines);
-  if (hooksLine === -1) {
-    // Also check for [[hooks.hooks]] without a preceding [hooks]
-    const arrLine = findLastHooksHooksArrayLine(newLines);
-    if (arrLine >= 0) {
-      // Insert [hooks] before the first [[hooks.hooks]]
-      newLines.splice(arrLine, 0, '[hooks]', '');
-      hooksLine = arrLine;
+  if (hooksTableLine < 0) {
+    const prefix = raw && !/\r?\n$/.test(raw) ? eol : '';
+    const header = `[hooks]${eol}enabled = true${eol}`;
+    if (entries.length) {
+      const at = records[entries[0].startLine].start;
+      raw = raw.slice(0, at) + header + eol + raw.slice(at);
     } else {
-      // No hooks at all — append at end
-      newLines = newLines.concat(['', '[hooks]', '']);
-      hooksLine = newLines.length - 2;
+      raw += prefix + (raw ? eol : '') + header;
     }
+    records = toRecords(raw);
+    hooksTableLine = records.findIndex((r) => isHooksTableHeader(r.content));
+    entries = findEntries(records);
   }
 
-  // 4. Find insertion point: AFTER the last [[hooks.hooks]] entry's full range.
-  //    We must not insert in the middle of an existing entry (between its header
-  //    and its trailing fields) — that would split the entry and leave a stray
-  //    empty header. So we find the last [[hooks.hooks]] header, parse its full
-  //    range (now correctly excluding trailing blanks), and insert after endLine.
-  let insertAfter = -1;
-  for (let i = newLines.length - 1; i >= 0; i--) {
-    if (/^\[\[hooks\.hooks\]\]\s*$/.test(newLines[i])) {
-      const e = parseEntry(newLines, i);
-      insertAfter = e.endLine;
-      break;
-    }
-  }
-  if (insertAfter < 0) insertAfter = hooksLine; // right after [hooks]
+  const block = makeHookBlock(eol);
+  let at = insertionOffset(raw, records, entries, hooksTableLine);
+  const before = raw.slice(0, at);
+  const after = raw.slice(at);
+  const lead = before && !before.endsWith(eol) ? eol : '';
+  const separatorBefore = before.endsWith(eol + eol) || !before ? '' : eol;
+  const separatorAfter = after && (after.startsWith(eol) || after.startsWith('\n') || after.startsWith('\r')) ? '' : eol;
+  raw = before + lead + separatorBefore + block + eol + separatorAfter + after;
 
-  // 5. Build our new TOML entries
-  const ourEntries = entries.map((e) => {
-    const f = { event: `"${e.event}"`, command: `"${e.command}"` };
-    if (e.timeout_secs != null) f.timeout_secs = e.timeout_secs;
-    if (e.background != null) f.background = e.background;
-    if (e.continue_on_error != null) f.continue_on_error = e.continue_on_error;
-    if (e.name) f.name = `"${e.name}"`;
-    return f;
-  });
-
-  // Count what happened (matched by event)
-  const oldEvents = new Set();
-  for (const p of parsed) {
-    if (isOurEntry(p)) oldEvents.add(p.fields.event);
-  }
-  let added = 0, updated = 0, skipped = 0;
-  for (const e of ourEntries) {
-    if (oldEvents.has(e.event)) updated++;
-    else added++;
-  }
-
-  // 6. Insert our entries after the insertion point
-  const tomlLines = ourEntries.flatMap((f) => entryToToml(f));
-  // Splice after insertAfter line
-  newLines.splice(insertAfter + 1, 0, '', ...tomlLines, '');
-
-  // 7. Clean up excessive blank lines (max 1 consecutive)
-  const cleaned = [];
-  let prevBlank = false;
-  for (const line of newLines) {
-    if (line.trim() === '') {
-      if (prevBlank) continue;
-      prevBlank = true;
-    } else {
-      prevBlank = false;
-    }
-    cleaned.push(line);
-  }
-  // Trim trailing blanks
-  while (cleaned.length && cleaned[cleaned.length - 1].trim() === '') cleaned.pop();
-
-  writeAtomic(cleaned.join('\n') + '\n');
-  return { added, updated, skipped, total: added + updated };
+  writeAtomic(raw);
+  const total = codewhale.hookTomlSchema.entries.length;
+  let updated = 0;
+  for (const entry of codewhale.hookTomlSchema.entries) if (oldEvents.has(entry.event)) updated++;
+  return { added: total - updated, updated, skipped: 0, total };
 }
 
-// ── Core: unregister hooks ───────────────────────────────────────────────────
 function unregisterHooks(options = {}) {
-  let raw = readConfig();
+  const raw = readConfig();
   if (raw === null) return { removed: 0 };
+  const records = toRecords(raw);
+  const ours = findEntries(records).filter(isOurEntry);
+  if (!ours.length) return { removed: 0 };
 
-  const lines = raw.split('\n');
-  let removed = 0;
-
-  // Find and mark our entries for removal
-  const removeSet = new Set();
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\[\[hooks\.hooks\]\]\s*$/.test(lines[i])) {
-      const entry = parseEntry(lines, i);
-      if (isOurEntry(entry)) {
-        for (let j = entry.startLine; j <= entry.endLine; j++) removeSet.add(j);
-        removed++;
-      }
-    }
-  }
-
-  if (removed === 0) return { removed: 0 };
-
-  // Backup before modifying
   let backupPath = null;
   if (options.backup) {
     try {
@@ -263,20 +244,29 @@ function unregisterHooks(options = {}) {
       fs.copyFileSync(getSettingsPath(), backupPath);
     } catch { backupPath = null; }
   }
-
-  const newLines = lines.filter((_, i) => !removeSet.has(i));
-  writeAtomic(newLines.join('\n') + '\n');
-  return { removed, backupPath };
+  writeAtomic(removeRanges(raw, records, ours));
+  return { removed: ours.length, backupPath };
 }
 
-// ── Core: check if our marker is present ─────────────────────────────────────
 function markerPresent() {
   try {
     const raw = readConfig();
-    return raw !== null && raw.includes(MARKER);
+    return raw !== null && findEntries(toRecords(raw)).some(isOurEntry);
   } catch {
     return false;
   }
 }
 
-module.exports = { registerHooks, unregisterHooks, markerPresent, getSettingsPath, MARKER };
+module.exports = {
+  registerHooks,
+  unregisterHooks,
+  markerPresent,
+  getSettingsPath,
+  MARKER,
+  toRecords,
+  parseEntry,
+  findEntries,
+  entryToToml,
+  tomlString,
+  unquoteTomlString,
+};

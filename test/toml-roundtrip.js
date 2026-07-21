@@ -4,10 +4,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const assert = require('assert');
 const codewhale = require('../providers/codewhale');
 const tomlHooks = require('../backend/toml-hooks');
 
-const TMPDIR = '/tmp/toml-rt-' + process.pid;
+const TMPDIR = path.join(os.tmpdir(), 'toml-rt-' + process.pid);
 fs.mkdirSync(TMPDIR, { recursive: true });
 
 // ---- helpers (write to stderr to avoid [ stripping) ----
@@ -74,14 +76,15 @@ log(`markerPresent: ${tomlHooks.markerPresent()}`);
 // Count our entries by counting lines with our marker
 const content = fs.readFileSync(testFile, 'utf8');
 const ourLines = content.split('\n').filter(l => l.includes('codewhale-hook.js')).length;
-log(`Our entry lines: ${ourLines} (expect ${8} events = 8 headers)`);
+const expectedHooks = codewhale.hookTomlSchema.entries.length;
+log(`Our entry lines: ${ourLines} (expect ${expectedHooks} events)`);
 
 // ---- Test 2: Update (reinstall) ----
 log('\n=== Test 2: Reinstall (update) ===');
 const reg2 = tomlHooks.registerHooks();
 log(`Reinstall result: ${JSON.stringify(reg2)}`);
 const ourLines2 = fs.readFileSync(testFile, 'utf8').split('\n').filter(l => l.includes('codewhale-hook.js')).length;
-log(`Our entry lines after reinstall: ${ourLines2} (should still be 8 headers)`);
+log(`Our entry lines after reinstall: ${ourLines2} (should still be ${expectedHooks})`);
 
 // ---- Test 3: Uninstall ----
 log('\n=== Test 3: Uninstall ===');
@@ -104,11 +107,13 @@ const allOk =
   before.hasEchoHello && before.hasEchoDone && before.hasModelSection &&
   before.hasHooksEnabled &&
   after.hasMarker && after.hasEchoHello && after.hasEchoDone && after.hasModelSection &&
-  ourLines === 8 &&
-  ourLines2 === 8 &&
+  ourLines === expectedHooks &&
+  ourLines2 === expectedHooks &&
   ourLinesFinal === 0 && !final.hasMarker &&
   final.hasEchoHello && final.hasEchoDone && final.hasModelSection;
-log(allOk ? 'PASS' : 'FAIL');
+assert.strictEqual(allOk, true, 'TOML register/reinstall/uninstall round-trip failed');
+assert.strictEqual(tomlHooks.tomlString(`node \"/tmp/o'brien/hook.js\"`), `\"node \\\"/tmp/o'brien/hook.js\\\"\"`);
+log('PASS');
 
 // Clean up
-fs.rmSync(TMPDIR, { recursive: true });
+fs.rmSync(TMPDIR, { recursive: true, force: true });

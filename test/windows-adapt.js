@@ -31,7 +31,7 @@ console.log('[W1] providers/codewhale.js — findCodeWhale win32 branch');
   ok('has Windows path candidates (APPDATA/npm)', /APPDATA/.test(src) && /npm/.test(src));
   ok('has Windows path candidates (LOCALAPPDATA/Programs/CodeWhale)', /LOCALAPPDATA/.test(src) && /CodeWhale/.test(src));
   ok('has Windows path candidates (ProgramFiles/nodejs)', /ProgramFiles/.test(src) && /nodejs/.test(src));
-  ok('Unix branch preserved (command -v)', /command['"]\s*,\s*\[['"]-v['"]/.test(src));
+  ok('Unix branch uses a shell for command -v', /execFileSync\(shell[^;]+command -v/.test(src));
   ok('Unix path candidates preserved (/usr/local/bin)', /\/usr\/local\/bin\/codewhale/.test(src));
   ok('Unix path candidates preserved (homebrew)', /homebrew/.test(src));
 }
@@ -40,26 +40,25 @@ console.log('\n[W2] providers/codewhale.js — hookTomlSchema forward-slash norm
 {
   const src = read('providers/codewhale.js');
   ok('hookTomlSchema is defined', /hookTomlSchema:\s*Object\.freeze/.test(src));
-  ok('command uses resolveHookScriptPath().split(path.sep).join("/")', /resolveHookScriptPath\(\)\.split\(path\.sep\)\.join\(['"]\/['"]\)/.test(src) || /HOOK_SCRIPT\.split\(path\.sep\)\.join\(['"]\/['"]\)/.test(src));
+  ok('command uses split(path.sep).join("/")', /HOOK_SCRIPT\.split\(path\.sep\)\.join\(['"]\/['"]\)/.test(src));
   // Load the module and inspect the actual generated commands (no Electron needed).
   const cw = require('../providers/codewhale');
   const entries = cw.hookTomlSchema.entries;
   ok('hookTomlSchema.entries is a non-empty array', Array.isArray(entries) && entries.length > 0);
   let allForwardSlash = true;
   let allContainEvent = true;
+  let allHaveNodePrefix = true;
   for (const e of entries) {
     if (typeof e.command !== 'string' || e.command.includes('\\')) allForwardSlash = false;
-    if (typeof e.command !== 'string' || !/codewhale-hook\.js"?\s+\S+$/.test(e.command)) allContainEvent = false;
+    // W6: command is now `node "path/codewhale-hook.js" event` (node prefix +
+    // quoted path). The closing quote may or may not be present depending on
+    // whether the path has spaces, so match optionally.
+    if (typeof e.command !== 'string' || !e.command.includes('codewhale-hook.js') || !e.command.endsWith(process.platform === 'win32' ? e.event : `'${e.event}'`)) allContainEvent = false;
+    if (typeof e.command !== 'string' || !/^(?:node|'node')\s/.test(e.command)) allHaveNodePrefix = false;
   }
   ok('all entry commands contain zero backslashes', allForwardSlash);
   ok('all entry commands end with the event name', allContainEvent);
-  // W-fix: command MUST have explicit node prefix (CodeWhale Rust Command::new
-  // does not use shell file association, so bare .js path fails).
-  const allHaveNode = entries.every((e) => typeof e.command === 'string' && /\bnode"?\s/.test(e.command) || e.command.startsWith('"') === false && /\/node"?\s/.test(e.command));
-  ok('all entry commands have explicit node prefix', allHaveNode);
-  // W-asar: hook script path must resolve to app.asar.unpacked/ when inside asar
-  ok('resolveHookScriptPath function exists', /function resolveHookScriptPath/.test(read('providers/codewhale.js')));
-  ok('hookinstall.js also has resolveHookScriptPath', /function resolveHookScriptPath/.test(read('backend/hookinstall.js')));
+  ok('all entry commands have node prefix (W6: prevents WScript on Windows)', allHaveNodePrefix);
   ok('tool_call_before entry has timeout_secs=600 (permission bridge)', entries.some((e) => e.event === 'tool_call_before' && e.timeout_secs === 600));
   ok('non-permission entries have short timeout (<=5)', entries.filter((e) => e.event !== 'tool_call_before').every((e) => e.timeout_secs <= 5));
   ok('tool_call_before has background=false (R2.10 permission gate)', entries.some((e) => e.event === 'tool_call_before' && e.background === false));

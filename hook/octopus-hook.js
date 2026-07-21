@@ -30,19 +30,37 @@ const EVENT_STATE = {
   Elicitation: 'notification',
 };
 const FOCUS_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
+const STDIN_MAX_BYTES = 1024 * 1024;
 
 function readStdin() {
   return new Promise((resolve) => {
     const chunks = [];
+    let bytes = 0;
+    let tooLarge = false;
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
       let payload = {};
-      try { const raw = Buffer.concat(chunks).toString('utf8'); if (raw.trim()) payload = JSON.parse(raw); } catch {}
+      try {
+        if (!tooLarge) {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          if (raw.trim()) payload = JSON.parse(raw);
+        }
+      } catch {}
       resolve(payload);
     };
-    process.stdin.on('data', (c) => chunks.push(c));
+    process.stdin.on('data', (c) => {
+      if (tooLarge) return;
+      bytes += c.length;
+      if (bytes > STDIN_MAX_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        finish();
+        return;
+      }
+      chunks.push(c);
+    });
     process.stdin.on('end', finish);
     process.stdin.on('error', finish);
     setTimeout(finish, 300);
@@ -131,7 +149,7 @@ function buildBody(event, p) {
   // Terminal ownership for focus + headless detection.
   if (FOCUS_EVENTS.has(event)) {
     try {
-      const r = pidwalk.resolve(process.ppid, 10, sid);
+      const r = pidwalk.resolve();
       if (r.sourcePid) body.source_pid = r.sourcePid;
       if (r.pidChain && r.pidChain.length) body.pid_chain = r.pidChain;
       if (r.editor) body.editor = r.editor;

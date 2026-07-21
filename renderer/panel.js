@@ -1,7 +1,21 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-let config = { mode: 'pet', skin: 'mascot', budget5h: 0 };
+let config = { mode: 'pet', skin: 'mascot', budget5h: 0, currency: 'USD', fxRate: 7.2 };
+
+// Format cost with current currency symbol (supports USD → $, CNY → ¥).
+// Cost values in stats are always USD; CNY display applies fxRate conversion.
+function fmtCost(cost, currency, fxRate) {
+  const n = Number(cost) || 0;
+  const cur = (currency || config.currency || 'USD');
+  const rate = Number.isFinite(fxRate || config.fxRate) && (fxRate || config.fxRate) > 0
+    ? (fxRate || config.fxRate) : 7.2;
+  const sym = cur === 'CNY' ? '¥' : '$';
+  const display = cur === 'CNY' ? n * rate : n;
+  if (Math.abs(display) < 1) return sym + display.toFixed(3);
+  if (Math.abs(display) < 100) return sym + display.toFixed(2);
+  return sym + display.toFixed(1);
+}
 let lastOpKey = null;
 let hoursSummary = ''; // 24h 视图默认读数（鼠标移开时恢复）
 let calSummary = '';   // 日历默认读数
@@ -29,9 +43,9 @@ function render(s) {
     $('active-sub').textContent = `${s.active.project} · ${shortModel(s.active.model)}`;
   }
   // 大数
-  $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
+  $('today-cost').textContent = fmtCost(s.today.cost || 0);
   $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + ' 轮';
-  $('win-cost').textContent = '$' + (s.window5h.cost || 0).toFixed(3);
+  $('win-cost').textContent = fmtCost(s.window5h.cost || 0);
   if (s.window5h.tokens > 0 && s.window5h.resetTs) {
     $('win-reset').textContent = fmt(s.window5h.tokens) + ' tok · ' + timeStr(s.window5h.resetTs) + ' 重置';
   } else {
@@ -56,6 +70,9 @@ function render(s) {
   $('t-cw').textContent = fmt(s.today.cacheCreate);
   $('t-cr').textContent = fmt(s.today.cacheRead);
   $('t-msg').textContent = s.today.messages;
+
+  // 按 provider 花费（今日）
+  renderProviderCost(s.providerCost);
 
   // 按模型（有总有分：每模型 cost + 占比条 + in/out/cache 四元组明细，末行合计）
   renderByModel(s.byModel || {});
@@ -85,7 +102,7 @@ function render(s) {
     list.innerHTML = ops
       .map(
         (o, i) =>
-          `<li class="${i === 0 && isNew ? 'new' : ''}"><span>${o.icon || '🔧'}</span><span>${escapeHtml(o.detail)}</span><span class="op-proj">${escapeHtml(o.project || '')}</span><span class="op-time">${timeStr(o.ts)}</span></li>`
+          `<li class="${i === 0 && isNew ? 'new' : ''}"><span>${escapeHtml(o.icon || '🔧')}</span><span>${escapeHtml(o.detail)}</span><span class="op-proj">${escapeHtml(o.project || '')}</span><span class="op-time">${timeStr(o.ts)}</span></li>`
       )
       .join('');
   }
@@ -111,6 +128,37 @@ function fitPanelHeight() {
 // 按模型明细：每模型一行 = 名称 + 占比条 + $花费 + token/占比；下方灰字给出
 // 入/出/缓写/缓读 四元组与轮次；最后一行合计。数据里没有明细字段（旧数据）时只
 // 显示头行，跑一次 `npm run meter:rebuild` 可回填历史明细。
+// Round 12-拓展: per-provider cost breakdown (today).
+const PCOST_META = {
+  claude: { icon: '🐙', label: 'Claude Code' },
+  codewhale: { icon: '🐋', label: 'CodeWhale' },
+  aider: { icon: '🤖', label: 'Aider' },
+};
+function renderProviderCost(providerCost) {
+  const el = $('provider-cost');
+  const block = $('provider-cost-block');
+  if (!el) return;
+  const entries = Object.entries(providerCost || {});
+  // Hide the whole block if no provider has any cost data.
+  const hasData = entries.some(([, v]) => (v.cost || 0) > 0 || (v.tokens || 0) > 0);
+  if (block) block.style.display = hasData ? '' : 'none';
+  if (!hasData) { el.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+  const totalCost = entries.reduce((s, [, v]) => s + (v.cost || 0), 0);
+  const base = totalCost || 1;
+  let html = '';
+  for (const [id, v] of entries) {
+    const m = PCOST_META[id] || { icon: '❓', label: id };
+    const pct = Math.round(((v.cost || 0) / base) * 100);
+    html += `<div class="row pcost-row">`
+      + `<span class="pcost-name">${escapeHtml(m.icon)} ${escapeHtml(m.label)}</span>`
+      + `<span class="pcost-bar-wrap"><span class="pcost-bar" style="width:${pct}%"></span></span>`
+       + `<b>${fmtCost(v.cost || 0)}</b>`
+      + `<span class="pcost-sub">${fmt(v.tokens)} tok · ${v.messages || 0} 轮</span>`
+      + `</div>`;
+  }
+  el.innerHTML = html;
+}
+
 function renderByModel(byModel) {
   const bm = $('by-model');
   const entries = Object.entries(byModel).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
@@ -128,12 +176,12 @@ function renderByModel(byModel) {
     html += `<div class="m-item">`
       + `<div class="m-head"><span class="mc">${escapeHtml(shortModel(model))}</span>`
       + `<span class="m-bar"><i style="width:${pct}%"></i></span>`
-      + `<b class="m-cost">$${(v.cost || 0).toFixed(3)}</b>`
-      + `<span class="m-tok">${fmt(v.tokens)} · ${pct}%</span></div>`
-      + detail + `</div>`;
-  }
-  html += `<div class="m-item m-total"><div class="m-head"><span class="mc">合计</span>`
-    + `<span class="m-bar"></span><b class="m-cost">$${totCost.toFixed(3)}</b>`
+       + `<b class="m-cost">${fmtCost(v.cost || 0)}</b>`
+       + `<span class="m-tok">${fmt(v.tokens)} · ${pct}%</span></div>`
+       + detail + `</div>`;
+   }
+   html += `<div class="m-item m-total"><div class="m-head"><span class="mc">合计</span>`
+     + `<span class="m-bar"></span><b class="m-cost">${fmtCost(totCost)}</b>`
     + `<span class="m-tok">${fmt(totTok)}</span></div></div>`;
   bm.innerHTML = html;
 }
@@ -166,10 +214,10 @@ function renderChart(hourly) {
       if (c > peakV) { peakV = c; peakH = h; }
       const pct = Math.max(3, Math.round((c / max) * 100));
       const cls = c <= 0 ? 'bar empty' : h === nowH ? 'bar now' : 'bar';
-      return `<div class="${cls}" data-h="${h}" data-c="${c.toFixed(3)}" style="height:${c <= 0 ? 4 : pct}%" title="${h}:00 · $${c.toFixed(3)}"></div>`;
+      return `<div class="${cls}" data-h="${h}" data-c="${c.toFixed(3)}" style="height:${c <= 0 ? 4 : pct}%" title="${h}:00 · ${fmtCost(c)}"></div>`;
     })
     .join('');
-  hoursSummary = `今日 <b>$${total.toFixed(2)}</b> · 峰值 ${peakH}点 <b>$${peakV.toFixed(2)}</b>`;
+  hoursSummary = `今日 <b>${fmtCost(total)}</b> · 峰值 ${peakH}点 <b>${fmtCost(peakV)}</b>`;
   const ro = $('hours-readout');
   if (ro) ro.innerHTML = hoursSummary;
 }
@@ -200,12 +248,12 @@ function renderCal(daily) {
       const c = list[i + j];
       const lvl = c.cost <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((c.cost / max) * 4)));
       const isToday = c.k === todayK ? ' today' : '';
-      html += `<div class="cal-cell lv${lvl}${isToday}" data-k="${c.k}" data-c="${c.cost.toFixed(2)}" data-t="${fmt(c.tokens)}" data-m="${c.msgs}" title="${c.k} · $${c.cost.toFixed(2)}"></div>`;
+      html += `<div class="cal-cell lv${lvl}${isToday}" data-k="${c.k}" data-c="${c.cost.toFixed(2)}" data-t="${fmt(c.tokens)}" data-m="${c.msgs}" title="${c.k} · ${fmtCost(c.cost)}"></div>`;
     }
     html += '</div>';
   }
   el.innerHTML = html;
-  calSummary = `近 ${list.length} 天合计 <b>$${total.toFixed(2)}</b>`;
+  calSummary = `近 ${list.length} 天合计 <b>${fmtCost(total)}</b>`;
   const cr = $('cal-readout');
   if (cr) cr.innerHTML = calSummary;
 }
@@ -224,11 +272,12 @@ function renderSessList(sessions) {
         : s.state;
       const m = STATE_META[effState] || STATE_META.idle;
       const detail =
-        effState === 'waiting' ? `等你${s.reason || '处理'}`
+        effState === 'waiting' ? escapeHtml(`等你${s.reason || '处理'}`)
         : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || '等你回复')
         : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
         : escapeHtml(m.label);
-      return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
+      const providerIcon = s.provider === 'codewhale' ? '🐋 ' : '';
+      return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-proj">${providerIcon}${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
     })
     .join('');
 }
@@ -296,8 +345,69 @@ function renderBg(bg) {
 }
 
 function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
+
+// Round 8: provider toggle UI.
+const PROVIDER_META = {
+  claude: { icon: '🐙', label: 'Claude Code' },
+  codewhale: { icon: '🐋', label: 'CodeWhale' },
+};
+
+function renderProviders() {
+  const el = $('provider-list');
+  if (!el || !config.providers) return;
+  const { active, all, cwHooksInstalled } = config.providers;
+  const activeSet = new Set(active || []);
+  const activeCount = activeSet.size;
+  el.innerHTML = (all || []).map((id) => {
+    const m = PROVIDER_META[id] || { icon: '❓', label: id };
+    const on = activeSet.has(id);
+    // W22: claude is NO LONGER locked — users can disable it to "unlock" Claude
+    // Code from the pet's permission hook. Only lock if it's the LAST active
+    // provider (must keep at least one active to show anything).
+    const locked = on && activeCount <= 1;
+    // Round 9-b: hook status indicator (only for providers that install hooks).
+    let status = '';
+    if (id === 'codewhale') {
+      if (on) {
+        // Active — show whether hooks are actually registered in config.toml.
+        const ok = !!cwHooksInstalled;
+        status = '<span class="prov-status ' + (ok ? 'ok' : 'warn') + '" title="'
+          + (ok ? 'hooks 已写入 ~/.codewhale/config.toml' : 'hooks 未注册（可能需要重启或手动安装）')
+          + '">' + (ok ? '●已注册' : '○未注册') + '</span>';
+      } else {
+        status = '<span class="prov-status off" title="provider 未启用">○未启用</span>';
+      }
+    }
+    return '<label class="prov-item' + (on ? ' active' : '') + (locked ? ' locked' : '') + '">'
+      + '<input type="checkbox" ' + (on ? 'checked' : '') + ' ' + (locked ? 'disabled' : '') + ' data-id="' + escapeHtml(id) + '">'
+      + '<span class="prov-icon">' + escapeHtml(m.icon) + '</span>'
+      + '<span class="prov-label">' + escapeHtml(m.label) + '</span>'
+      + status
+      + '</label>';
+  }).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('provider-list').addEventListener('change', (e) => {
+    if (!e.target.matches('input[data-id]')) return;
+    const id = e.target.dataset.id;
+    const { active } = config.providers || { active: ['claude'] };
+    const newActive = e.target.checked
+      ? [...active, id]
+      : active.filter((a) => a !== id);
+    // W22: allow disabling claude (to "unlock" it from the pet's hook). Only
+    // guard: must keep at least one active provider.
+    if (newActive.length === 0) {
+      e.target.checked = true; // revert checkbox
+      return;
+    }
+    window.pet.setProviders(newActive);
+  });
+});
 
 function applyConfigUI() {
   document.querySelectorAll('#mode-seg .seg-btn').forEach((b) =>
@@ -308,6 +418,7 @@ function applyConfigUI() {
   );
   const bi = $('budget'); // 预算输入已移到托盘；面板里不再有该元素
   if (bi && document.activeElement !== bi) bi.value = config.budget5h || '';
+  renderProviders();
 }
 
 // 事件
@@ -326,8 +437,6 @@ window.pet.onConfig((cfg) => {
   if (!cfg) return;
   config = { ...config, ...cfg };
   applyConfigUI();
-  // Round 8: provider info comes via pet:config (frontendConfig), not pet:stats
-  if (cfg.providers) applyProviderUI(cfg.providers);
 });
 
 $('close').addEventListener('click', () => window.pet.closePanel());
@@ -353,48 +462,6 @@ document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
   });
 }
 
-// Round 8: Provider 切换（Claude / CodeWhale / 双开）
-function applyProviderUI(providerInfo) {
-  if (!providerInfo) return;
-  const active = providerInfo.active || [];
-  const all = providerInfo.all || [];
-  // 决定当前选中态：单选 claude/codewhale，或双开 all
-  let current = 'all';
-  if (active.length === 1) current = active[0];
-  else if (active.length === 0) current = '';
-
-  document.querySelectorAll('#provider-seg .seg-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.provider === current);
-  });
-
-  const statusEl = $('provider-status');
-  if (statusEl) {
-    const parts = [];
-    if (all.includes('claude')) parts.push(active.includes('claude') ? '✅ Claude' : '⚪ Claude');
-    if (all.includes('codewhale')) parts.push(active.includes('codewhale') ? '✅ CodeWhale' : '⚪ CodeWhale');
-    if (providerInfo.cwHooksInstalled) parts.push('· CW hooks 已装');
-    statusEl.textContent = parts.join('  ') || '未配置';
-  }
-}
-
-// 监听 pet:stats 中的 provider 信息
-const _origRender = render;
-render = function(s) {
-  _origRender(s);
-  if (s && s.providers) applyProviderUI(s.providers);
-};
-
-document.querySelectorAll('#provider-seg .seg-btn').forEach((b) =>
-  b.addEventListener('click', () => {
-    const p = b.dataset.provider;
-    let ids;
-    if (p === 'all') ids = ['claude', 'codewhale'];
-    else ids = [p];
-    document.querySelectorAll('#provider-seg .seg-btn').forEach((x) => x.classList.toggle('active', x === b));
-    if (window.pet && window.pet.setProviders) window.pet.setProviders(ids);
-  })
-);
-
 // 视图切换：24h / 日历
 document.querySelectorAll('.view-tabs .vt').forEach((b) =>
   b.addEventListener('click', () => {
@@ -407,14 +474,14 @@ document.querySelectorAll('.view-tabs .vt').forEach((b) =>
 // 悬停看具体数值：24h 柱
 $('chart').addEventListener('mouseover', (e) => {
   const bar = e.target.closest('.bar');
-  if (bar) $('hours-readout').innerHTML = `${bar.dataset.h}:00 · <b>$${bar.dataset.c}</b>`;
+  if (bar) $('hours-readout').innerHTML = `${bar.dataset.h}:00 · <b>${fmtCost(Number(bar.dataset.c))}</b>`;
 });
 $('chart').addEventListener('mouseleave', () => { $('hours-readout').innerHTML = hoursSummary; });
 
 // 悬停看具体数值：日历格子
 $('cal').addEventListener('mouseover', (e) => {
   const cell = e.target.closest('.cal-cell');
-  if (cell) $('cal-readout').innerHTML = `${cell.dataset.k} · <b>$${cell.dataset.c}</b> · ${cell.dataset.t} tok · ${cell.dataset.m} 轮`;
+  if (cell) $('cal-readout').innerHTML = `${cell.dataset.k} · <b>${fmtCost(Number(cell.dataset.c))}</b> · ${cell.dataset.t} tok · ${cell.dataset.m} 轮`;
 });
 $('cal').addEventListener('mouseleave', () => { $('cal-readout').innerHTML = calSummary; });
 

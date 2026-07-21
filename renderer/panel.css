@@ -185,7 +185,48 @@ html, body {
 }
 .budget-input input:focus { outline: none; border-color: #d97757; }
 
-/* Round 8: Provider 切换区块 */
-#provider-block { padding: 10px 14px; }
-#provider-seg { display: flex; gap: 4px; margin-bottom: 6px; }
-.provider-status { font-size: 11px; color: #8a7367; padding-top: 2px; }
+/* Round 8: provider toggle list */
+.provider-list { display: flex; flex-direction: column; gap: 5px; }
+.prov-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+  border-radius: 8px; cursor: pointer; transition: background 0.15s;
+}
+.prov-item:hover { background: rgba(255,255,255,0.06); }
+.prov-item.active { background: rgba(217,119,87,0.15); }
+.prov-item.locked { opacity: 0.7; cursor: default; }
+.prov-item input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; border: 2px solid #c79b86; border-radius: 4px;
+  background: transparent; cursor: pointer; flex-shrink: 0; position: relative;
+}
+.prov-item input[type="checkbox"]:checked { background: #d97757; border-color: #d97757; }
+.prov-item input[type="checkbox"]:checked::after {
+  content: '✓'; position: absolute; top: -1px; left: 2px;
+  font-size: 11px; color: #fff; font-weight: bold;
+}
+.prov-item input[type="checkbox"]:disabled { cursor: default; }
+.prov-icon { font-size: 16px; }
+.prov-label { font-size: 12px; color: #f3e7df; }
+/* Round 9-b: hook registration status indicator */
+.prov-status {
+  margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.prov-status.ok { color: #7fd1a3; background: rgba(127,209,163,0.12); }
+.prov-status.warn { color: #f0c674; background: rgba(240,198,116,0.12); }
+.prov-status.off { color: #8a807a; background: rgba(138,128,122,0.10); }
+
+/* Round 12-拓展: per-provider cost breakdown */
+.pcost-row { flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.pcost-name { font-size: 12px; color: #e9c9b8; flex-shrink: 0; min-width: 0; }
+.pcost-bar-wrap {
+  flex: 1 1 40px; height: 6px; min-width: 0;
+  background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden;
+}
+.pcost-bar {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, #e8a06d, #d97757);
+  transition: width 0.4s ease;
+}
+.pcost-row b { font-size: 12px; flex-shrink: 0; }
+.pcost-sub { font-size: 10px; color: #a9826f; margin-left: auto; flex-shrink: 0; }

@@ -10,7 +10,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences, session } = require('electron');
 
 // Give the dev app a distinct identity ("octopus") so it isn't shown as a generic
 // "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
@@ -39,9 +39,13 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude } = require('./backend/launch');
 const transport = require('./backend/transport');
+const currencyFmt = require('./backend/currency');
 const { getActiveProviders, getActiveIds, is_active, ALL_IDS, invalidate } = require('./providers');
+const { localFileMatches, trustedIpcEvent, clampBoundsToWorkArea } = require('./backend/window-security');
 
 const PRELOAD = path.join(__dirname, 'preload.js');
+const PET_FILE = path.join(__dirname, 'renderer', 'pet.html');
+const PANEL_FILE = path.join(__dirname, 'renderer', 'panel.html');
 const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
 
 let petWin = null;
@@ -68,7 +72,38 @@ let lastStats = null;
 let customSize = null; // {w,h} when a popup wants the window sized to fit it
 let statsTimer = null;
 let emitDebounce = null;
+let displayRepairTimer = null;
 const recentOps = []; // ring for the panel "操作流"; newest first, capped
+
+// ── Adaptive stats polling ─────────────────────────────────────────────────
+// Event-driven scheduleEmit() handles instant pushes.  The periodic timer is
+// only a safety-net for: idle→sleeping transitions, cost counter ticks, and
+// stale UI recovery.  When sessions are active we poll at FAST_INTERVAL (4 s);
+// when everything is idle/sleeping we slow to SLOW_INTERVAL (30 s) to save CPU.
+const STATS_FAST_MS = 4000;
+const STATS_SLOW_MS = 30000;
+
+function isAnySessionActive() {
+  if (!core) return false;
+  const snap = core.buildSnapshot();
+  if (!snap.active) return false;
+  // A session counts as "active" if it had activity in the last 5 minutes.
+  // This covers thinking/working/waiting states and their transient variants.
+  return (Date.now() - snap.lastActivityTs) < 300_000;
+}
+
+function scheduleStatsTimer() {
+  if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; }
+  const ms = isAnySessionActive() ? STATS_FAST_MS : STATS_SLOW_MS;
+  // A one-shot timer cannot overlap with itself if a slow disk scan or renderer
+  // push takes longer than expected. Recompute the cadence after each tick.
+  statsTimer = setTimeout(() => {
+    statsTimer = null;
+    emitStats();
+    scheduleStatsTimer();
+  }, ms);
+  if (statsTimer.unref) statsTimer.unref();
+}
 
 // ── frontend config shape ─────────────────────────────────────────────────────
 function frontendConfig() {
@@ -81,6 +116,8 @@ function frontendConfig() {
     muted: c.muted,
     permHook: c.permHook,
     territory: c.territory,
+    currency: c.currency,
+    fxRate: c.fxRate,
     territorySupported: process.platform === 'darwin', // 渲染端据此隐藏「巡视」菜单
     // Round 8: provider info for the panel UI.
     // Round 9-b: cwHooksInstalled reflects whether our TOML entries are
@@ -113,15 +150,10 @@ function getAllProviderIds() { return ALL_IDS; }
 // height), so a 1-row session list doesn't blow the window up to a fixed 600px.
 function targetSize() {
   if (customSize) {
-    return { w: Math.min(900, Math.max(BASE_W, customSize.w)), h: Math.max(BASE_H, customSize.h) };
+    return { w: Math.min(900, Math.max(BASE_W, customSize.w)), h: Math.min(1600, Math.max(BASE_H, customSize.h)) };
   }
   return { w: BASE_W, h: BASE_H };
 }
-
-// Stable anchor for the pet window's bottom-center, set when the user drags
-// or on first placement. applyPetSize() resizes around this anchor instead of
-// recomputing from current bounds (which jitters when popups open/close).
-let petAnchor = null; // { cx, bottom } in screen coords, or null = use current bounds
 
 function applyPetSize() {
   if (!petWin || petWin.isDestroyed()) return;
@@ -133,24 +165,87 @@ function applyPetSize() {
   try {
     const wa = screen.getDisplayMatching(b).workArea;
     h = Math.min(h, wa.height);
-    // Use stable anchor if available; otherwise seed it from current bounds.
-    if (!petAnchor) petAnchor = { cx: b.x + b.width / 2, bottom: b.y + b.height };
-    let x = Math.round(petAnchor.cx - w / 2);
-    let y = Math.round(petAnchor.bottom - h);
+    const cx = b.x + b.width / 2;
+    const bottom = b.y + b.height;
+    let x = Math.round(cx - w / 2);
+    let y = Math.round(bottom - h);
     x = Math.min(Math.max(x, wa.x), wa.x + wa.width - w);
     y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
     petWin.setBounds({ x, y, width: w, height: h });
   } catch {
-    const bottom = petAnchor ? petAnchor.bottom : (b.y + b.height);
-    const cx = petAnchor ? petAnchor.cx : (b.x + b.width / 2);
-    petWin.setBounds({ x: Math.round(cx - w / 2), y: Math.round(bottom - h), width: w, height: h });
+    const bottom = b.y + b.height;
+    petWin.setBounds({ x: b.x, y: Math.round(bottom - h), width: w, height: h });
   }
+}
+
+function clampedPetBounds(x, y, width = BASE_W, height = BASE_H) {
+  try {
+    const point = { x: Number.isFinite(x) ? Math.round(x) : 0, y: Number.isFinite(y) ? Math.round(y) : 0 };
+    const display = screen.getDisplayNearestPoint(point);
+    return clampBoundsToWorkArea({ x: point.x, y: point.y, width, height }, display.workArea);
+  } catch {
+    return { x, y, width, height };
+  }
+}
+
+function repairWindowToVisibleDisplay(win, persistPet = false) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const bounds = win.getBounds();
+    const center = { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+    const display = screen.getDisplayNearestPoint(center);
+    const safe = clampBoundsToWorkArea(bounds, display.workArea);
+    if (safe.x !== bounds.x || safe.y !== bounds.y || safe.width !== bounds.width || safe.height !== bounds.height) {
+      win.setBounds(safe);
+      if (persistPet) config.save({ petPosition: { x: safe.x, y: safe.y } });
+    }
+  } catch (err) {
+    log('window', 'display repair skipped:', err.message);
+  }
+}
+
+function scheduleDisplayRepair() {
+  if (displayRepairTimer) clearTimeout(displayRepairTimer);
+  displayRepairTimer = setTimeout(() => {
+    displayRepairTimer = null;
+    repairWindowToVisibleDisplay(petWin, true);
+    repairWindowToVisibleDisplay(panelWin, false);
+  }, 150);
+  if (displayRepairTimer.unref) displayRepairTimer.unref();
+}
+
+function installScreenGuards() {
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.on(event, scheduleDisplayRepair);
+  }
+}
+
+function uninstallScreenGuards() {
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.removeListener(event, scheduleDisplayRepair);
+  }
+  if (displayRepairTimer) { clearTimeout(displayRepairTimer); displayRepairTimer = null; }
+}
+
+function hardenDefaultSession() {
+  const ses = session && session.defaultSession;
+  if (!ses) return;
+  // Local renderer pages require no camera, microphone, geolocation, MIDI,
+  // notifications, clipboard-read, USB, Bluetooth, or screen-capture grants.
+  ses.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  if (typeof ses.setPermissionCheckHandler === 'function') ses.setPermissionCheckHandler(() => false);
+  if (typeof ses.setDevicePermissionHandler === 'function') ses.setDevicePermissionHandler(() => false);
+  ses.on('will-download', (event) => event.preventDefault());
 }
 
 function createPetWindow() {
   const saved = config.get().petPosition;
   let x, y;
-  if (saved) { x = saved.x; y = saved.y; }
+  if (saved) {
+    const safe = clampedPetBounds(saved.x, saved.y);
+    x = safe.x; y = safe.y;
+    if (x !== saved.x || y !== saved.y) config.save({ petPosition: { x, y } });
+  }
   else {
     try {
       const wa = screen.getPrimaryDisplay().workArea;
@@ -170,18 +265,25 @@ function createPetWindow() {
     alwaysOnTop: true,
     skipTaskbar: true,
     fullscreenable: false,
+    icon: path.join(__dirname, 'assets', 'mascot-icon.png'), // W20: app icon = octopus mascot (square)
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      webviewTag: false,
+      devTools: process.env.OCTOPUS_DEVTOOLS === '1',
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      navigateOnDragDrop: false,
+      spellcheck: false,
       autoplayPolicy: 'no-user-gesture-required',
     },
   });
   petWin.setAlwaysOnTop(true, 'floating');
   try { petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
-  hardenWindow(petWin);
-  petWin.loadFile(path.join(__dirname, 'renderer', 'pet.html'));
+  hardenWindow(petWin, PET_FILE);
+  petWin.loadFile(PET_FILE);
 
   petWin.on('moved', () => {
     if (!petWin || customSize || petGuided || petFrameGuided) return; // only persist the resting position
@@ -197,24 +299,43 @@ function createPetWindow() {
 function openPanel() {
   if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
   panelH = 0; // 每次开面板重置自适应高度基准
+  // W24: center the panel on the display the PET is on (not always primary).
+  // Previously used getPrimaryDisplay — if the pet was on monitor 2, the panel
+  // opened on monitor 1's center, disjoint from the pet.
+  let panelX, panelY;
+  try {
+    const petBounds = petWin && !petWin.isDestroyed() ? petWin.getBounds() : null;
+    const display = petBounds ? screen.getDisplayMatching(petBounds) : screen.getPrimaryDisplay();
+    const wa = display.workArea;
+    panelX = Math.round(wa.x + (wa.width - 560) / 2);
+    panelY = Math.round(wa.y + (wa.height - 720) / 2);
+  } catch { panelX = undefined; panelY = undefined; }
   panelWin = new BrowserWindow({
     width: 560,
     height: 720,
+    ...(panelX != null ? { x: panelX, y: panelY } : {}),
     frame: false,
     transparent: false,
     resizable: true,
     skipTaskbar: false,
     show: false, // 先隐藏，首帧按内容定高后再显示，避免闪一下大窗口
     backgroundColor: '#2c1f1a',
+    icon: path.join(__dirname, 'assets', 'mascot-icon.png'), // W20: app icon = octopus mascot (square)
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      webviewTag: false,
+      devTools: process.env.OCTOPUS_DEVTOOLS === '1',
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      navigateOnDragDrop: false,
+      spellcheck: false,
     },
   });
-  hardenWindow(panelWin);
-  panelWin.loadFile(path.join(__dirname, 'renderer', 'panel.html'));
+  hardenWindow(panelWin, PANEL_FILE);
+  panelWin.loadFile(PANEL_FILE);
   panelWin.webContents.on('did-finish-load', () => {
     sendPanel('panel:config', frontendConfig());
     if (lastStats) sendPanel('panel:stats', lastStats);
@@ -400,10 +521,39 @@ function applyTerritory(on) {
 }
 
 // Block any navigation / new-window to external content (hardening).
-function hardenWindow(win) {
+function hardenWindow(win, allowedFile) {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('file://')) e.preventDefault();
+    if (!localFileMatches(url, allowedFile)) e.preventDefault();
+  });
+  win.webContents.on('will-frame-navigate', (e, details) => {
+    const url = typeof details === 'string' ? details : details && details.url;
+    if (!localFileMatches(url, allowedFile)) e.preventDefault();
+  });
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  win.webContents.on('render-process-gone', (_e, details) => {
+    log('main', `renderer exited (${details && details.reason ? details.reason : 'unknown'})`);
+  });
+}
+
+function ipcSenderTrusted(event) {
+  return trustedIpcEvent(event, [
+    { win: petWin, file: PET_FILE },
+    { win: panelWin, file: PANEL_FILE },
+  ]);
+}
+
+function trustedOn(channel, listener) {
+  ipcMain.on(channel, (event, ...args) => {
+    if (!ipcSenderTrusted(event)) { log('security', `blocked IPC ${channel}`); return; }
+    return listener(event, ...args);
+  });
+}
+
+function trustedHandle(channel, listener) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!ipcSenderTrusted(event)) throw new Error('untrusted renderer');
+    return listener(event, ...args);
   });
 }
 
@@ -417,11 +567,15 @@ function sendPanel(channel, payload) {
 
 function buildStats() {
   const snapshot = core.buildSnapshot();
-  let meter = metering ? metering.getStats() : null;
-  // Round 7-b: merge CodeWhale metering into Claude metering.
+  const claudeMeter = metering ? metering.getStats() : null;
+  let meter = claudeMeter;
+  // Round 12-拓展: per-provider metering for panel breakdown.
+  const meterByProvider = {};
+  if (claudeMeter) meterByProvider.claude = claudeMeter;
   if (cwMetering) {
     const cw = cwMetering.getStats();
     meter = mergeMetering(meter, cw);
+    meterByProvider.codewhale = cw;
   }
   // Round 6: merge CodeWhale pending permissions into the same pending list.
   const allPending = permissions.getPending();
@@ -433,7 +587,13 @@ function buildStats() {
     }));
     allPending.push(...cwPending);
   }
-  return adapter.buildPetStats(snapshot, allPending, meter, { lastOps: recentOps.slice(0, 30) });
+  const stats = adapter.buildPetStats(snapshot, allPending, meter, { lastOps: recentOps.slice(0, 30), meterByProvider });
+  // 附上窗口实时位置，供渲染端校正拖动缓存
+  if (petWin && !petWin.isDestroyed()) {
+    const b = petWin.getBounds();
+    stats.winPos = [b.x, b.y];
+  }
+  return stats;
 }
 
 // Round 7-b: merge CodeWhale metering stats into Claude metering stats.
@@ -587,6 +747,18 @@ function bootBackend() {
   server = createServer({
     core,
     permissions,
+    // W22 (corrects W19): NEVER drop CW permission requests based on
+    // markerPresent(). The fact that we received the /codewhale-permission POST
+    // means the hook DID fire — so hooks ARE installed. Dropping based on
+    // markerPresent() was a logic inversion: it dropped permissions when hooks
+    // appeared absent (config path mismatch, race condition, CODEWHALE_HOME
+    // override), causing CodeWhale to show its own terminal prompt instead of
+    // the pet bubble — exactly the "agent 被调用时授权在 codewhale cli 出现" bug.
+    //
+    // The original W19 conflict (two prompts) only happens when the hook process
+    // exits with empty stdout (pet unreachable) — CodeWhale falls back to its
+    // own prompt. That's already handled by the hook printing nothing on
+    // connection failure. No shouldDrop needed.
     shouldDropForDnd: () => false,
   });
   server.start();
@@ -595,33 +767,52 @@ function bootBackend() {
   cwPermissions = server.getCwPermissions ? server.getCwPermissions() : null;
   cwMetering = server.getCwMetering ? server.getCwMetering() : null;
 
-  // Install hooks once the server has a port (defer so listen wins the race).
-  // OCTOPUS_NO_HOOKS=1 skips touching ~/.claude/settings.json (dev/verify mode).
-  setTimeout(() => {
+  // Install hooks only after the tokenized local server is listening. Binding is
+  // normally immediate, but antivirus/startup load can delay it; retry instead
+  // of silently leaving stale-token hooks installed for the whole session.
+  let hookInstallAttempts = 0;
+  const installActiveHooks = () => {
     if (process.env.OCTOPUS_NO_HOOKS === '1') {
       log('main', 'OCTOPUS_NO_HOOKS=1 — skipping all hook installs');
       return;
     }
-    const port = server.getPort();
+    const port = server && server.getPort ? server.getPort() : null;
     if (!port) {
-      log('main', 'server has no port — hooks not installed (ports busy?)');
+      hookInstallAttempts++;
+      if (hookInstallAttempts <= 40) {
+        const retry = setTimeout(installActiveHooks, 250);
+        if (retry.unref) retry.unref();
+      } else {
+        log('main', 'server has no port after 10s — hooks not installed (ports busy?)');
+      }
       return;
     }
-    // Claude Code hooks (original behavior, always installed).
-    hooks.install(port);
-    stopWatcher = hooks.startWatcher(() => server.getPort());
 
-    // Round 6: CodeWhale TOML hooks (only if codewhale provider is active).
-    if (is_active('codewhale')) {
-      try {
-        const cwProvider = require('./providers/codewhale');
+    if (is_active('claude')) {
+      hooks.install(port);
+      stopWatcher = hooks.startWatcher(() => server && server.getPort ? server.getPort() : port);
+    } else {
+      // A prior crash/manual config edit may leave our blocking hook behind even
+      // though the provider is disabled. Reconcile disk state at every startup.
+      try { hooks.uninstall(); } catch (e) { log('main', 'Claude stale-hook cleanup failed:', e.message); }
+      log('main', 'Claude provider disabled — Octopus hooks removed');
+    }
+
+    try {
+      const cwProvider = require('./providers/codewhale');
+      if (is_active('codewhale')) {
         const result = cwProvider.installHooks();
         log('main', 'CodeWhale hooks installed:', JSON.stringify(result));
-      } catch (e) {
-        log('main', 'CodeWhale hook install failed (non-fatal):', e.message);
+      } else {
+        const result = cwProvider.uninstallHooks();
+        if (result && result.removed) log('main', 'CodeWhale stale hooks removed:', JSON.stringify(result));
       }
+    } catch (e) {
+      log('main', 'CodeWhale hook reconciliation failed (non-fatal):', e.message);
     }
-  }, 400);
+  };
+  const initialHookTimer = setTimeout(installActiveHooks, 100);
+  if (initialHookTimer.unref) initialHookTimer.unref();
 
   // Round 6: Wire CodeWhale permission onAdded callback so the UI gets notified.
   if (cwPermissions && typeof cwPermissions.setOnAdded === 'function') {
@@ -634,10 +825,21 @@ function bootBackend() {
       scheduleEmit();
     });
   }
+  // W12: Wire onResolved so the pet UI dismisses the ask panel when a permission
+  // is resolved server-side (auto-close, client disconnect, batch-clear, or the
+  // user clicked in the pet — both paths converge here). Without this, the pet
+  // stays stuck on "waiting" if the user approves in the CodeWhale terminal or
+  // presses Ctrl+C (hook process exits → connection closes → resolveEntry).
+  if (cwPermissions && typeof cwPermissions.setOnResolved === 'function') {
+    cwPermissions.setOnResolved((entry, decision) => {
+      sendPet('pet:event', { kind: 'cancel', permId: entry.id, sessionId: entry.sessionId, decision, ts: Date.now() });
+      scheduleEmit();
+    });
+  }
 
-  // Periodic refresh so idle→sleeping transitions + cost updates reach the UI.
-  statsTimer = setInterval(emitStats, 4000);
-  if (statsTimer.unref) statsTimer.unref();
+  // Adaptive periodic refresh: fast (4 s) when sessions are active, slow (30 s)
+  // when idle/sleeping.  Event-driven scheduleEmit() still fires instantly.
+  scheduleStatsTimer();
 }
 
 // minimal entry shape for adapter.projectName()
@@ -647,46 +849,50 @@ function toEntryLite(s) {
 
 // ── IPC ───────────────────────────────────────────────────────────────────────
 function registerIpc() {
-  ipcMain.handle('get-config', () => frontendConfig());
-  ipcMain.handle('get-stats', () => lastStats || buildStats());
-  ipcMain.handle('get-win-pos', () => {
+  trustedHandle('get-config', () => frontendConfig());
+  trustedHandle('get-stats', () => lastStats || buildStats());
+  trustedHandle('get-win-pos', () => {
     if (!petWin || petWin.isDestroyed()) return [0, 0];
     const b = petWin.getBounds();
     return [b.x, b.y];
   });
 
-  ipcMain.on('set-win-pos', (_e, x, y) => {
+  trustedOn('set-win-pos', (_e, x, y) => {
     if (petWin && !petWin.isDestroyed() && Number.isFinite(x) && Number.isFinite(y)) {
       const b = petWin.getBounds();
-      const nx = Math.round(x), ny = Math.round(y);
-      petWin.setBounds({ x: nx, y: ny, width: b.width, height: b.height });
-      // Update the stable anchor so future resize keeps the new bottom-center.
-      petAnchor = { cx: nx + b.width / 2, bottom: ny + b.height };
+      const safe = clampedPetBounds(x, y, b.width, b.height);
+      petWin.setBounds(safe);
     }
   });
 
-  ipcMain.on('open-panel', openPanel);
-  ipcMain.on('close-panel', closePanel);
+  trustedOn('open-panel', openPanel);
+  trustedOn('close-panel', closePanel);
 
   // 详情面板按内容高度自适应：clamp 到屏幕工作区，阈值防抖避免每次 stats 都抖
-  ipcMain.on('set-panel-height', (_e, h) => {
+  trustedOn('set-panel-height', (_e, h) => {
     if (!panelWin || panelWin.isDestroyed() || !Number.isFinite(h)) return;
     const b = panelWin.getBounds();
     const wa = screen.getDisplayMatching(b).workArea;
     const clamped = Math.max(320, Math.min(Math.round(h), wa.height - 24));
     if (Math.abs(clamped - panelH) < 6) return;
     panelH = clamped;
-    panelWin.setBounds({ x: b.x, y: b.y, width: b.width, height: clamped });
+    // W24: re-center vertically after height change. Previously kept y=b.y
+    // (positioned for height=720), so a shorter panel appeared off-center low.
+    const newY = Math.round(wa.y + (wa.height - clamped) / 2);
+    panelWin.setBounds({ x: b.x, y: newY, width: b.width, height: clamped });
   });
 
-  ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
-  ipcMain.on('set-skin', (_e, skin) => applySkin(skin));
-  ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
-  ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
+  trustedOn('set-mode', (_e, mode) => { if (['pet', 'panel', 'menubar'].includes(mode)) applyMode(mode); });
+  trustedOn('set-skin', (_e, skin) => { if (['mascot', 'pixel', 'cat'].includes(skin)) applySkin(skin); });
+  trustedOn('set-budget', (_e, v) => { const n = Number(v); config.save({ budget5h: Number.isFinite(n) ? Math.max(0, Math.min(100000, n)) : 0 }); broadcastConfig(); });
+  trustedOn('set-currency', (_e, c) => { if (c === 'USD' || c === 'CNY') applyCurrency(c); });
+  trustedOn('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
   // Round 8: provider toggle from panel.
   // Round 9-a: live hook install/uninstall (no restart needed).
-  ipcMain.on('set-providers', (_e, ids) => {
+  trustedOn('set-providers', (_e, ids) => {
     if (!Array.isArray(ids)) return;
+    ids = [...new Set(ids.slice(0, ALL_IDS.length).map((x) => String(x).toLowerCase()).filter((x) => ALL_IDS.includes(x)))];
+    if (!ids.length) return;
     const prevActive = getActiveIds(); // capture BEFORE invalidate
     config.save({ providers: ids });
     invalidate(); // bust provider registry cache
@@ -699,6 +905,35 @@ function registerIpc() {
     const port = server && server.getPort ? server.getPort() : null;
     if (!port) return;
 
+    // ── Claude hooks: live install/uninstall (W7 fix) ──────────────────────
+    // Previously, Claude hooks were always installed at startup and never
+    // removed when the user unchecked claude in the provider panel — leaving
+    // Claude Code "locked" to the pet (blocking permission hook still active).
+    // Now we mirror the codewhale logic: uninstall when claude is deactivated,
+    // reinstall (and restart watcher) when reactivated.
+    const claudeWasActive = prevActive.includes('claude');
+    const claudeNowActive = is_active('claude');
+    if (claudeWasActive && !claudeNowActive) {
+      // Deactivate: stop watcher + uninstall Claude hooks.
+      try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
+      try {
+        hooks.uninstall();
+        log('main', 'Claude hooks uninstalled (live)');
+      } catch (e) {
+        log('main', 'Claude live hook uninstall failed (non-fatal):', e.message);
+      }
+    } else if (!claudeWasActive && claudeNowActive) {
+      // Reactivate: reinstall Claude hooks + restart watcher.
+      try {
+        hooks.install(port);
+        if (!stopWatcher) stopWatcher = hooks.startWatcher(() => server && server.getPort ? server.getPort() : port);
+        log('main', 'Claude hooks installed (live)');
+      } catch (e) {
+        log('main', 'Claude live hook install failed (non-fatal):', e.message);
+      }
+    }
+
+    // ── CodeWhale hooks: live install/uninstall (R9-a, unchanged) ──────────
     const cwWasActive = prevActive.includes('codewhale');
     const cwNowActive = is_active('codewhale');
 
@@ -713,7 +948,7 @@ function registerIpc() {
       }
       broadcastConfig(); // refresh cwHooksInstalled indicator
     } else if (cwWasActive && !cwNowActive) {
-      // Deactivate: uninstall CW TOML hooks (with backup).
+      // Deactivate: uninstall CW TOML hooks (with backup) + clear batch rules.
       try {
         const cwProvider = require('./providers/codewhale');
         const result = cwProvider.uninstallHooks({ backup: true });
@@ -721,39 +956,63 @@ function registerIpc() {
       } catch (e) {
         log('main', 'CodeWhale live hook uninstall failed (non-fatal):', e.message);
       }
+      // W23: clear all batch auto-allow rules so they don't leak to a future
+      // re-activation (session-scoped rules should not survive provider toggles).
+      try {
+        if (cwPermissions && typeof cwPermissions.clearBatchRules === 'function') {
+          cwPermissions.clearBatchRules('all');
+          log('main', 'CodeWhale batch rules cleared (provider deactivated)');
+        }
+      } catch (e) {
+        log('main', 'CodeWhale batch rule clear failed (non-fatal):', e.message);
+      }
       broadcastConfig(); // refresh cwHooksInstalled indicator
     }
   });
-  ipcMain.on('territory-run-now', runTerritoryNow);
-  ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
+  trustedOn('territory-run-now', runTerritoryNow);
+  trustedOn('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
-  ipcMain.on('quit-app', () => app.quit());
+  trustedOn('quit-app', () => app.quit());
 
-  ipcMain.on('launch-claude', () => {
+  trustedOn('launch-claude', () => {
     launchClaude({}).then((r) => {
       if (!r.ok) log('main', 'launch claude failed:', r.message);
     }).catch((e) => log('main', 'launch claude error:', e.message));
   });
-
-  ipcMain.on('launch-codewhale', () => {
+  // W26: launch CodeWhale CLI in a new terminal.
+  trustedOn('launch-codewhale', () => {
     try {
       const cw = require('./providers/codewhale');
-      cw.launch({}).then((r) => {
-        if (!r.ok) log('main', 'launch codewhale failed:', r.message);
-      }).catch((e) => log('main', 'launch codewhale error:', e.message));
+      if (typeof cw.launch === 'function') {
+        cw.launch({}).then((r) => {
+          if (!r || !r.ok) log('main', 'launch codewhale failed:', (r && r.message) || 'unknown');
+        }).catch((e) => log('main', 'launch codewhale error:', e.message));
+      } else {
+        log('main', 'codewhale provider has no launch() function');
+      }
     } catch (e) {
       log('main', 'launch codewhale error:', e.message);
     }
   });
 
-  ipcMain.on('permission-decide', (_e, permId, behavior) => {
+  trustedOn('permission-decide', (_e, permId, behavior) => {
+    if (typeof permId !== 'string' || permId.length > 128) return;
     permissions.decide(permId, behavior);
   });
   // Round 6: CodeWhale permission decisions from the renderer.
-  ipcMain.on('cw-permission-decide', (_e, permId, behavior) => {
+  trustedOn('cw-permission-decide', (_e, permId, behavior) => {
+    if (typeof permId !== 'string' || permId.length > 128) return;
     if (cwPermissions) cwPermissions.decide(permId, behavior);
   });
-  ipcMain.on('focus-session', (_e, sessionId) => {
+  // W11: session-scoped batch authorization for CodeWhale.
+  trustedOn('cw-permission-decide-batch', (_e, permId, mode) => {
+    if (typeof permId !== 'string' || permId.length > 128 || !['tool', 'session'].includes(mode)) return;
+    if (cwPermissions && typeof cwPermissions.decideBatch === 'function') {
+      cwPermissions.decideBatch(permId, mode);
+    }
+  });
+  trustedOn('focus-session', (_e, sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId.length > 256) return;
     focusSession(core.getSession(sessionId));
   });
 
@@ -763,7 +1022,7 @@ function registerIpc() {
   //   • a focusable session exists  → focus the most relevant one
   //   • sessions exist but none focusable (no pid / closed / non-mac) → open panel
   //   • no sessions at all → launch a fresh CLI (Claude or CodeWhale depending on active provider)
-  ipcMain.on('primary-action', async () => {
+  trustedOn('primary-action', async () => {
     const all = core ? [...core.sessions.values()] : [];
     if (!all.length) {
       // Round 6: launch the first active provider's CLI.
@@ -793,21 +1052,23 @@ function registerIpc() {
 
   // Dynamic sizing: renderer measures the open popup and asks for an exact fit.
   // w/h <= 0 resets to the base pet size.
-  ipcMain.on('set-pet-size', (_e, w, h) => {
-    customSize = (Number(w) > 0 && Number(h) > 0) ? { w: Number(w), h: Number(h) } : null;
+  trustedOn('set-pet-size', (_e, w, h) => {
+    const nw = Number(w), nh = Number(h);
+    customSize = (Number.isFinite(nw) && Number.isFinite(nh) && nw > 0 && nh > 0)
+      ? { w: Math.min(900, Math.max(BASE_W, nw)), h: Math.min(1600, Math.max(BASE_H, nh)) } : null;
     applyPetSize();
   });
   // Back-compat coarse toggles (renderer now prefers set-pet-size).
-  ipcMain.on('pet-tall', (_e, on) => { customSize = on ? { w: BASE_W, h: TALL_H } : null; applyPetSize(); });
-  ipcMain.on('pet-big', (_e, on) => { customSize = on ? { w: BIG_W, h: BIG_H } : null; applyPetSize(); });
-  ipcMain.on('pet-focus', () => { if (petWin) { petWin.setFocusable(true); petWin.focus(); } });
-  ipcMain.on('pet-blur', () => { if (petWin) { petWin.blur(); } });
+  trustedOn('pet-tall', (_e, on) => { customSize = on ? { w: BASE_W, h: TALL_H } : null; applyPetSize(); });
+  trustedOn('pet-big', (_e, on) => { customSize = on ? { w: BIG_W, h: BIG_H } : null; applyPetSize(); });
+  trustedOn('pet-focus', () => { if (petWin) { petWin.setFocusable(true); petWin.focus(); } });
+  trustedOn('pet-blur', () => { if (petWin) { petWin.blur(); } });
 
   // Click-through: the renderer hit-tests the cursor and toggles this so the
   // transparent parts of the pet window let clicks reach apps behind it.
   // forward:true keeps mousemove flowing to the renderer while ignoring, so it
   // can re-enable clicks the moment the cursor returns to the pet/content.
-  ipcMain.on('set-ignore-mouse', (_e, ignore) => {
+  trustedOn('set-ignore-mouse', (_e, ignore) => {
     rendererMouseIgnoring = !!ignore;
     if (petWin && !petWin.isDestroyed()) {
       // 巡视动画进行时，renderer 会收到 forward 的 mousemove；它只能
@@ -818,18 +1079,25 @@ function registerIpc() {
   });
 
   // 渲染端上报「用户正在交互」(领地模式据此避战/撤退,别的场景以后也能用)
-  ipcMain.on('ui-busy', (_e, on) => { uiBusy = !!on; });
-  ipcMain.on('pet-visual-bounds', (_e, rect) => {
+  trustedOn('ui-busy', (_e, on) => { uiBusy = !!on; });
+  trustedOn('pet-visual-bounds', (_e, rect) => {
     if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return;
     if (!(rect.width > 0) || !(rect.height > 0)) return;
+    const b = petWin && !petWin.isDestroyed() ? petWin.getBounds() : { width: 900, height: 1600 };
     petVisualRect = {
-      x: Math.round(rect.x), y: Math.round(rect.y),
-      width: Math.round(rect.width), height: Math.round(rect.height),
+      x: Math.max(0, Math.min(Math.round(rect.x), b.width)),
+      y: Math.max(0, Math.min(Math.round(rect.y), b.height)),
+      width: Math.max(1, Math.min(Math.round(rect.width), b.width)),
+      height: Math.max(1, Math.min(Math.round(rect.height), b.height)),
     };
   });
 
-  ipcMain.on('open-log', () => { shell.openPath(LOG_PATH); });
-  ipcMain.on('pet-log', (_e, tag, msg) => { log('ui:' + String(tag || ''), String(msg || '')); });
+  trustedOn('open-log', () => { shell.openPath(LOG_PATH); });
+  trustedOn('pet-log', (_e, tag, msg) => {
+    const safeTag = String(tag || '').replace(/[\r\n\0]/g, ' ').slice(0, 64);
+    const safeMsg = String(msg || '').replace(/\0/g, '').slice(0, 2048);
+    log('ui:' + safeTag, safeMsg);
+  });
 }
 
 // ── settings actions (shared by tray menu + panel IPC) ─────────────────────────
@@ -847,7 +1115,20 @@ function applySkin(skin) {
   refreshTrayMenu();
 }
 function applyBudget(v) {
-  config.save({ budget5h: Number(v) || 0 });
+  const n = Number(v);
+  config.save({ budget5h: Number.isFinite(n) ? Math.max(0, Math.min(100000, n)) : 0 });
+  broadcastConfig();
+  refreshTrayMenu();
+}
+function applyCurrency(currency) {
+  if (currency !== 'USD' && currency !== 'CNY') return;
+  config.save({ currency });
+  broadcastConfig();
+  refreshTrayMenu();
+}
+function applyFxRate(rate) {
+  const n = Number(rate);
+  config.save({ fxRate: Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(0.01, n)) : 7.2 });
   broadcastConfig();
   refreshTrayMenu();
 }
@@ -899,11 +1180,15 @@ function refreshTrayMenu() {
     ] },
     { label: '　5h 预算', submenu: [
       { label: '关闭', type: 'radio', checked: !budget, click: () => applyBudget(0) },
-      { label: '$10', type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
-      { label: '$20', type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
-      { label: '$30', type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
-      { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
-      { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
+      { label: currencyFmt.budgetLabel(10, cfg.currency, cfg.fxRate), type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
+      { label: currencyFmt.budgetLabel(20, cfg.currency, cfg.fxRate), type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
+      { label: currencyFmt.budgetLabel(30, cfg.currency, cfg.fxRate), type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
+      { label: currencyFmt.budgetLabel(50, cfg.currency, cfg.fxRate), type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
+      { label: currencyFmt.budgetLabel(100, cfg.currency, cfg.fxRate), type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
+    ] },
+    { label: '　货币', submenu: [
+      { label: '$ 美元', type: 'radio', checked: cfg.currency === 'USD', click: () => applyCurrency('USD') },
+      { label: '¥ 人民币', type: 'radio', checked: cfg.currency === 'CNY', click: () => applyCurrency('CNY') },
     ] },
     ...(process.platform === 'darwin' ? [
       { label: '　🥊 自动巡逻（顶走别的桌宠）', type: 'checkbox', checked: !!cfg.territory,
@@ -912,7 +1197,11 @@ function refreshTrayMenu() {
     ] : []),
     { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
     { type: 'separator' },
-    { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
+    // W21: only show launch buttons for ACTIVE providers (don't show "唤起 Claude"
+    // if the user unchecked claude and only uses codewhale).
+    ...(is_active('claude') ? [
+      { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
+    ] : []),
     ...(is_active('codewhale') ? [
       { label: '🐋 唤起 CodeWhale', click: () => {
         const cw = require('./providers/codewhale');
@@ -921,11 +1210,21 @@ function refreshTrayMenu() {
     ] : []),
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
-    { label: '🧹 卸载 Claude 钩子', click: () => {
+    { label: '🧹 卸载所有钩子', click: () => {
       // Stop the settings watcher first — otherwise it sees our hooks vanish and
       // re-registers them within 800ms, silently undoing this uninstall.
       try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
       hooks.uninstall();
+      // W8: also uninstall CodeWhale TOML hooks if codewhale provider is active.
+      try {
+        if (is_active('codewhale')) {
+          const cwProvider = require('./providers/codewhale');
+          const r = cwProvider.uninstallHooks({ backup: true });
+          log('main', 'CodeWhale hooks uninstalled (tray):', JSON.stringify(r));
+        }
+      } catch (e) {
+        log('main', 'CodeWhale tray uninstall failed (non-fatal):', e.message);
+      }
     } },
     { label: '🚪 退出', click: () => app.quit() },
   ]));
@@ -987,6 +1286,8 @@ if (!gotTheLock) {
       return;
     }
     migrateState();
+    hardenDefaultSession();
+    installScreenGuards();
     registerIpc();
     bootBackend();
     createPetWindow();
@@ -999,6 +1300,9 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
+  try { if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; } } catch {}
+  try { if (emitDebounce) { clearTimeout(emitDebounce); emitDebounce = null; } } catch {}
+  try { uninstallScreenGuards(); } catch {}
   try { if (territory) territory.stop(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}

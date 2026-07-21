@@ -1,6 +1,7 @@
 {
   "name": "octopus",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "productName": "Octopus",
   "description": "桌面宠物：实时盯 Claude Code 等 coding agent 的状态、消息、授权与花费",
   "main": "main.js",
   "license": "MIT",
@@ -11,17 +12,20 @@
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
-    "dist": "electron-builder",
-    "dist:linux": "electron-builder --linux",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js",
-    "test:windows": "node test/windows-adapt.js"
+    "package:linux": "bash scripts/package-linux.sh",
+    "package:win": "bash scripts/package-win.sh",
+    "dist": "npm run package:linux",
+    "dist:linux": "npm run package:linux",
+    "dist:win": "npm run package:win",
+    "dist:mac": "npm run package:mac",
+    "test": "node test/run-all.js",
+    "test:core": "node test/run-all.js",
+    "test:windows": "node test/windows-adapt.js",
+    "test:all": "npm run test:core && npm run test:windows"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^26.15.3",
-    "sharp": "^0.35.3"
+    "electron": "^43.1.1",
+    "resedit": "^3.0.2"
   },
   "dependencies": {
     "png-to-ico": "^3.0.2"

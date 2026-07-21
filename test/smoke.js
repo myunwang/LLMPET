@@ -7,6 +7,7 @@
 
 const http = require('http');
 const assert = require('assert');
+const os = require('os');
 const { createCore } = require('../backend/core');
 const { createPermissions } = require('../backend/permission');
 const { createServer } = require('../backend/server');
@@ -23,14 +24,14 @@ const permissions = createPermissions({
   onAdded: (entry) => { events.push({ kind: 'waiting', permId: entry.id, sessionId: entry.sessionId }); },
   onChange: () => {},
 });
-const server = createServer({ core, permissions, shouldDropForDnd: () => false });
+const server = createServer({ core, permissions, shouldDropForDnd: () => false, transcriptRoots: [os.tmpdir()] });
 
 function post(pathName, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = http.request(
       { hostname: '127.0.0.1', port: server.getPort(), path: pathName, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), 'x-octopus-token': server.getToken() } },
       (res) => {
         let data = '';
         res.on('data', (c) => (data += c));
@@ -149,7 +150,7 @@ async function main() {
 
   console.log('\n[7] stale permission swept when user answers in terminal');
   const sweepSid = 'sweep-session-dddd';
-  const sweepP = post('/permission', { tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sweepSid });
+  const sweepP = post('/permission', { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, session_id: sweepSid });
   await sleep(60);
   check('one pending before sweep', () => assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 1));
   await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: sweepSid });
@@ -278,7 +279,6 @@ async function main() {
 
   console.log('\n[15] SessionStart 无 source 时用 transcript 历史兜底');
   const fs = require('fs');
-  const os = require('os');
   const path = require('path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-test-'));
   const histFile = path.join(tmpDir, 'hist.jsonl');

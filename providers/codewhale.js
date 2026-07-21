@@ -5,12 +5,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // UPDATED for R2 source-code facts (see worklog "附录 R2"):
-//   • 11 hook events (not 5): +session_start, session_end, on_error, mode_change
+//   • 11 known hook variants; Octopus registers 10 lifecycle events
 //   • tool_call_before sends ENV VARS, not stdin (R2.2)
 //   • Session IDs are bare UUIDs, not sess_ prefixed (R2.6)
 //   • Session storage is pretty JSON <UUID>.json, not jsonl (R2.7)
 //   • PATH is NOT stripped (R2.5) — no absolute node path needed
-//   • Timeout folds to Allow, not deny (R2.11)
+//   • Native timeout semantics may allow; Octopus bridge therefore fails closed-to-native as `ask`
 //   • background=true hooks cannot deny (R2.10)
 //   • Global config uses [[hooks.hooks]], project uses [[hooks]] (R2.8)
 
@@ -19,6 +19,7 @@ const os = require('os');
 const fs = require('fs');
 const { makeNotImplemented } = require('./base');
 const { textFromContent, clean } = require('../backend/transcript');
+const { quotePosix } = require('../backend/shell-quote');
 
 const ID = 'codewhale';
 
@@ -32,47 +33,22 @@ const LEGACY_DATA_HOME = path.join(os.homedir(), '.deepseek');
 const HOOK_SCRIPT = path.join(__dirname, '..', 'hook', 'codewhale-hook.js');
 const HOOK_MARKER = 'codewhale-hook.js';
 
-// When running inside an asar archive, hook/ is unpacked to app.asar.unpacked/hook/
-// (see electron-builder.yml asarUnpack). System node (used by CodeWhale to run
-// hooks) cannot read asar virtual paths, so we must point the hook command at
-// the real filesystem path under app.asar.unpacked/.
-function resolveHookScriptPath() {
-  const p = HOOK_SCRIPT;
-  // app.asar/hook/... → app.asar.unpacked/hook/...
-  if (p.includes('.asar' + path.sep)) {
-    return p.replace(/\.asar([\\/])/, '.asar.unpacked$1');
-  }
-  return p;
-}
-
-// Resolve the node binary path for the hook command. CodeWhale's Rust
-// Command::new does NOT use shell file association, so we MUST prefix the
-// script with an explicit node path (like Claude's hookinstall.js does).
-function resolveNodeForHook() {
-  try {
-    const transport = require('../backend/transport');
-    const n = transport.resolveNodeBin();
-    if (n) return n;
-  } catch {}
-  // Fallbacks: process.execPath (Electron's node) or bare 'node'
-  if (process.execPath) return process.execPath;
-  return 'node';
-}
-
-// ── Events (R2.1: 11 actual HookEvent variants; we register 8) ────────────
+// ── Events (R2.1: 11 known HookEvent variants; we register 10) ───────────
 // session_start / session_end give us native greet/sleep (previously thought
 // impossible).  on_error gives us native error state.  mode_change is optional.
 // tool_call_after is defined but turn_loop never calls it.  shell_env is
-// exec_shell-only env injector, not a lifecycle hook.  We skip both.
+// exec_shell-only env injector, not a lifecycle hook. We skip shell_env only.
 const HOOK_EVENTS = Object.freeze([
   'session_start',
   'session_end',
   'message_submit',
   'tool_call_before',
+  'tool_call_after',   // W18: clear working state after each tool runs
   'turn_end',
   'subagent_spawn',
   'subagent_complete',
   'on_error',
+  'mode_change',       // W23: register for mode_change (plan/agent/operate switch)
 ]);
 
 // CodeWhale native event → (internal Claude-equivalent event, pet state).
@@ -82,10 +58,14 @@ const EVENT_MAP = Object.freeze({
   session_end:      { internal: 'SessionEnd',      state: 'sleeping' },
   message_submit:   { internal: 'UserPromptSubmit', state: 'thinking' },
   tool_call_before: { internal: 'PreToolUse',      state: 'working' },   // + permission gate (R3)
+  tool_call_after:  { internal: 'PostToolUse',     state: 'working' },   // W18: tool finished, still working (turn continues)
   turn_end:         { internal: 'Stop',            state: 'attention' },
   subagent_spawn:   { internal: 'SubagentStart',   state: 'juggling' },
   subagent_complete: { internal: 'SubagentStop',    state: 'working' },
   on_error:         { internal: 'StopFailure',     state: 'error' },
+  // mode_change is registered for forward compatibility. It does not imply a
+  // task transition, so it maps to a neutral Notification/idle event.
+  mode_change:      { internal: 'Notification',    state: 'idle' },
 });
 
 const eventToPetState = {};
@@ -201,9 +181,31 @@ function parseHookStdin(event, payload) {
       else if (typeof p.reason === 'string' && p.reason) body.api_error_type = p.reason;
       break;
     }
-    case 'subagent_spawn':
-    case 'subagent_complete':
+    case 'tool_call_after':
+      // W18: tool finished executing. State stays 'working' (turn continues),
+      // but this event lets the pet know the tool call completed — useful for
+      // clearing "stuck on tool_call_before" if turn_end never arrives.
+      // tool_name may come from stdin (future CW versions) or env vars.
+      if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
       break;
+    case 'subagent_spawn':
+      // W22: carry agent_id so core/adapter can track subagent identity.
+      // session_id here is the PARENT session (the one that spawned the subagent),
+      // so the pet updates the parent to 'juggling' — no session split.
+      if (typeof p.agent_id === 'string' && p.agent_id) body.agent_id = p.agent_id;
+      if (typeof p.prompt_preview === 'string' && p.prompt_preview) body.user_prompt = p.prompt_preview;
+      break;
+    case 'subagent_complete':
+      // W22: carry agent_id + status for the same reason.
+      if (typeof p.agent_id === 'string' && p.agent_id) body.agent_id = p.agent_id;
+      if (typeof p.status === 'string' && p.status) body.api_error_type = p.status === 'failed' ? p.status : null;
+      break;
+    case 'mode_change': {
+      // W23: CW mode switch (plan/agent/operate). State stays idle (no pet
+      // state transition), but carry the new mode so the panel can show it.
+      if (typeof p.to_mode === 'string' && p.to_mode) body.agent_mode = p.to_mode;
+      break;
+    }
     default:
       break;
   }
@@ -218,19 +220,36 @@ function parseHookStdin(event, payload) {
 
 const ASSISTANT_MAX = 2200;
 const SESSIONS_DIR = path.join(DATA_HOME, 'sessions');
+const MAX_SESSION_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_SESSION_LIST = 50;
+const MAX_SESSION_CANDIDATES = 100;
+const MAX_SESSION_SCAN_BYTES = 64 * 1024 * 1024;
 
 // Read a CodeWhale session JSON file and return its messages array.
 // path can be either the full path or just the session_id (UUID).
-function cwReadTranscriptTail(sessionPathOrId) {
+function resolveSessionFile(sessionPathOrId) {
   let filePath;
   if (typeof sessionPathOrId === 'string' && path.isAbsolute(sessionPathOrId)) {
     filePath = sessionPathOrId;
   } else {
-    // Treat as session ID, derive path
     const sid = String(sessionPathOrId || '').trim();
-    if (!sid || sid.includes('/') || sid.includes('..')) return null;
+    if (!sid || !/^[A-Za-z0-9_-]{1,256}$/.test(sid)) return null;
     filePath = path.join(SESSIONS_DIR, sid + '.json');
   }
+  const base = path.resolve(SESSIONS_DIR);
+  const resolved = path.resolve(filePath);
+  const rel = path.relative(base, resolved);
+  if (!rel || rel.startsWith('..' + path.sep) || rel === '..' || path.isAbsolute(rel)) return null;
+  try {
+    const st = fs.lstatSync(resolved);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_SESSION_FILE_BYTES) return null;
+  } catch { return null; }
+  return resolved;
+}
+
+function cwReadTranscriptTail(sessionPathOrId) {
+  const filePath = resolveSessionFile(sessionPathOrId);
+  if (!filePath) return null;
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -289,13 +308,21 @@ function findCodeWhale() {
     return 'codewhale';
   }
 
-  // Unix: `command -v` (POSIX shell built-in, available on macOS/Linux).
+  // Unix: `command` is a shell built-in, not an executable. Calling it via
+  // execFileSync('command', ...) always fails on normal macOS/Linux systems.
+  // Run the fixed candidate names through a POSIX shell instead and preserve
+  // the caller's PATH (important for npm/nvm/homebrew installations).
+  const shells = [...new Set([process.env.SHELL, '/bin/sh'].filter(Boolean))];
   for (const name of candidates) {
-    try {
-      const out = execFileSync('command', ['-v', name], { encoding: 'utf8', timeout: 3000 });
-      const line = out.trim().split('\n').pop();
-      if (line && line.startsWith('/')) return line;
-    } catch {}
+    for (const shell of shells) {
+      try {
+        const out = execFileSync(shell, ['-c', `command -v ${name} 2>/dev/null`], {
+          encoding: 'utf8', timeout: 3000,
+        });
+        const line = out.trim().split(/\r?\n/).pop();
+        if (line && path.isAbsolute(line)) return line;
+      } catch {}
+    }
   }
   const home = os.homedir();
   const paths = [
@@ -323,34 +350,63 @@ async function cwLaunch(opts = {}) {
 // ── Session list (R5) ──────────────────────────────────────────────────
 // Scan sessions/*.json and return metadata for each. R2.7: each file is a
 // SavedSession with { metadata: { id, title, created_at, updated_at, ... } }.
+function boundedMetaNumber(value, max = 1e15) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0;
+}
+
+function cleanSessionCost(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out = {};
+  for (const key of ['total', 'input', 'output', 'cacheRead', 'cacheWrite']) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) out[key] = boundedMetaNumber(value[key], 1e12);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function cwListSessions() {
   const dir = SESSIONS_DIR;
-  let files;
-  try { files = fs.readdirSync(dir); } catch { return []; }
-  const sessions = [];
-  for (const f of files) {
-    if (!f.endsWith('.json')) continue;
+  let names;
+  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return []; }
+  // Avoid synchronously parsing an unbounded directory on the Electron main
+  // thread. Prefer recently modified files, reject symlinks/oversized JSON, and
+  // parse at most a bounded candidate set before returning the newest 50.
+  const candidates = [];
+  for (const f of names) {
     try {
-      const raw = fs.readFileSync(path.join(dir, f), 'utf8');
-      const data = JSON.parse(raw);
+      const full = path.join(dir, f);
+      const st = fs.lstatSync(full);
+      if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_SESSION_FILE_BYTES) continue;
+      candidates.push({ f, full, mtimeMs: st.mtimeMs, size: st.size });
+    } catch {}
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const sessions = [];
+  let bytesParsed = 0;
+  const text = (v, max) => typeof v === 'string' ? v.slice(0, max) : null;
+  for (const { f, full, size } of candidates.slice(0, MAX_SESSION_CANDIDATES)) {
+    if (bytesParsed + size > MAX_SESSION_SCAN_BYTES) continue;
+    bytesParsed += size;
+    try {
+      const data = JSON.parse(fs.readFileSync(full, 'utf8'));
       const meta = data && data.metadata;
       if (!meta || typeof meta !== 'object') continue;
       sessions.push({
-        id: meta.id || f.replace('.json', ''),
-        title: typeof meta.title === 'string' ? meta.title : null,
-        workspace: typeof meta.workspace === 'string' ? meta.workspace : null,
-        model: typeof meta.model === 'string' ? meta.model : null,
-        mode: typeof meta.mode === 'string' ? meta.mode : null,
-        messageCount: Number(meta.message_count) || 0,
-        totalTokens: Number(meta.total_tokens) || 0,
-        createdAt: meta.created_at || null,
-        updatedAt: meta.updated_at || null,
-        cost: meta.cost && typeof meta.cost === 'object' ? meta.cost : null,
+        id: text(meta.id, 256) || f.replace(/\.json$/, ''),
+        title: text(meta.title, 512),
+        workspace: text(meta.workspace, 4096),
+        model: text(meta.model, 256),
+        mode: text(meta.mode, 64),
+        messageCount: Math.floor(boundedMetaNumber(meta.message_count, 1e12)),
+        totalTokens: Math.floor(boundedMetaNumber(meta.total_tokens, 1e15)),
+        createdAt: text(meta.created_at, 128),
+        updatedAt: text(meta.updated_at, 128),
+        cost: cleanSessionCost(meta.cost),
       });
     } catch {}
   }
   sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  return sessions;
+  return sessions.slice(0, MAX_SESSION_LIST);
 }
 
 const provider = {
@@ -377,10 +433,11 @@ const provider = {
   stdinShape: {
     common: STDIN_COMMON,
     perEvent: {
-      session_start:    [],                                              // R2: no stdin fields beyond common? TBI
+      session_start:    STDIN_COMMON.concat(['session_source']),         // W23: startup|resume (was TBI, now documented)
       session_end:      [],
       message_submit:   STDIN_COMMON.concat(['text']),                  // R2.4
       tool_call_before: [],                                              // ★ R2.2: NO stdin — uses env vars
+      tool_call_after:  STDIN_COMMON.concat(['tool_name', 'tool_result', 'status']), // W18: tool finished
       turn_end:         STDIN_COMMON.concat([                            // R2.3
         'created_at', 'model_backed', 'provider', 'billing_surface',
         'turn_id', 'status', 'error', 'duration_ms',
@@ -390,6 +447,7 @@ const provider = {
       subagent_spawn:   STDIN_COMMON.concat(['agent_id', 'prompt_preview', 'prompt_truncated']), // R2.4
       subagent_complete: STDIN_COMMON.concat(['agent_id', 'status', 'result_preview', 'result_truncated']),
       on_error:         STDIN_COMMON.concat(['error', 'reason']),
+      mode_change:      STDIN_COMMON.concat(['from_mode', 'to_mode']),   // W22: CW may fire this (plan/agent/operate)
     },
     // tool_call_before env vars (R2.2) — read by hook script, not parseHookStdin
     tcbEnvVars: TCB_ENV_VARS,
@@ -461,31 +519,27 @@ const provider = {
   parseHookStdin,
 
   // ── TOML hook entries (data-driven, for toml-hooks.js) ────────────────────
-  // R2.5 said "no resolveNodeBin needed" but that was wrong: CodeWhale's Rust
-  // Command::new does NOT use shell file association, so a bare .js path fails
-  // with "hook failed and blocked". We MUST prefix with an explicit node path.
-  // R2.8: global uses [[hooks.hooks]]. R2.10: tool_call_before MUST be
-  // background=false for permission bridge.
+  // R2.5: PATH is NOT stripped, so `node /abs/path/codewhale-hook.js <event>`
+  // is sufficient (no resolveNodeBin needed). R2.8: global uses [[hooks.hooks]].
+  // R2.10: tool_call_before MUST be background=false for permission bridge.
+  // W6 (Windows fix): MUST prefix with `node` — on Windows, `.js` files are
+  // associated with Windows Script Host (WScript/JScript) by default, not Node.
+  // Without the `node` prefix, CodeWhale's shell spawns codewhale-hook.js via
+  // WScript → "无效字符" (invalid character) JScript compilation error.
+  // `node` is guaranteed in PATH because CodeWhale itself requires Node.js.
+  // The script path is double-quoted (handles spaces) and the whole command is
+  // serialized as a TOML literal string (single quotes) in toml-hooks.js so the
+  // inner double quotes don't need escaping.
   hookTomlSchema: Object.freeze({
     entries: HOOK_EVENTS.map((ev) => {
       const isPerm = ev === 'tool_call_before';
-      const nodeBin = resolveNodeForHook();
-      // Use unpacked path (app.asar.unpacked/hook/) so system node can read it.
-      // Both nodeBin and script paths are forward-slash normalized for
-      // TOML basic string safety (W2: backslash is TOML escape char).
-      const scriptPath = resolveHookScriptPath().split(path.sep).join('/');
-      const nodePath = String(nodeBin).split(path.sep).join('/');
-      // TOML basic string (double-quoted) CANNOT contain raw double quotes —
-      // they must be escaped as \". We build the command WITHOUT quotes when
-      // paths have no spaces (the common case: D:/nodejs/node.exe), and with
-      // escaped \" quotes when they do (C:/Program Files/nodejs/node.exe).
-      const nodeNeedsQuote = nodePath.includes(' ');
-      const scriptNeedsQuote = scriptPath.includes(' ');
-      const nodePart = nodeNeedsQuote ? `\\"${nodePath}\\"` : nodePath;
-      const scriptPart = scriptNeedsQuote ? `\\"${scriptPath}\\"` : scriptPath;
       return {
         event: ev,
-        command: `${nodePart} ${scriptPart} ${ev}`,
+        // `node` prefix is mandatory on Windows (W6). Forward slashes work in
+        // Node on all platforms and avoid TOML `\` escape issues (W2).
+        command: process.platform === 'win32'
+          ? 'node "' + HOOK_SCRIPT.split(path.sep).join('/') + '" ' + ev
+          : `${quotePosix('node')} ${quotePosix(HOOK_SCRIPT)} ${quotePosix(ev)}`,
         timeout_secs: isPerm ? 600 : 5,
         background: false,          // R2.10: must be foreground for perm
         continue_on_error: ev === 'turn_end' || ev === 'on_error',

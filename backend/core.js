@@ -47,12 +47,19 @@ const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUs
 // ALIVE stays visible (never auto-slept or removed) — so every open Claude
 // session keeps showing. We only retire sessions whose terminal is gone, or that
 // have been silent far too long.
-const WORKING_STALE_MS = 2 * 60 * 1000;   // stuck working/thinking → drop to idle (keep visible)
+const WORKING_STALE_MS = 5 * 60 * 1000;   // W25: stuck working/thinking → drop to idle after 5min.
+// Was 60s (W24), but too short for CodeWhale background shell tasks
+// (exec_shell background=true / task_shell_start) which return immediately
+// with a task_id but keep running in the background for minutes.
+// 5 minutes is a balance: long enough for typical background tasks, short
+// enough to recover from genuinely stuck sessions.
 const CWD_ACTIVE_MS = 10 * 60 * 1000;     // 同 cwd 近期活跃窗口：期间新 SessionStart 视为进入既有工作，不欢迎
 const DETACHED_REMOVE_MS = 30 * 1000;     // terminal pid dead → remove after a short grace
 const SESSION_STALE_MS = 30 * 60 * 1000;  // no live terminal + this idle → remove; ended (sleeping) → remove
 const BACKFILL_MAX_AGE_MS = SESSION_STALE_MS; // on boot, seed sessions whose transcript changed within this
 const BACKFILL_MAX = 15;                  // cap seeded sessions
+const BACKFILL_SCAN_MAX = 5000;           // startup guard for very large transcript trees
+const MAX_SESSIONS = 256;                 // bound long-running memory/UI growth
 
 // The session's Claude Code transcript file. Prefer the real path CC hands us
 // (forwarded by the hook / captured during backfill); only fall back to deriving
@@ -107,6 +114,21 @@ function createCore(options = {}) {
   const sessions = new Map();
   let cleanupTimer = null;
 
+  function ensureSessionCapacity(incomingId) {
+    if (sessions.has(incomingId) || sessions.size < MAX_SESSIONS) return;
+    const candidates = [...sessions.values()].sort((a, b) => {
+      const aBusy = BUSY_STATES.has(a.state) ? 1 : 0;
+      const bBusy = BUSY_STATES.has(b.state) ? 1 : 0;
+      if (aBusy !== bBusy) return aBusy - bBusy; // retire idle/ended first
+      return (a.updatedAt || 0) - (b.updatedAt || 0);
+    });
+    const victim = candidates[0];
+    if (victim) {
+      sessions.delete(victim.id);
+      log('core', `session cap reached; retired ${String(victim.id).slice(0, 8)}`);
+    }
+  }
+
   function setField(s, key, value) {
     if (value === undefined || value === null) return;
     s[key] = value;
@@ -118,11 +140,13 @@ function createCore(options = {}) {
     const now = Date.now();
     const prev = sessions.get(id);
     const isNew = !prev;
+    if (isNew) ensureSessionCapacity(id);
     const s = prev || { id, createdAt: now, state: 'idle', recentEvents: [] };
     const prevState = s.state;
 
     // Merge identity / focus fields only when provided (never clobber with null).
     setField(s, 'agentId', f.agentId);
+    setField(s, 'provider', f.provider);
     setField(s, 'cwd', f.cwd);
     setField(s, 'transcriptPath', f.transcriptPath);
     setField(s, 'sourcePid', f.sourcePid);
@@ -245,6 +269,7 @@ function createCore(options = {}) {
     return {
       id: s.id,
       agentId: s.agentId || 'claude-code',
+      provider: s.provider || null,  // 'codewhale' | null(Claude)
       state: s.state || 'idle',
       badge: deriveBadge(s),
       cwd: s.cwd || '',
@@ -298,16 +323,19 @@ function createCore(options = {}) {
     let files = [];
     try {
       const cutoff = Date.now() - BACKFILL_MAX_AGE_MS;
-      for (const d of fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+      let scanned = 0;
+      scanDirs: for (const d of fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
         if (!d.isDirectory()) continue;
         const sub = path.join(PROJECTS_DIR, d.name);
         let names; try { names = fs.readdirSync(sub); } catch { continue; }
         for (const n of names) {
+          if (++scanned > BACKFILL_SCAN_MAX) { log('core', `backfill scan capped at ${BACKFILL_SCAN_MAX} files`); break scanDirs; }
           if (!n.endsWith('.jsonl')) continue;
           const fp = path.join(sub, n);
-          let st; try { st = fs.statSync(fp); } catch { continue; }
+          let st; try { st = fs.lstatSync(fp); } catch { continue; }
+          if (!st.isFile() || st.isSymbolicLink()) continue;
           if (st.mtimeMs < cutoff) continue;
-          files.push({ fp, mtime: st.mtimeMs, id: n.slice(0, -6) });
+          files.push({ fp, mtime: st.mtimeMs, size: st.size, id: n.slice(0, -6) });
         }
       }
     } catch { return; }
@@ -326,6 +354,7 @@ function createCore(options = {}) {
         state: 'idle', recentEvents: [], agentId: 'claude-code',
         cwd, transcriptPath: f.fp, sessionTitle: transcript.sessionTitle(entries) || null,
         contextUsage: transcript.contextUsage(entries, f.id) || null,
+        transcriptScanKey: `${f.mtime}:${f.size}`,
         sourcePid: null, headless: false,
       });
       added++;
@@ -345,9 +374,14 @@ function createCore(options = {}) {
       const p = transcriptPathFor(s);
       if (!p) continue;
       try {
-        // transcript 的 mtime = 模型最近一次产出时间。事件间隙里文件还在长，
-        // 说明模型在干活（重连后继续跑/流式输出），adapter 据此不判摸鱼。
-        try { s.transcriptActiveAt = fs.statSync(p).mtimeMs; } catch {}
+        // transcript 的 mtime = 模型最近一次产出时间。只在 mtime/size
+        // 变化时重读 tail；大量空闲会话不再每 10 秒重复做磁盘 I/O/JSON 解析。
+        const st = fs.statSync(p);
+        if (!st.isFile()) continue;
+        s.transcriptActiveAt = st.mtimeMs;
+        const scanKey = `${st.mtimeMs}:${st.size}`;
+        if (s.transcriptScanKey === scanKey) continue;
+        s.transcriptScanKey = scanKey;
         const entries = transcript.readTail(p);
         if (!entries) continue;
         const cu = transcript.contextUsage(entries, s.id);
@@ -454,4 +488,6 @@ module.exports = {
   VALID_STATES,
   getPriority,
   deriveBadge,
+  MAX_SESSIONS,
+  BACKFILL_SCAN_MAX,
 };

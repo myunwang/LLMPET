@@ -141,7 +141,7 @@ function suggestionLabel(sg) {
   }
   if (sg.type === 'addRules' || Array.isArray(sg.rules)) {
     const rules = (sg.rules || []).map((r) => (typeof r === 'string' ? r : (r.ruleContent || r.toolName || ''))).filter(Boolean);
-    return '🔓 始终允许：' + clip(rules.join(', ') || '此操作', 36);
+    return '🔓 按 Claude 建议允许：' + clip(rules.join(', ') || '此操作', 36);
   }
   return null;
 }
@@ -152,6 +152,14 @@ function buildPermChoice(perm, entry) {
   for (let i = 0; i < sgs.length && i < 4; i++) {
     const lbl = suggestionLabel(sgs[i]);
     if (lbl) options.push({ label: lbl, key: 'suggestion:' + i });
+  }
+  // CodeWhale batch authorization options (W11/W24): renamed for clarity.
+  // Keep both options explicit: all tools in this session, or this tool in this
+  // session. Neither grants cross-session permission.
+  // and "本会话允许此工具". Both are session-scoped and expire after inactivity.
+  if (perm.provider === 'codewhale') {
+    options.splice(1, 0, { label: '✅✅ 本轮全部允许', key: 'cw-allow-session' });
+    options.splice(2, 0, { label: '🔓 本会话允许此工具', key: 'cw-allow-tool' });
   }
   options.push({ label: '⛔ 拒绝', key: 'deny' });
   return {
@@ -164,6 +172,7 @@ function buildPermChoice(perm, entry) {
     options,
     multi: false,
     allowInput: false,
+    provider: perm.provider || null,   // Round 7: 'codewhale' | null(Claude)
   };
 }
 
@@ -208,7 +217,9 @@ function buildContinueChoice(entry) {
     sessionId: entry.id,
     project: projectName(entry),
     header: '',
-    question: entry.assistantLastOutput ? clip(entry.assistantLastOutput, 120) : 'Claude 在等你回复',
+    question: entry.assistantLastOutput
+      ? clip(entry.assistantLastOutput, 120)
+      : (entry.provider === 'codewhale' ? 'CodeWhale 在等你回复' : 'Claude 在等你回复'),
     options: [],
     multi: false,
     allowInput: false,
@@ -282,6 +293,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
         : null,
       sessionId: e.id,
       headless: e.headless,
+      provider: e.provider || null,  // 'codewhale' | null(Claude)
       badge: e.badge,
       model: e.model || null,
       // context-window usage % (for the session-list HUD badge), null if unknown
@@ -334,10 +346,23 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     activeOut = { ...activeOut, project: path.basename(activeOut.project) || activeOut.project };
   }
 
+  // Round 12-拓展: per-provider cost breakdown for panel UI.
+  const mbp = (opts && opts.meterByProvider) || {};
+  const providerCost = {};
+  for (const [id, pm] of Object.entries(mbp)) {
+    const pt = pm.today || {};
+    providerCost[id] = {
+      cost: pt.cost || 0,
+      tokens: pt.tokens || 0,
+      messages: pt.messages != null ? pt.messages : (pt.msgs || 0),
+    };
+  }
+
   return {
     today: todayOut,
     window5h: m.window5h || { tokens: 0, cost: 0, startTs: 0, resetTs: 0 },
     byModel: m.byModel || {},
+    providerCost,
     lastOps: Array.isArray(opts && opts.lastOps) ? opts.lastOps : [],
     active: activeOut,
     sessions,

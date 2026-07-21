@@ -44,6 +44,10 @@
     'bell-off': '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 16.5V11a5.5 5.5 0 0 1 8.5-4.6"/><path d="M17.5 11v5.5l1.5 2h-13"/><path d="M10 20a2 2 0 0 0 4 0"/><path d="M3 3l18 18" stroke-width="2.3"/></svg>',
     // ⏻ 电源/退出
     power: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.5 7.5a8 8 0 1 0 11 0"/></svg>',
+    // 💲 货币/美元
+    coins: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9.5" cy="12.5" r="5.5"/><circle cx="14.5" cy="11.5" r="5.5"/><path d="M9.5 10v5M9.5 12.5h2.5"/></svg>',
+    // 💴 日元
+    yen: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l7 9 7-9"/><path d="M5 13h14"/><path d="M5 17h14"/><path d="M12 15v6"/></svg>',
   };
 
   function escapeHtml(s) {
@@ -69,17 +73,29 @@
     '🔔': 'bell',
     '🔇': 'bell-off',
     '⏻': 'power',
+    '💲': 'coins',
+    '💴': 'yen',
   };
 
-  const EMOJI_SRC = '(' + Object.keys(EMOJI_TO_ICON).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')';
-  const EMOJI_RE = new RegExp(EMOJI_SRC, 'g');       // for replace-all in withIcons
-  const EMOJI_TEST_RE = new RegExp(EMOJI_SRC);       // no /g — .test() must be stateless
+  const EMOJI_KEYS = Object.freeze(Object.keys(EMOJI_TO_ICON));
 
-  // Take a plain string, escape it (HTML-safe), then swap known emoji for SVG.
-  // Output is intended for innerHTML; surrounding user text is already escaped.
+  // Take a plain string, escape each literal segment, then swap known emoji for
+  // fixed SVG assets. Avoiding a synthesized regular expression keeps this hot
+  // path deterministic even if the icon map grows later.
   function withIcons(text) {
-    const escaped = escapeHtml(text);
-    return escaped.replace(EMOJI_RE, (e) => '<span class="oi">' + (ICONS[EMOJI_TO_ICON[e]] || e) + '</span>');
+    const source = text == null ? '' : String(text);
+    let out = '';
+    let plain = '';
+    for (const char of source) {
+      const iconName = EMOJI_TO_ICON[char];
+      if (!iconName) {
+        plain += char;
+        continue;
+      }
+      if (plain) { out += escapeHtml(plain); plain = ''; }
+      out += '<span class="oi">' + (ICONS[iconName] || escapeHtml(char)) + '</span>';
+    }
+    return out + escapeHtml(plain);
   }
 
   function setTextWithIcons(el, text) {
@@ -90,9 +106,8 @@
   // Detect: does this string contain any of our mapped emoji? If not, callers
   // can keep using textContent for speed — useful in hot paths.
   function hasMappedEmoji(text) {
-    // Use the non-global regex: a /g regex's .test() advances lastIndex and
-    // wouldn't reset, so repeated calls on the same string flip true/false/true…
-    return EMOJI_TEST_RE.test(String(text == null ? '' : text));
+    const source = String(text == null ? '' : text);
+    return EMOJI_KEYS.some((emoji) => source.includes(emoji));
   }
 
   root.OctoIcons = { icon, withIcons, setTextWithIcons, hasMappedEmoji, EMOJI_TO_ICON };

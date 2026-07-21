@@ -1,8 +1,9 @@
 'use strict';
 
-// Tiny append-only logger. Backs window.pet.openLog() / petLog(tag,msg).
-// Lives under ~/.octopus/octopus.log so it survives app restarts and is easy to
-// tail while debugging the hook → server → pet pipeline.
+// Bounded asynchronous logger. Each append opens/closes the file, so Windows can
+// rotate it reliably without racing an open WriteStream handle. Calls from the
+// Electron main process only enqueue short strings; disk I/O is serialized in
+// the background and the queue is capped to prevent a log storm using memory.
 
 const fs = require('fs');
 const os = require('os');
@@ -10,65 +11,86 @@ const path = require('path');
 
 const LOG_DIR = path.join(os.homedir(), '.octopus');
 const LOG_PATH = path.join(LOG_DIR, 'octopus.log');
-const MAX_BYTES = 1 * 1024 * 1024; // rotate at 1 MB so the file never grows unbounded
+const ROTATED_PATH = LOG_PATH + '.1';
+const MAX_BYTES = 1 * 1024 * 1024;
+const MAX_QUEUE = 1000;
 
-let stream = null;
-let written = 0; // bytes in the current LOG_PATH, tracked so we rotate mid-run
+let queue = [];
+let draining = false;
+let written = null;
 let stdoutUsable = true;
+let dropped = 0;
 
-// Socket/PTY 写失败是异步 error 事件，try/catch 捕获不到。启动终端关闭后
-// 只停止镜像 stdout，文件日志仍继续工作，绝不能因此击穿 Electron 主进程。
 if (process.stdout && typeof process.stdout.on === 'function') {
   process.stdout.on('error', () => { stdoutUsable = false; });
-}
-
-function ensureStream() {
-  if (stream) return stream;
-  try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-    // Rotate once if the existing file is already large; else resume its size.
-    try {
-      const st = fs.statSync(LOG_PATH);
-      if (st.size > MAX_BYTES) { fs.renameSync(LOG_PATH, LOG_PATH + '.1'); written = 0; }
-      else written = st.size;
-    } catch { written = 0; }
-    const created = fs.createWriteStream(LOG_PATH, { flags: 'a' });
-    created.on('error', () => { if (stream === created) stream = null; });
-    stream = created;
-  } catch {
-    stream = null;
-  }
-  return stream;
-}
-
-// A tray app runs for weeks without a restart, so checking size only at stream
-// creation let the file grow unbounded past MAX_BYTES. Rotate whenever the
-// running total crosses the cap; the next log() re-creates a fresh stream.
-function rotateIfNeeded() {
-  if (written <= MAX_BYTES) return;
-  try {
-    if (stream) { stream.end(); stream = null; }
-    fs.renameSync(LOG_PATH, LOG_PATH + '.1');
-    written = 0;
-  } catch { /* keep appending to the current file if rotate fails */ }
-}
-
-function log(tag, ...parts) {
-  const line = `${new Date().toISOString()} [${tag}] ${parts
-    .map((p) => (typeof p === 'string' ? p : safeJson(p)))
-    .join(' ')}\n`;
-  const s = ensureStream();
-  if (s) {
-    try { s.write(line); written += Buffer.byteLength(line); rotateIfNeeded(); } catch {}
-  }
-  // Also mirror to stdout so `npm start` shows the pipeline live.
-  if (stdoutUsable && process.stdout && process.stdout.writable && !process.stdout.destroyed) {
-    try { process.stdout.write(line); } catch { stdoutUsable = false; }
-  }
 }
 
 function safeJson(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-module.exports = { log, LOG_PATH, LOG_DIR };
+function enqueue(line) {
+  if (queue.length >= MAX_QUEUE) {
+    queue.shift();
+    dropped++;
+  }
+  queue.push(line);
+  drain().catch(() => {});
+}
+
+async function initFile() {
+  await fs.promises.mkdir(LOG_DIR, { recursive: true, mode: 0o700 });
+  try { await fs.promises.chmod(LOG_DIR, 0o700); } catch {}
+  if (written !== null) return;
+  try {
+    const st = await fs.promises.stat(LOG_PATH);
+    written = st.size;
+  } catch { written = 0; }
+}
+
+async function rotate() {
+  try { await fs.promises.unlink(ROTATED_PATH); } catch {}
+  try { await fs.promises.rename(LOG_PATH, ROTATED_PATH); } catch (err) {
+    if (!err || err.code !== 'ENOENT') throw err;
+  }
+  written = 0;
+}
+
+async function drain() {
+  if (draining) return;
+  draining = true;
+  try {
+    await initFile();
+    while (queue.length) {
+      let line = queue.shift();
+      if (dropped) {
+        line = `${new Date().toISOString()} [log] dropped ${dropped} queued line(s)\n` + line;
+        dropped = 0;
+      }
+      const bytes = Buffer.byteLength(line);
+      if (written > 0 && written + bytes > MAX_BYTES) await rotate();
+      await fs.promises.appendFile(LOG_PATH, line, { encoding: 'utf8', mode: 0o600 });
+      try { await fs.promises.chmod(LOG_PATH, 0o600); } catch {}
+      written += bytes;
+    }
+  } catch {
+    // Logging must never crash or stall the tray app. A later call retries.
+    written = null;
+  } finally {
+    draining = false;
+    if (queue.length) setImmediate(() => drain().catch(() => {}));
+  }
+}
+
+function log(tag, ...parts) {
+  const safeTag = String(tag == null ? '' : tag).replace(/[\r\n\0]/g, ' ').slice(0, 96);
+  const line = `${new Date().toISOString()} [${safeTag}] ${parts
+    .map((p) => (typeof p === 'string' ? p : safeJson(p)))
+    .join(' ')}\n`;
+  enqueue(line);
+  if (stdoutUsable && process.stdout && process.stdout.writable && !process.stdout.destroyed) {
+    try { process.stdout.write(line); } catch { stdoutUsable = false; }
+  }
+}
+
+module.exports = { log, LOG_PATH, LOG_DIR, _drain: drain };

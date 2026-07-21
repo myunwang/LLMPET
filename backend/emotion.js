@@ -24,7 +24,7 @@ const EMOTIONS = [
   {
     id: 'sad',
     cn: ['又错了', '错了', '搞砸', '失望', '烦死', '烦人', '真讨厌', '讨厌', '气死', '怎么搞的', '不像话', '算了吧', '真无语', '无语', '糟糕', '糟透了', '一团糟', '又坏了', '你怎么回事', '别再错'],
-    en: ['disappointing', 'frustrating', 'terrible', 'awful', 'garbage', 'useless', 'what the hell', 'damn it', 'seriously\\?'],
+    en: ['disappointing', 'frustrating', 'terrible', 'awful', 'garbage', 'useless', 'what the hell', 'damn it', 'seriously?'],
   },
   {
     id: 'sorry',
@@ -48,16 +48,29 @@ function neighborNegation(text, idx) {
   return NEGATION_RE_CN.test(before) || NEGATION_RE_EN.test(before);
 }
 
+function isWordChar(ch) {
+  return !!ch && /[a-z0-9_]/i.test(ch);
+}
+
+function findLiteralPhrase(text, phrase) {
+  const haystack = text.toLowerCase();
+  const needle = phrase.toLowerCase();
+  let from = 0;
+  while (from <= haystack.length - needle.length) {
+    const i = haystack.indexOf(needle, from);
+    if (i < 0) return -1;
+    const before = i > 0 ? haystack[i - 1] : '';
+    const after = i + needle.length < haystack.length ? haystack[i + needle.length] : '';
+    if (!isWordChar(before) && !isWordChar(after)) return i;
+    from = i + 1;
+  }
+  return -1;
+}
+
 function findOne(text, words, isCn) {
   for (const w of words) {
-    if (isCn) {
-      const i = text.indexOf(w);
-      if (i >= 0 && !neighborNegation(text, i)) return true;
-    } else {
-      const re = new RegExp('\\b' + w + '\\b', 'i');
-      const m = re.exec(text);
-      if (m && !neighborNegation(text, m.index)) return true;
-    }
+    const i = isCn ? text.indexOf(w) : findLiteralPhrase(text, w);
+    if (i >= 0 && !neighborNegation(text, i)) return true;
   }
   return false;
 }

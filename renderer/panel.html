@@ -2,6 +2,7 @@
 <html lang="zh">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
     <link rel="stylesheet" href="panel.css" />
     <title>Claude 小章鱼 · 详情</title>
   </head>
@@ -37,16 +38,6 @@
           <span id="budget-pct">0%</span>
         </div>
         <div class="bar"><div id="budget-fill" class="bar-fill"></div></div>
-      </section>
-
-      <section class="block" id="provider-block">
-        <div class="block-title">🔌 Agent Provider</div>
-        <div id="provider-seg" class="seg">
-          <button class="seg-btn" data-provider="claude">Claude Code</button>
-          <button class="seg-btn" data-provider="codewhale">CodeWhale</button>
-          <button class="seg-btn" data-provider="all">双开</button>
-        </div>
-        <div id="provider-status" class="provider-status">读取中…</div>
       </section>
 
       <section class="block" id="todo-block">
@@ -89,6 +80,16 @@
             <div class="row total"><span>消息轮次</span><b id="t-msg">0</b></div>
           </div>
         </section>
+
+        <section class="block" id="provider-cost-block">
+          <div class="block-title">按 Provider（今日）</div>
+          <div id="provider-cost" class="rows"><div class="empty">暂无数据</div></div>
+        </section>
+
+      <section class="block" id="provider-block">
+        <div class="block-title">Provider</div>
+        <div id="provider-list" class="provider-list"></div>
+      </section>
 
         <section class="block">
           <div class="block-title">进行中的任务</div>

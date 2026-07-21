@@ -57,19 +57,21 @@ function trySpawn(bin, args, opts) {
 function buildCandidates(claude, workDir) {
   const plat = process.platform;
   if (plat === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd ${appleEscape(posixQuote(workDir))} && ${appleEscape(claude)}"`;
+    const script = `tell application "Terminal" to do script "cd ${appleEscape(posixQuote(workDir))} && ${appleEscape(posixQuote(claude))}"`;
     return [['osascript', ['-e', script]]];
   }
   if (plat === 'win32') {
-    // W3: wt.exe is an App Execution Alias (not a real .exe) — spawning it
-    // directly may ENOENT. Wrap in cmd.exe /c so the alias resolves inside a
-    // real shell context.
+    // wt.exe is an App Execution Alias (not a real .exe) — spawning it
+    // directly without a shell may ENOENT on some Windows versions. Wrap it
+    // in cmd.exe /c so the alias resolves inside a real shell context.
+    // (W3: Windows adaptation — affects both Claude and CodeWhale launch.)
     return [
       ['cmd.exe', ['/c', 'wt.exe', '--', 'cmd.exe', '/k', `cd /d "${workDir}" && "${claude}"`]],
       ['cmd.exe', ['/c', 'start', '', 'cmd.exe', '/k', `cd /d "${workDir}" && "${claude}"`]],
     ];
   }
-  const run = `cd ${posixQuote(workDir)}; ${posixQuote(claude)}; exec ${process.env.SHELL || 'bash'}`;
+  const loginShell = process.env.SHELL && path.isAbsolute(process.env.SHELL) ? process.env.SHELL : '/bin/bash';
+  const run = `cd ${posixQuote(workDir)}; ${posixQuote(claude)}; exec ${posixQuote(loginShell)}`;
   return [
     ['x-terminal-emulator', ['-e', `bash -lc ${posixQuote(run)}`]],
     ['gnome-terminal', ['--', 'bash', '-lc', run]],
@@ -88,4 +90,4 @@ async function launchClaude(opts = {}) {
   return { ok: false, message: 'could not open a terminal' };
 }
 
-module.exports = { launchClaude, findClaude, buildCandidates, trySpawn };
+module.exports = { launchClaude, findClaude, buildCandidates, trySpawn, posixQuote, appleEscape };

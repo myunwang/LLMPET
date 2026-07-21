@@ -21,6 +21,8 @@ const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
 const { log } = require('./log');
+const { readJsonBoundedSync } = require('./safe-json');
+const { dict, finiteNonNegative, safeMapKey, cleanDailyMap, cleanByModelMap, cleanHourlyMap, cleanRecent, cleanCursors, cleanSeen, readJsonBounded } = require('./metering-state');
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const STATE_DIR = path.join(os.homedir(), '.octopus');
@@ -33,6 +35,13 @@ const WINDOW_MS = 5 * 60 * 60 * 1000;     // Claude's 5h rate window (approx)
 const DAILY_KEEP_DAYS = 95;
 const RECENT_KEEP_MS = WINDOW_MS + 30 * 60 * 1000;
 const BACKFILL_MS = DAILY_KEEP_DAYS * DAY_MS;
+const MAX_PRICING_FILE_BYTES = 4 * 1024 * 1024;
+const READ_CHUNK_BYTES = 4 * 1024 * 1024;
+const MAX_SCAN_BYTES_PER_TICK = 32 * 1024 * 1024;
+const MAX_TRANSCRIPT_FILES = 5000;
+const MAX_RECENT_RECORDS = 50000;
+const MAX_SEEN_RECORDS = 200000;
+const SEEN_TRIM_BATCH = 10000;
 
 // USD per 1,000,000 tokens. Family-level ESTIMATES — only a last-resort fallback
 // now that we price by exact model id (pricing._models, synced from LiteLLM).
@@ -57,41 +66,56 @@ function normModelName(model) {
   return seg.replace(/-\d{8}\b/g, '').replace(/-v\d+$/, '').replace(/@.*$/, '');
 }
 
+function normalizePriceRow(row, fallback) {
+  const base = fallback && typeof fallback === 'object' ? fallback : DEFAULT_PRICING.default;
+  const out = {};
+  for (const key of ['input', 'output', 'cacheWrite', 'cacheRead']) {
+    const candidate = row && Number(row[key]);
+    out[key] = Number.isFinite(candidate) && candidate >= 0 && candidate <= 1_000_000
+      ? candidate
+      : base[key];
+  }
+  return out;
+}
+
 // Priority: user manual override > LiteLLM sync cache > built-in defaults.
 // Family-level shallow merge — sub-keys (input/output/cacheWrite/cacheRead)
 // from a higher layer replace the same key in a lower layer; missing sub-keys
 // keep the lower-layer value. So a stale cache can't zero-out a missing field.
 function loadPricing() {
   const out = JSON.parse(JSON.stringify(DEFAULT_PRICING));
-  out._models = {}; // exact per-model-id prices (claude-fable-5 → {...}); wins over family
+  out._models = dict(); // exact per-model-id prices (claude-fable-5 → {...}); wins over family
   // layer 1: synced cache (~/.octopus/pricing-cache.json)
   try {
-    const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
+    const c = readJsonBoundedSync(PRICING_CACHE_PATH, MAX_PRICING_FILE_BYTES);
     if (c && c.pricing && typeof c.pricing === 'object') {
       for (const [fam, row] of Object.entries(c.pricing)) {
-        if (out[fam] && row && typeof row === 'object') {
-          for (const k of Object.keys(out[fam])) if (Number.isFinite(row[k])) out[fam][k] = row[k];
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_PRICING, fam) && row && typeof row === 'object') {
+          out[fam] = normalizePriceRow(row, out[fam]);
         }
       }
     }
     if (c && c.models && typeof c.models === 'object') {
       for (const [id, row] of Object.entries(c.models)) {
-        if (row && typeof row === 'object' && Number.isFinite(row.input)) out._models[normModelName(id)] = row;
+        if (row && typeof row === 'object' && Number.isFinite(row.input)) {
+          const key = safeMapKey(normModelName(id), '', 256);
+          if (key) out._models[key] = normalizePriceRow(row, DEFAULT_PRICING.default);
+        }
       }
     }
   } catch {}
   // layer 2: user override (~/.octopus/pricing.json) — wins. Supports both family
   // keys and a "models" map of exact ids.
   try {
-    const raw = JSON.parse(fs.readFileSync(PRICING_OVERRIDE_PATH, 'utf8'));
+    const raw = readJsonBoundedSync(PRICING_OVERRIDE_PATH, MAX_PRICING_FILE_BYTES);
     for (const [fam, row] of Object.entries(raw)) {
       if (fam === 'models' && row && typeof row === 'object') {
         for (const [id, r] of Object.entries(row)) {
-          const k = normModelName(id);
-          if (r && typeof r === 'object') out._models[k] = { ...(out._models[k] || {}), ...r };
+          const k = safeMapKey(normModelName(id), '', 256);
+          if (k && r && typeof r === 'object') out._models[k] = normalizePriceRow(r, out._models[k] || DEFAULT_PRICING.default);
         }
-      } else if (row && typeof row === 'object') {
-        out[fam] = { ...(out[fam] || {}), ...row };
+      } else if (Object.prototype.hasOwnProperty.call(DEFAULT_PRICING, fam) && row && typeof row === 'object') {
+        out[fam] = normalizePriceRow(row, out[fam]);
       }
     }
   } catch {}
@@ -101,9 +125,9 @@ function loadPricing() {
 // Price a model: exact per-id table first (correct across opus generations and
 // new models like fable-5), then family keyword, then the generic default.
 function priceFor(pricing, model) {
-  const models = pricing._models || {};
-  const norm = normModelName(model);
-  if (norm && models[norm]) return models[norm];
+  const models = pricing._models || dict();
+  const norm = safeMapKey(normModelName(model), '', 256);
+  if (norm && Object.prototype.hasOwnProperty.call(models, norm)) return normalizePriceRow(models[norm], pricing.default);
   const m = String(model || '').toLowerCase();
   if (m.includes('opus')) return pricing.opus;
   if (m.includes('fable')) return pricing.fable || pricing.default;
@@ -113,8 +137,70 @@ function priceFor(pricing, model) {
 }
 
 function dayKey(ts) {
-  const d = new Date(ts);
+  let d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Incrementally read complete JSONL records with fixed memory. When a single
+// line is larger than the chunk, advance through it without parsing; the next
+// call detects that the cursor is mid-line and discards bytes up to the next LF.
+async function readNewLinesBounded(file, fromOffset, size, maxBytes = READ_CHUNK_BYTES) {
+  if (size <= fromOffset) {
+    return { lines: [], newOffset: size < fromOffset ? 0 : fromOffset, bytesRead: 0 };
+  }
+  const fh = await fsp.open(file, 'r');
+  try {
+    const wanted = Math.max(1, Math.min(size - fromOffset, maxBytes));
+    const buf = Buffer.allocUnsafe(wanted);
+    const { bytesRead } = await fh.read(buf, 0, wanted, fromOffset);
+    if (!bytesRead) return { lines: [], newOffset: fromOffset, bytesRead: 0 };
+    const data = buf.subarray(0, bytesRead);
+
+    let startsMidLine = false;
+    if (fromOffset > 0) {
+      const previous = Buffer.allocUnsafe(1);
+      const prevRead = await fh.read(previous, 0, 1, fromOffset - 1);
+      startsMidLine = prevRead.bytesRead === 1 && previous[0] !== 0x0A;
+    }
+
+    let start = 0;
+    let discardedThrough = 0;
+    if (startsMidLine) {
+      const firstNl = data.indexOf(0x0A);
+      if (firstNl < 0) {
+        const moreRemains = fromOffset + bytesRead < size;
+        return {
+          lines: [],
+          newOffset: moreRemains ? fromOffset + bytesRead : fromOffset,
+          bytesRead,
+        };
+      }
+      start = firstNl + 1;
+      discardedThrough = start;
+    }
+
+    const lastNl = data.lastIndexOf(0x0A);
+    if (lastNl < start) {
+      const moreRemains = fromOffset + bytesRead < size;
+      return {
+        lines: [],
+        newOffset: discardedThrough
+          ? fromOffset + discardedThrough
+          : (moreRemains ? fromOffset + bytesRead : fromOffset),
+        bytesRead,
+      };
+    }
+
+    const complete = data.subarray(start, lastNl).toString('utf8');
+    return {
+      lines: complete ? complete.split('\n') : [],
+      newOffset: fromOffset + lastNl + 1,
+      bytesRead,
+    };
+  } finally {
+    await fh.close();
+  }
 }
 
 function emptyDay() {
@@ -126,29 +212,32 @@ function createMetering() {
 
   // Persisted state.
   let state = {
-    cursors: {},          // filePath -> byte offset already consumed
-    seen: {},             // `${msgId}|${requestId}` -> dayKey, dedupe across files/runs
-    daily: {},            // 'YYYY-MM-DD' -> { cost, tokens, msgs, input, output, cacheCreate, cacheRead }
-    byModelByDay: {},     // 'YYYY-MM-DD' -> { model: { cost, tokens } }
-    hourlyByDay: {},      // 'YYYY-MM-DD' -> [24] cost
+    cursors: dict(),          // filePath -> byte offset already consumed
+    seen: dict(),             // `${msgId}|${requestId}` -> dayKey, dedupe across files/runs
+    daily: dict(),            // 'YYYY-MM-DD' -> { cost, tokens, msgs, input, output, cacheCreate, cacheRead }
+    byModelByDay: dict(),     // 'YYYY-MM-DD' -> { model: { cost, tokens } }
+    hourlyByDay: dict(),      // 'YYYY-MM-DD' -> [24] cost
     recent: [],           // [{ ts, cost, tokens }] within RECENT_KEEP_MS, for window5h
   };
   let scanning = false;
   let dirty = false;
   let saveTimer = null;
+  let scanStartIndex = 0;
 
   function load() {
     try {
-      const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-      if (raw && typeof raw === 'object') {
-        state.cursors = raw.cursors && typeof raw.cursors === 'object' ? raw.cursors : {};
-        state.seen = raw.seen && typeof raw.seen === 'object' ? raw.seen : {};
-        state.daily = raw.daily && typeof raw.daily === 'object' ? raw.daily : {};
-        state.byModelByDay = raw.byModelByDay && typeof raw.byModelByDay === 'object' ? raw.byModelByDay : {};
-        state.hourlyByDay = raw.hourlyByDay && typeof raw.hourlyByDay === 'object' ? raw.hourlyByDay : {};
-        state.recent = Array.isArray(raw.recent) ? raw.recent : [];
+      const raw = readJsonBounded(STATE_PATH);
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        state.cursors = cleanCursors(raw.cursors);
+        state.seen = cleanSeen(raw.seen);
+        state.daily = cleanDailyMap(raw.daily);
+        state.byModelByDay = cleanByModelMap(raw.byModelByDay);
+        state.hourlyByDay = cleanHourlyMap(raw.hourlyByDay);
+        state.recent = cleanRecent(raw.recent);
       }
-    } catch {}
+    } catch (err) {
+      if (err && err.code === 'ESTATEBIG') log('meter', 'ignored oversized state file:', err.message);
+    }
     pruneDaily();
   }
 
@@ -162,10 +251,12 @@ function createMetering() {
   function saveNow() {
     dirty = false;
     try {
-      fs.mkdirSync(STATE_DIR, { recursive: true });
+      fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+      try { fs.chmodSync(STATE_DIR, 0o700); } catch {}
       const tmp = path.join(STATE_DIR, `.usage.${process.pid}.${Date.now()}.tmp`);
-      fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
+      fs.writeFileSync(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tmp, STATE_PATH);
+      try { fs.chmodSync(STATE_PATH, 0o600); } catch {}
     } catch (err) {
       log('meter', 'save failed:', err.message);
     }
@@ -176,8 +267,13 @@ function createMetering() {
     for (const k of Object.keys(state.daily)) if (k < cutoff) delete state.daily[k];
     for (const k of Object.keys(state.byModelByDay)) if (k < cutoff) delete state.byModelByDay[k];
     for (const k of Object.keys(state.hourlyByDay)) if (k < cutoff) delete state.hourlyByDay[k];
-    // Bound the dedupe set to the retention window (dayKey values sort lexically).
+    // Bound the dedupe set to the retention window and a hard runtime cap.
     for (const k of Object.keys(state.seen)) if (state.seen[k] < cutoff) delete state.seen[k];
+    const seenKeys = Object.keys(state.seen);
+    if (seenKeys.length > MAX_SEEN_RECORDS) {
+      const removeCount = Math.max(SEEN_TRIM_BATCH, seenKeys.length - MAX_SEEN_RECORDS);
+      for (const k of seenKeys.slice(0, removeCount)) delete state.seen[k];
+    }
   }
 
   // Add one deduped assistant usage record into the aggregates.
@@ -197,8 +293,8 @@ function createMetering() {
     d.cost += cost; d.tokens += tokens; d.msgs += 1;
     d.input += input; d.output += output; d.cacheCreate += cacheCreate; d.cacheRead += cacheRead;
 
-    const fam = (state.byModelByDay[k] = state.byModelByDay[k] || {});
-    const mk = model || 'unknown';
+    const fam = (state.byModelByDay[k] = state.byModelByDay[k] || dict());
+    const mk = safeMapKey(model, 'unknown', 256);
     // Per-model detail (cost + token 四元组 + 轮次) so the panel can show 有总有分.
     const mv = (fam[mk] = fam[mk] || { cost: 0, tokens: 0, msgs: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 });
     mv.cost += cost; mv.tokens += tokens; mv.msgs += 1;
@@ -207,7 +303,12 @@ function createMetering() {
     const hours = (state.hourlyByDay[k] = state.hourlyByDay[k] || new Array(24).fill(0));
     hours[new Date(tsMs).getHours()] += cost;
 
-    if (Date.now() - tsMs < RECENT_KEEP_MS) state.recent.push({ ts: tsMs, cost, tokens });
+    if (Date.now() - tsMs < RECENT_KEEP_MS) {
+      state.recent.push({ ts: tsMs, cost, tokens });
+      if (state.recent.length > MAX_RECENT_RECORDS) {
+        state.recent.splice(0, state.recent.length - MAX_RECENT_RECORDS);
+      }
+    }
   }
 
   function pruneRecent() {
@@ -215,27 +316,12 @@ function createMetering() {
     if (state.recent.length && state.recent[0].ts < cutoff) {
       state.recent = state.recent.filter((r) => r.ts >= cutoff);
     }
-  }
-
-  // Read appended bytes since the stored cursor, returning complete lines only.
-  async function readNewLines(file, fromOffset, size) {
-    if (size <= fromOffset) return { lines: [], newOffset: size < fromOffset ? 0 : fromOffset };
-    const fh = await fsp.open(file, 'r');
-    try {
-      const len = size - fromOffset;
-      const buf = Buffer.alloc(len);
-      await fh.read(buf, 0, len, fromOffset);
-      const text = buf.toString('utf8');
-      const lastNl = text.lastIndexOf('\n');
-      if (lastNl < 0) return { lines: [], newOffset: fromOffset }; // no complete line yet
-      const consumed = text.slice(0, lastNl);
-      return { lines: consumed.split('\n'), newOffset: fromOffset + Buffer.byteLength(consumed, 'utf8') + 1 };
-    } finally {
-      await fh.close();
+    if (state.recent.length > MAX_RECENT_RECORDS) {
+      state.recent.splice(0, state.recent.length - MAX_RECENT_RECORDS);
     }
   }
 
-  async function scanFile(file) {
+  async function scanFile(file, byteBudget = READ_CHUNK_BYTES) {
     let st;
     try { st = await fsp.stat(file); } catch { return; }
     if (st.mtimeMs < Date.now() - BACKFILL_MS) return; // too old to matter
@@ -243,7 +329,12 @@ function createMetering() {
     if (offset > st.size) offset = 0; // file truncated/rotated
     if (st.size <= offset) return;
 
-    const { lines, newOffset } = await readNewLines(file, offset, st.size);
+    const { lines, newOffset, bytesRead } = await readNewLinesBounded(
+      file,
+      offset,
+      st.size,
+      Math.max(1, Math.min(byteBudget, READ_CHUNK_BYTES))
+    );
     for (const line of lines) {
       if (!line || line.charCodeAt(0) !== 123) continue; // fast skip non-'{' lines
       let o;
@@ -264,6 +355,7 @@ function createMetering() {
       record(tsMs, msg.model || 'unknown', usage);
     }
     state.cursors[file] = newOffset;
+    return bytesRead || 0;
   }
 
   async function listTranscripts() {
@@ -274,8 +366,12 @@ function createMetering() {
       if (!d.isDirectory()) continue;
       const sub = path.join(PROJECTS_DIR, d.name);
       let files;
-      try { files = await fsp.readdir(sub); } catch { continue; }
-      for (const f of files) if (f.endsWith('.jsonl')) out.push(path.join(sub, f));
+      try { files = await fsp.readdir(sub, { withFileTypes: true }); } catch { continue; }
+      for (const f of files) {
+        if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
+        out.push(path.join(sub, f.name));
+        if (out.length >= MAX_TRANSCRIPT_FILES) return out;
+      }
     }
     return out;
   }
@@ -285,10 +381,25 @@ function createMetering() {
     scanning = true;
     try {
       const files = await listTranscripts();
-      for (const file of files) {
-        // Isolate per file: a single unreadable/poison transcript must not abort
-        // the whole loop and starve every file after it, scan after scan.
-        try { await scanFile(file); } catch (e) { log('meter', 'scanFile failed:', file, e.message); }
+      if (files.length) {
+        scanStartIndex %= files.length;
+        let remaining = MAX_SCAN_BYTES_PER_TICK;
+        let processed = 0;
+        for (let i = 0; i < files.length && remaining > 0; i++) {
+          const file = files[(scanStartIndex + i) % files.length];
+          // Isolate per file: one unreadable/poison transcript must not abort
+          // the whole loop. A global byte budget also keeps the UI responsive.
+          try {
+            const consumed = await scanFile(file, remaining);
+            remaining -= Math.max(0, consumed || 0);
+          } catch (e) {
+            log('meter', 'scanFile failed:', file, e.message);
+          }
+          processed++;
+        }
+        scanStartIndex = (scanStartIndex + processed) % files.length;
+      } else {
+        scanStartIndex = 0;
       }
       pruneRecent();
       pruneDaily();
@@ -342,7 +453,7 @@ function createMetering() {
     let count = Object.keys(DEFAULT_PRICING).length - 1;
     let source = 'builtin';
     try {
-      const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
+      const c = readJsonBoundedSync(PRICING_CACHE_PATH, MAX_PRICING_FILE_BYTES);
       if (c && c.pricing && typeof c.pricing === 'object' && Object.keys(c.pricing).length) {
         live = true; ts = Number(c.ts) || 0; source = 'litellm';
         // Prefer the exact per-model count (what actually drives billing now).
@@ -361,11 +472,11 @@ function createMetering() {
   // stored under a wrong price (e.g. fable-5 previously billed at sonnet). Async.
   async function rebuild() {
     load(); // pull existing so a partial failure still leaves the old data
-    state.cursors = {};
-    state.seen = {};
-    state.daily = {};
-    state.byModelByDay = {};
-    state.hourlyByDay = {};
+    state.cursors = dict();
+    state.seen = dict();
+    state.daily = dict();
+    state.byModelByDay = dict();
+    state.hourlyByDay = dict();
     state.recent = [];
     pricing = loadPricing();
     await scan();
@@ -404,7 +515,11 @@ function createMetering() {
 
 function num(v) {
   const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  return finiteNonNegative(n, 1e12);
 }
 
-module.exports = { createMetering, DEFAULT_PRICING, normModelName, priceFor, loadPricing };
+module.exports = {
+  createMetering, DEFAULT_PRICING, normModelName, priceFor, loadPricing,
+  _readNewLinesBounded: readNewLinesBounded,
+  _limits: { READ_CHUNK_BYTES, MAX_SCAN_BYTES_PER_TICK, MAX_TRANSCRIPT_FILES, MAX_RECENT_RECORDS, MAX_SEEN_RECORDS },
+};

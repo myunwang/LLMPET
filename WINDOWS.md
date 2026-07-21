@@ -17,7 +17,7 @@
 ### 安装 Octopus
 ```powershell
 cd C:\path\to\llmpet-codewhale
-npm install
+npm ci
 npm start
 ```
 
@@ -96,7 +96,7 @@ npm start
 ### Q3：CodeWhale hooks 未注册
 - **排查**：
   1. 在面板确认 codewhale provider 已启用（🐋 checkbox 勾选，状态显示"●已注册"）。
-  2. 检查 `%USERPROFILE%\.codewhale\config.toml` 是否含 `# octopus-codewhale-hook` marker。
+  2. 检查 `%USERPROFILE%\.codewhale\config.toml` 是否存在命令中含 `codewhale-hook.js` 的 `[[hooks.hooks]]` 条目（当前实现不写注释 marker）。
   3. 确认 CodeWhale 已安装：`where codewhale`。
   4. 确认 config.toml 路径用正斜杠（W2：`C:/Users/.../codewhale-hook.js`，非反斜杠）。
 
@@ -151,17 +151,17 @@ npm start
 Windows 适配单测：`test/windows-adapt.js`（W7）。运行：
 ```powershell
 cd C:\path\to\llmpet-codewhale
-node test/windows-adapt.js
+npm run test:windows
 ```
 覆盖：W1 findCodeWhale 接口完整性、W2 hookTomlSchema 正斜杠、W3 wt.exe cmd 包装、W4 disableHWAccel 调用、W5 tray-icon 模块接口、路径健壮性、文档存在性。
 
-原项目 4 套测试（smoke/state-smoke/pricing/territory）在 Windows 上同样应全绿（零回归）。
+完整验证建议执行 `npm run test:all`：先跑 18 文件核心套件，再跑 92 项 Windows 适配断言。当前 Linux CI 只能静态验证 win32 分支；发布前仍需在真实 Windows 10/11 上启动 Electron 并验证托盘、透明窗口、hook 闪窗与终端启动。
 
 ---
 
 ## 八、路径安全审计结论（W8）
 
-2026-07-17 完成全量路径审计（18 个源文件、45+ 处 `path.join` 使用），结论：**Windows 路径安全性已达标，无需额外代码修改。**
+2026-07-20 复核路径与 TOML 写入链路。静态检查未发现生产代码硬编码 `~/`；TOML 安装器已改为按完整条目合并并通过安装→重装→卸载字节级往返测试。真实 Windows 文件系统与 Electron 启动仍应作为发布门禁。
 
 ### 审计范围
 - 所有 `.js` 文件中 `path.join` / 路径拼接的使用

@@ -2,16 +2,24 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+function subscribe(channel, cb) {
+  if (typeof cb !== 'function') return () => {};
+  const listener = (_event, data) => cb(data);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld('pet', {
   // 主进程 -> 渲染进程
-  onEvent: (cb) => ipcRenderer.on('pet:event', (_e, data) => cb(data)),
-  onStats: (cb) => ipcRenderer.on('pet:stats', (_e, data) => cb(data)),
-  onPanelStats: (cb) => ipcRenderer.on('panel:stats', (_e, data) => cb(data)),
+  onEvent: (cb) => subscribe('pet:event', cb),
+  onStats: (cb) => subscribe('pet:stats', cb),
+  onPanelStats: (cb) => subscribe('panel:stats', cb),
   onConfig: (cb) => {
-    ipcRenderer.on('pet:config', (_e, data) => cb(data));
-    ipcRenderer.on('panel:config', (_e, data) => cb(data));
+    const offPet = subscribe('pet:config', cb);
+    const offPanel = subscribe('panel:config', cb);
+    return () => { offPet(); offPanel(); };
   },
-  onPrice: (cb) => ipcRenderer.on('panel:price', (_e, data) => cb(data)),
+  onPrice: (cb) => subscribe('panel:price', cb),
   // 渲染进程 -> 主进程
   getConfig: () => ipcRenderer.invoke('get-config'),
   getStats: () => ipcRenderer.invoke('get-stats'),
@@ -20,6 +28,7 @@ contextBridge.exposeInMainWorld('pet', {
   setMode: (m) => ipcRenderer.send('set-mode', m),
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),
+  setCurrency: (c) => ipcRenderer.send('set-currency', c),
   toggleMute: () => ipcRenderer.send('toggle-mute'),
   // Round 8: provider list toggle
   setProviders: (ids) => ipcRenderer.send('set-providers', ids),
@@ -31,12 +40,14 @@ contextBridge.exposeInMainWorld('pet', {
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
   // 唤起 Claude 客户端
   launchClaude: () => ipcRenderer.send('launch-claude'),
-  // 唤起 CodeWhale 客户端
-  launchCodewhale: () => ipcRenderer.send('launch-codewhale'),
+  // W26: 唤起 CodeWhale 客户端（新开按钮按当前 provider 选择）
+  launchCodeWhale: () => ipcRenderer.send('launch-codewhale'),
   // 原生授权：通过本地 HTTP server 回 CC 决策（allow/deny），不需按键/Accessibility
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // Round 7: CodeWhale 权限决策路由到独立 IPC channel
   decideCwPermission: (permId, behavior) => ipcRenderer.send('cw-permission-decide', permId, behavior),
+  // W11: CodeWhale 批量授权（均限制在当前会话，且会过期）
+  decideCwPermissionBatch: (permId, mode) => ipcRenderer.send('cw-permission-decide-batch', permId, mode),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
   // 左键主操作（非待处理情形）：由后端决定聚焦会话 / 开面板 / 新开 CLI

@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { log } = require('./log');
+const { readJsonBoundedSync } = require('./safe-json');
 const { normModelName } = require('./metering');
 
 const CACHE = path.join(os.homedir(), '.octopus', 'pricing-cache.json');
@@ -25,14 +26,25 @@ const REFRESH_MS = 24 * 60 * 60 * 1000;
 const STARTUP_DELAY_MS = 4000;            // let the app finish booting first
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_BODY = 4 * 1024 * 1024;
+const MAX_CACHE_BYTES = 8 * 1024 * 1024;
 
 function fetchJson(url) {
   return new Promise((res, rej) => {
     const req = https.get(url, { timeout: FETCH_TIMEOUT_MS }, (r) => {
       if (r.statusCode !== 200) { r.resume(); rej(new Error('HTTP ' + r.statusCode)); return; }
-      let body = ''; let size = 0; let tooLarge = false;
-      r.on('data', (c) => { if (tooLarge) return; size += c.length; if (size > MAX_BODY) { tooLarge = true; return; } body += c; });
-      r.on('end', () => { if (tooLarge) { rej(new Error('body too large')); return; } try { res(JSON.parse(body)); } catch (e) { rej(e); } });
+      const declared = Number(r.headers['content-length']);
+      if (Number.isFinite(declared) && declared > MAX_BODY) { r.resume(); rej(new Error('body too large')); return; }
+      const chunks = []; let size = 0; let tooLarge = false;
+      r.on('data', (c) => {
+        if (tooLarge) return;
+        size += c.length;
+        if (size > MAX_BODY) { tooLarge = true; chunks.length = 0; r.destroy(); return; }
+        chunks.push(c);
+      });
+      r.on('end', () => {
+        if (tooLarge) { rej(new Error('body too large')); return; }
+        try { res(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { rej(e); }
+      });
     });
     req.on('error', rej);
     req.on('timeout', () => { req.destroy(); rej(new Error('timeout')); });
@@ -40,7 +52,11 @@ function fetchJson(url) {
 }
 
 // LiteLLM stores costs as USD per token; we use USD per 1M tokens.
-const toMTok = (v) => (Number.isFinite(v) ? v * 1e6 : null);
+const toMTok = (v) => {
+  const n = Number(v);
+  const perMillion = n * 1e6;
+  return Number.isFinite(perMillion) && perMillion >= 0 && perMillion <= 1_000_000 ? perMillion : null;
+};
 
 // Collapse all per-model rows into family rows (opus/sonnet/haiku).
 // LiteLLM lists newer dated variants later, so taking the last non-null wins
@@ -127,10 +143,19 @@ function createPricingSync(options = {}) {
       const pricing = extractFamilies(table);
       const models = extractModels(table);
       if (!Object.keys(pricing).length) throw new Error('no claude families extracted');
+      let tmp = null;
       try {
-        fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-        fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), source: 'litellm', url: URL, pricing, models }, null, 2));
-      } catch (e) { log('pricing', 'cache write failed:', e.message); }
+        fs.mkdirSync(path.dirname(CACHE), { recursive: true, mode: 0o700 });
+        try { fs.chmodSync(path.dirname(CACHE), 0o700); } catch {}
+        tmp = path.join(path.dirname(CACHE), `.pricing.${process.pid}.${Date.now()}.tmp`);
+        fs.writeFileSync(tmp, JSON.stringify({ ts: Date.now(), source: 'litellm', url: URL, pricing, models }, null, 2), { encoding: 'utf8', mode: 0o600 });
+        fs.renameSync(tmp, CACHE);
+        tmp = null;
+        try { fs.chmodSync(CACHE, 0o600); } catch {}
+      } catch (e) {
+        if (tmp) { try { fs.unlinkSync(tmp); } catch {} }
+        log('pricing', 'cache write failed:', e.message);
+      }
       const fams = Object.keys(pricing).join('/');
       log('pricing', `synced from LiteLLM (${fams}; ${Object.keys(models).length} models)`);
       try { onUpdate(); } catch {}
@@ -149,7 +174,7 @@ function createPricingSync(options = {}) {
     if (timer) { clearTimeout(timer); timer = null; }
   }
   function getCached() {
-    try { return JSON.parse(fs.readFileSync(CACHE, 'utf8')); } catch { return null; }
+    try { return readJsonBoundedSync(CACHE, MAX_CACHE_BYTES); } catch { return null; }
   }
 
   return { start, stop, getCached, refresh };
