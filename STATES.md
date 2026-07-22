@@ -1,6 +1,6 @@
-# octopus — 状态机 & 形象生成规范
+# LLMPET — 状态机 & 形象生成规范
 
-桌宠「octopus」(Claude Code 等编码 agent 的桌面宠物)的全部状态、触发逻辑,以及每个状态的**图片生成 prompt**。依据本项目自身的状态机整理。把第 4 节的英文 prompt 交给生成模型即可。
+桌宠「LLMPET」(Claude Code 等编码 agent 的桌面宠物)的全部状态、触发逻辑,以及每个状态的**图片生成 prompt**。依据本项目自身的状态机整理。把第 4 节的英文 prompt 交给生成模型即可。
 
 ---
 

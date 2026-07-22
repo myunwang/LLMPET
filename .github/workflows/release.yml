@@ -25,12 +25,12 @@ jobs:
       - run: npm run package:mac
       - name: Verify macOS package
         run: |
-          codesign --verify --deep --strict --verbose=2 dist/Octopus.app
-          unzip -tq dist/Octopus-*-mac-arm64.zip
+          codesign --verify --deep --strict --verbose=2 dist/LLMPET.app
+          unzip -tq dist/LLMPET-*-mac-arm64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: octopus-macos-arm64
-          path: dist/Octopus-*-mac-arm64.zip
+          name: llmpet-macos-arm64
+          path: dist/LLMPET-*-mac-arm64.zip
           if-no-files-found: error
 
   build-windows:
@@ -52,10 +52,10 @@ jobs:
         run: Get-ChildItem dist -File | Format-Table Name, Length
       - uses: actions/upload-artifact@v4
         with:
-          name: octopus-windows-x64
+          name: llmpet-windows-x64
           path: |
-            dist/Octopus-*-Windows-x64.exe
-            dist/Octopus-*-Windows-x64.zip
+            dist/LLMPET-*-Windows-x64.exe
+            dist/LLMPET-*-Windows-x64.zip
           if-no-files-found: error
 
   publish:
@@ -78,5 +78,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Octopus 1.0.0" \
+            --title "LLMPET 1.0.0" \
             --generate-notes

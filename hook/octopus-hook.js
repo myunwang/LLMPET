@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 
-// Octopus hook — run by Claude Code as: node octopus-hook.js <Event>
+// LLMPET compatibility hook — run by Claude Code as: node octopus-hook.js <Event>
 //
 // Reads the hook's stdin JSON, derives a pet state, enriches it from the session
 // transcript (Claude's last message, context usage, API errors, title), figures
 // out which terminal owns the session (for "去回复" focus), and POSTs it to the
-// running Octopus server. Must be fast and never throw — Claude Code waits on it.
+// running LLMPET server. Must be fast and never throw — Claude Code waits on it.
 
 const transport = require('../backend/transport');
 const transcript = require('../backend/transcript');

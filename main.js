@@ -1,6 +1,6 @@
 'use strict';
 
-// Octopus — Electron main process.
+// LLMPET — Electron main process.
 //
 // Boot order: core (session state) → metering (cost) → permissions → HTTP
 // server → install Claude Code hooks (using the bound port) → start watcher.
@@ -12,9 +12,9 @@ const fs = require('fs');
 const os = require('os');
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences } = require('electron');
 
-// Give the dev app a distinct identity ("octopus") so it isn't shown as a generic
+// Give the dev app the public LLMPET identity so it isn't shown as a generic
 // "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
-try { app.setName('octopus'); } catch {}
+try { app.setName('LLMPET'); } catch {}
 try { app.setAppUserModelId('com.octopus.pet'); } catch {}
 
 const config = require('./backend/config');
@@ -352,7 +352,7 @@ function ensureTerritoryPermission() {
     type: 'info',
     message: '巡视桌宠需要「辅助功能」权限',
     detail: '小章鱼要移动别的桌宠窗口，才能把闯进地盘的它顶到屏幕边上。\n' +
-      '点「打开辅助功能设置」，在列表里勾选 Octopus 即可——授权成功会自动开始巡视，不用退出重开。',
+      '点「打开辅助功能设置」，在列表里勾选 LLMPET 即可——授权成功会自动开始巡视，不用退出重开。',
     buttons: ['打开辅助功能设置', '稍后'],
     defaultId: 0,
     cancelId: 1,
@@ -462,7 +462,7 @@ function bootBackend() {
   // On a fresh sync: reload the in-memory price table (so new prices apply this
   // run, not next restart) and push the updated source line to the panel.
   // OCTOPUS_NO_NET=1 keeps the app fully offline (the pricing fetch is the ONLY
-  // outbound request Octopus ever makes) — falls back to the built-in price table.
+  // outbound request LLMPET ever makes) — falls back to the built-in price table.
   if (process.env.OCTOPUS_NO_NET === '1') {
     log('main', 'OCTOPUS_NO_NET=1 — pricing sync disabled (fully offline)');
   } else {
@@ -685,7 +685,7 @@ function buildTray() {
     if (process.platform === 'darwin') img.setTemplateImage(true);
   } catch {}
   tray = new Tray(img || nativeImage.createEmpty());
-  tray.setToolTip('Octopus — Claude Code 桌宠');
+  tray.setToolTip('LLMPET — Claude Code 桌宠');
   refreshTrayMenu();
   tray.on('click', () => { if (petWin) petWin.show(); });
 }
@@ -740,8 +740,9 @@ function refreshTrayMenu() {
   ]));
 }
 
-// One-time migration from the app's earlier name: move ~/.llmpet → ~/.octopus
-// (preserves usage history + config). Octopus lives entirely under ~/.octopus.
+// Historical compatibility namespace: move the oldest ~/.llmpet data into
+// ~/.octopus. The public brand is LLMPET, but this path stays stable so upgrades
+// preserve usage history, config, installed hooks and permissions.
 function migrateState() {
   try {
     const oct = path.join(os.homedir(), '.octopus');
@@ -786,10 +787,10 @@ if (!gotTheLock) {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
     const rival = await findRivalInstance();
     if (rival) {
-      log('main', `another octopus server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
+      log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
       dialog.showErrorBox(
-        'Octopus 已在运行',
-        `检测到另一个 Octopus 实例正在端口 ${rival} 上服务（可能来自其他代码副本）。\n` +
+        'LLMPET 已在运行',
+        `检测到另一个 LLMPET 实例正在端口 ${rival} 上服务（可能来自其他代码副本）。\n` +
         '本实例将退出，避免抢占会话事件。\n开发需要多开时：OCTOPUS_ALLOW_MULTI=1'
       );
       app.quit();
@@ -801,7 +802,7 @@ if (!gotTheLock) {
     createPetWindow();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
-    log('main', 'Octopus ready');
+    log('main', 'LLMPET ready');
   });
 }
 
@@ -815,5 +816,5 @@ app.on('before-quit', () => {
   try { if (metering) metering.stop(); } catch {}
   try { if (pricingSync) pricingSync.stop(); } catch {}
   try { if (core) core.stopStaleCleanup(); } catch {}
-  log('main', 'Octopus quit');
+  log('main', 'LLMPET quit');
 });

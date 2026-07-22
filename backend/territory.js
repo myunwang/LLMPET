@@ -1215,7 +1215,7 @@ function createTerritory(hooks) {
     let current = { ...rival };
     const startX = current.x;
     let maxTravel = 0;
-    // Octopus 重启后，真实透明外框可能仍在系统边缘，但上次的 CGS
+    // LLMPET 重启后，真实透明外框可能仍在系统边缘，但上次的 CGS
     // transform/锚点内存都没了。这时无需再向屏外校准，直接重施视觉补偿。
     const alreadyClamped = await finishClampedVisualEdge(current, dir, maxTravel);
     if (alreadyClamped) return alreadyClamped;
@@ -1431,7 +1431,7 @@ function createTerritory(hooks) {
       let wa = hooks.getWorkArea(rival);
       let pet = hooks.getPetBounds();
       if (/chatgpt/i.test(rival.name)) {
-        // WindowServer 的视觉 transform 可能跨 Octopus 重启仍留在对方窗口上，
+        // WindowServer 的视觉 transform 可能跨 LLMPET 重启仍留在对方窗口上，
         // 而内存里的 visualShiftByPid 已丢失。每次新开战先恢复逻辑 frame 对应
         // 的标准 transform，确保下面的拖点坐标不会落在旧画面之外。
         const normalized = await clearVisual(rival);
