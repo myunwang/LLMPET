@@ -362,7 +362,7 @@ check('对手名单为空 → presence 为空 → 不抬层级不开战', async 
   assert.strictEqual(calls.emitted, 0);
   assert.strictEqual(t.dominating, false);
 });
-check('手动 runNow 即使自动巡逻关闭也会扫描一次并反馈 clear', async () => {
+check('手动 runNow 即使自动巡逻关闭也会连续确认两次再反馈 clear', async () => {
   const phases = [];
   const { hooks, calls } = mockHooks({
     isEnabled: () => false,
@@ -371,7 +371,89 @@ check('手动 runNow 即使自动巡逻关闭也会扫描一次并反馈 clear',
   const t = createTerritory(hooks);
   const result = await t.runNow();
   assert.strictEqual(result, 'clear');
-  assert.strictEqual(calls.scanned, 1);
+  assert.strictEqual(calls.scanned, 2);
+  assert.deepStrictEqual(phases, ['searching', 'clear']);
+});
+
+check('回归：UI 忙导致扫描被跳过时不能误报 clear', async () => {
+  const phases = [];
+  const { hooks } = mockHooks({
+    isEnabled: () => false,
+    canScan: () => false,
+    sleep: async () => {},
+    emit: (ev) => phases.push(ev.phase),
+  });
+  const t = createTerritory(hooks);
+  const result = await t.runNow();
+  assert.strictEqual(result, 'blocked');
+  assert.deepStrictEqual(phases, ['searching', 'blocked']);
+  assert(!phases.includes('clear'), '没有真正扫描时绝不能显示“巡视完毕”');
+});
+
+check('回归：菜单关闭状态短暂滞后时等待收口，并在同一轮识别 ChatGPT', async () => {
+  const phases = [];
+  let readinessChecks = 0;
+  const atRightEdge = 'ChatGPT|42|1279|300|243|253\n';
+  const { hooks } = mockHooks({
+    isEnabled: () => false,
+    canScan: () => ++readinessChecks >= 3,
+    rivalNames: () => [],
+    hostRivalNames: () => ['ChatGPT'],
+    sleep: async () => {},
+    emit: (ev) => phases.push(ev.phase),
+    runOsa: async (script) => ({
+      ok: true,
+      out: script.includes('position of w') ? atRightEdge : '',
+      err: '',
+    }),
+  });
+  const t = createTerritory(hooks);
+  const result = await t.runNow();
+  assert.strictEqual(result, 'present');
+  assert(readinessChecks >= 3, '手动巡视应等待 renderer 的 uiBusy=false 到达');
+  assert.deepStrictEqual(phases, ['searching', 'ontop']);
+  assert(!phases.includes('clear'), '状态同步滞后不能产生假阴性提示');
+});
+
+check('回归：首帧没识别到、确认帧出现 ChatGPT 时本轮直接接着巡视', async () => {
+  const phases = [];
+  let windowScans = 0;
+  const atRightEdge = 'ChatGPT|42|1279|300|243|253\n';
+  const { hooks } = mockHooks({
+    isEnabled: () => false,
+    rivalNames: () => [],
+    hostRivalNames: () => ['ChatGPT'],
+    sleep: async () => {},
+    emit: (ev) => phases.push(ev.phase),
+    runOsa: async (script) => {
+      if (script.includes('position of w')) {
+        windowScans++;
+        return { ok: true, out: windowScans === 1 ? '' : atRightEdge, err: '' };
+      }
+      return { ok: true, out: '', err: '' };
+    },
+  });
+  const t = createTerritory(hooks);
+  const result = await t.runNow();
+  assert.strictEqual(result, 'present');
+  assert(windowScans >= 3, `空帧、确认帧和 ChatGPT 稳定帧都应执行，实际 ${windowScans}`);
+  assert.deepStrictEqual(phases, ['searching', 'ontop']);
+  assert(!phases.includes('clear'), '确认帧已经发现 ChatGPT 时绝不能先报空');
+});
+
+check('回归：重叠 runNow 共享同一次巡视，不重复发布 searching/clear', async () => {
+  const phases = [];
+  const { hooks, calls } = mockHooks({
+    isEnabled: () => false,
+    sleep: async () => {},
+    emit: (ev) => phases.push(ev.phase),
+  });
+  const t = createTerritory(hooks);
+  const first = t.runNow();
+  const second = t.runNow();
+  assert.strictEqual(first, second, '并发调用必须拿到同一个巡视 Promise');
+  assert.deepStrictEqual(await Promise.all([first, second]), ['clear', 'clear']);
+  assert.strictEqual(calls.scanned, 2, '共享巡视只做两帧空结果确认');
   assert.deepStrictEqual(phases, ['searching', 'clear']);
 });
 

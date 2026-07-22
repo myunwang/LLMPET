@@ -1143,6 +1143,10 @@ window.pet.onEvent((ev) => {
         case 'busy':
           showBubble('🔎 正在巡视中，等我处理完这只桌宠！', 2600);
           break;
+        case 'blocked':
+          // 面板/菜单还在收口时没有真正执行窗口扫描，不能误报“地盘安静”。
+          showBubble('⏳ 界面操作结束后再巡视，避免打断你～', 2800);
+          break;
         case 'abort':
           // 中途撤退(用户来了/弹层打开):静默收掉 march 的长斗志表情,
           // 立刻回落到真实聚合态,不冒气泡打扰正事。

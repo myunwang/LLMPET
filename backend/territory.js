@@ -580,6 +580,7 @@ function createTerritory(hooks) {
   const visualShiftByPid = new Map(); // WindowServer 视觉偏移；AXPosition 不会反映它
   let lastOwnDragAt = 0;
   let manualDragAuthorized = false; // 点击“巡视”本身不能被 HID idle 闸门当成用户干扰
+  let manualRunPromise = null; // 菜单点击/授权回调/开关首巡重叠时只允许一个手动巡视
   let episodeInterrupted = false; // helper 检测到物理按键后，整场立即让用户优先
 
   function dragPointKey(rival) {
@@ -858,12 +859,12 @@ function createTerritory(hooks) {
     return 'victory';
   }
 
-  async function presence() {
+  async function presenceDetailed() {
     const names = allNames();
-    if (!names.length) return [];
+    if (!names.length) return { ok: true, rivals: [], error: '' };
     const res = await osa(PRESENCE_SCRIPT, names);
-    if (!res.ok) return [];
-    return parsePresence(res.out, hooks.excludePids());
+    if (!res.ok) return { ok: false, rivals: [], error: String(res.err || 'process scan failed') };
+    return { ok: true, rivals: parsePresence(res.out, hooks.excludePids()), error: '' };
   }
 
   function hostNames() {
@@ -1496,11 +1497,46 @@ function createTerritory(hooks) {
     try {
 
     // 独立型对手:进程在即在场(无需辅助功能权限,锁屏也能查)。
-    const dedicated = await presence();
+    let dedicatedResult = await presenceDetailed();
+    let dedicated = dedicatedResult.rivals;
+
     // 窗口级扫描:独立型 + 寄生型(如 ChatGPT 里的 Codex 桌宠),需辅助功能权限。
-    let rivals = [];
-    if (!episode && hooks.canScan()) rivals = await scan();
+    // 从右键菜单点“巡视”时，renderer 会先发 uiBusy=false 再发 runNow，但 IPC
+    // 状态仍可能短暂滞后。给手动巡视一个很短的收口窗口；若界面仍忙，必须
+    // 返回 blocked，绝不能把“根本没扫描”说成“扫描完毕、地盘安静”。
+    let scanAllowed = hooks.canScan();
+    if (force && !scanAllowed) {
+      for (let attempt = 0; attempt < 4 && !scanAllowed; attempt++) {
+        await wait(120);
+        scanAllowed = hooks.canScan();
+      }
+    }
+    if (episode) return 'busy';
+    if (!scanAllowed) return dedicated.length ? 'present' : 'blocked';
+
+    let scanResult = await scanDetailed();
+    if (!scanResult.ok) return dedicated.length ? 'present' : 'scan-error';
+    let rivals = scanResult.rivals;
+
+    // 手动巡视的“没有发现”是终态提示，不能建立在单帧 System Events 抖动上。
+    // 只有进程扫描和窗口扫描连续两轮都成功且为空，才允许发 clear；第二轮若
+    // 看见了 ChatGPT，就直接沿用本轮继续开战，不再等下一次自动轮询。
+    if (force && !dedicated.length && !rivals.length) {
+      await wait(180);
+      if (episode) return 'busy';
+      if (!hooks.canScan()) return 'blocked';
+      dedicatedResult = await presenceDetailed();
+      if (!dedicatedResult.ok) return 'scan-error';
+      dedicated = dedicatedResult.rivals;
+      scanResult = await scanDetailed();
+      if (!scanResult.ok) return dedicated.length ? 'present' : 'scan-error';
+      rivals = scanResult.rivals;
+    }
     if (episode) return 'busy'; // scan 期间可能已被并发 tick 抢先开战
+
+    // 任何一个实际扫描失败都不能降层级，也不能发布 clear。窗口扫描失败已在
+    // 上面短路；这里补齐无需辅助功能的进程扫描失败分支。
+    if (!dedicatedResult.ok) return rivals.length ? 'present' : 'scan-error';
 
     // ── 定律①:猫爪在上。任一对手在场就持续 moveTop(对手也可能自抬,每次
     // 巡逻都重申);对手全走光才降回 floating。
@@ -1546,19 +1582,33 @@ function createTerritory(hooks) {
     }
   }
 
-  async function runNow() {
-    hooks.emit({ kind: 'territory', phase: 'searching', ts: Date.now() });
-    // 用户明确点击了“巡视”，这次点击会把 HIDIdleTime 清零。只在本次手动
-    // episode 内授权软件指针，不让启动按钮反过来把自己的动作拦掉。
-    manualDragAuthorized = true;
-    try {
-      const result = await tick(true);
-      if (result === 'clear') hooks.emit({ kind: 'territory', phase: 'clear', ts: Date.now() });
-      else if (result === 'busy') hooks.emit({ kind: 'territory', phase: 'busy', ts: Date.now() });
-      return result;
-    } finally {
-      manualDragAuthorized = false;
-    }
+  function runNow() {
+    // 授权成功回调、自动巡逻开关首巡和用户点击可能在同一时刻到达。共享同一
+    // Promise，确保 searching/clear 等终态消息只由真正拥有扫描的一次发布。
+    if (manualRunPromise) return manualRunPromise;
+
+    const run = (async () => {
+      hooks.emit({ kind: 'territory', phase: 'searching', ts: Date.now() });
+      // 用户明确点击了“巡视”，这次点击会把 HIDIdleTime 清零。只在本次手动
+      // episode 内授权软件指针，不让启动按钮反过来把自己的动作拦掉。
+      manualDragAuthorized = true;
+      try {
+        const result = await tick(true);
+        if (result === 'clear') hooks.emit({ kind: 'territory', phase: 'clear', ts: Date.now() });
+        else if (result === 'busy') hooks.emit({ kind: 'territory', phase: 'busy', ts: Date.now() });
+        else if (result === 'blocked') hooks.emit({ kind: 'territory', phase: 'blocked', ts: Date.now() });
+        return result;
+      } finally {
+        manualDragAuthorized = false;
+      }
+    })();
+
+    manualRunPromise = run;
+    run.then(
+      () => { if (manualRunPromise === run) manualRunPromise = null; },
+      () => { if (manualRunPromise === run) manualRunPromise = null; },
+    );
+    return run;
   }
 
   function start() {
