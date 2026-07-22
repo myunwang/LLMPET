@@ -3,8 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
-APP="$DIST/Octopus.app"
-ZIP="$DIST/Octopus-mac-arm64.zip"
+APP="$DIST/LLMPET.app"
+VERSION="$(cd "$ROOT" && node -p "require('./package.json').version")"
+ARCH="$(node -p "process.arch")"
+ZIP="$DIST/LLMPET-$VERSION-mac-$ARCH.zip"
 ELECTRON_APP="$ROOT/node_modules/electron/dist/Electron.app"
 RESOURCES="$APP/Contents/Resources"
 
@@ -35,18 +37,18 @@ chmod +x "$RESOURCES/drag-window"
 cp "$ROOT/assets/icon.icns" "$RESOURCES/icon.icns"
 
 PLIST="$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleName Octopus" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Octopus" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName LLMPET" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName LLMPET" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.octopus.pet" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "$PLIST"
 if ! /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST" 2>/dev/null; then
   /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST"
 fi
 
 # 第一阶段正常深签 Electron 的全部嵌套 Framework/Helper；第二阶段只重签顶层
-# Octopus 并写入稳定 designated requirement。不能把自定义 requirement 和
+# LLMPET 并写入稳定 designated requirement。不能把自定义 requirement 和
 # --deep 放在同一条命令里，否则它会错误套到所有 Electron 子组件上。
 codesign --force --deep --sign - "$APP"
 # ad-hoc 默认 requirement 是每次构建都变化的 CDHash，导致辅助功能列表虽然

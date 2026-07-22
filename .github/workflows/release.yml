@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS ARM64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify tag matches package version
+        run: node -e "const v=require('./package.json').version;if('v'+v!==process.env.GITHUB_REF_NAME)throw new Error('tag/package version mismatch')"
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:mac
+      - name: Verify macOS package
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/LLMPET.app
+          unzip -tq dist/LLMPET-*-mac-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llmpet-macos-arm64
+          path: dist/LLMPET-*-mac-arm64.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify tag matches package version
+        run: node -e "const v=require('./package.json').version;if('v'+v!==process.env.GITHUB_REF_NAME)throw new Error('tag/package version mismatch')"
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:win
+      - name: List Windows packages
+        shell: pwsh
+        run: Get-ChildItem dist -File | Format-Table Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llmpet-windows-x64
+          path: |
+            dist/LLMPET-*-Windows-x64.exe
+            dist/LLMPET-*-Windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "LLMPET 1.0.0" \
+            --generate-notes

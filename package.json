@@ -1,6 +1,6 @@
 {
-  "name": "octopus",
-  "version": "0.1.0",
+  "name": "llmpet",
+  "version": "1.0.0",
   "description": "桌面宠物：实时盯 Claude Code 等 coding agent 的状态、消息、授权与花费",
   "main": "main.js",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
     "package:win": "electron-builder --win",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/popup-style.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/popup-style.js && node test/branding.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -20,7 +20,7 @@
   },
   "build": {
     "appId": "com.myunwang.octopus",
-    "productName": "Octopus",
+    "productName": "LLMPET",
     "asar": false,
     "files": [
       "main.js",
@@ -33,7 +33,8 @@
     ],
     "win": {
       "target": ["nsis", "zip"],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "artifactName": "LLMPET-${version}-Windows-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

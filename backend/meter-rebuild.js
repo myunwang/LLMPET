@@ -59,7 +59,7 @@ async function main() {
   }
   const delta = after.cost - before.cost;
   console.log(`\n合计  $${before.cost.toFixed(2)} → $${after.cost.toFixed(2)}  (${delta >= 0 ? '+' : ''}$${delta.toFixed(2)})`);
-  console.log('已写回 ~/.octopus/usage.json —— 重开 Octopus 详情面板即见新数字。');
+  console.log('已写回 ~/.octopus/usage.json —— 重开 LLMPET 详情面板即见新数字。');
 }
 
 main().catch((e) => { console.error('rebuild 失败:', e); process.exit(1); });
