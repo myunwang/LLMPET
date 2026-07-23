@@ -133,6 +133,8 @@ function createCore(options = {}) {
     setField(s, 'editor', f.editor);
     setField(s, 'tmuxSocket', f.tmuxSocket);
     setField(s, 'tmuxClient', f.tmuxClient);
+    setField(s, 'terminalApp', f.terminalApp);
+    setField(s, 'terminalTty', f.terminalTty);
     setField(s, 'wtHwnd', f.wtHwnd);
     setField(s, 'ghosttyTerminalId', f.ghosttyTerminalId);
     setField(s, 'model', f.model);
@@ -292,6 +294,8 @@ function createCore(options = {}) {
       editor: s.editor || null,
       tmuxSocket: s.tmuxSocket || null,
       tmuxClient: s.tmuxClient || null,
+      terminalApp: s.terminalApp || null,
+      terminalTty: s.terminalTty || null,
       wtHwnd: s.wtHwnd || null,
       ghosttyTerminalId: s.ghosttyTerminalId || null,
     };

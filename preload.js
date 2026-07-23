@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('pet', {
   // 主进程 -> 渲染进程
   onEvent: (cb) => ipcRenderer.on('pet:event', (_e, data) => cb(data)),
   onStats: (cb) => ipcRenderer.on('pet:stats', (_e, data) => cb(data)),
+  onMeme: (cb) => ipcRenderer.on('pet:meme', (_e, data) => cb(data)),
   onPanelStats: (cb) => ipcRenderer.on('panel:stats', (_e, data) => cb(data)),
   onConfig: (cb) => {
     ipcRenderer.on('pet:config', (_e, data) => cb(data));
@@ -36,6 +37,8 @@ contextBridge.exposeInMainWorld('pet', {
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
+  getMemeCatalog: () => ipcRenderer.invoke('meme-catalog'),
+  triggerMeme: (sessionId, memeId) => ipcRenderer.invoke('meme-trigger', sessionId, memeId),
   // 左键主操作（非待处理情形）：由后端决定聚焦会话 / 开面板 / 新开 CLI
   primaryAction: () => ipcRenderer.send('primary-action'),
   // 透明空白处点击穿透：渲染端命中测试后切换（true=穿透，鼠标事件仍转发回来）

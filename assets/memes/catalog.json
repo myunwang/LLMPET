@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "huaqiang-guaranteed",
+      "label": "你这瓜保熟吗？",
+      "description": "别急着交付，拿真实证据证明它能行",
+      "category": "delivery-review",
+      "tags": ["验收", "复盘", "PUA"],
+      "media": {
+        "gif": "huaqiang-guaranteed/visual.gif",
+        "audio": "huaqiang-guaranteed/voice.mp3",
+        "durationMs": 2600,
+        "placement": "pet-right"
+      },
+      "prompt": {
+        "version": 1,
+        "text": "你确定你这次交付的东西真的能行吗？别急着说完成。请把当前交付当作“保熟”承诺，重新对照本次对话里用户最初的目标、明确约束和验收方式，逐项检查当前实现。\n\n先检查真实代码路径、运行状态、失败路径和高风险边界，再运行与风险相称的测试，并在用户要求的真实环境中验证核心效果。主动寻找一个能够推翻“已经完成”判断的反例；如果发现问题，直接修复并重复同一验收步骤。\n\n最后只基于证据说明：哪些要求已经证明确实能行，哪些仍未验证。不要用编译成功或测试通过替代真实效果验收，不要把推测写成结论，也不要为了显得完成而忽略失败率、兼容性或交互问题。"
+      }
+    }
+  ]
+}

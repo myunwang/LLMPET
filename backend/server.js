@@ -51,6 +51,16 @@ function normTmuxClient(v) {
   if (!t || t.length > 256 || t.startsWith('-')) return null;
   return /^[\w./:-]+$/.test(t) ? t : null;
 }
+function normTerminalApp(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(t) ? t : null;
+}
+function normTerminalTty(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return /^(?:\/dev\/)?tty[\w.-]{1,80}$/.test(t) ? t : null;
+}
 function normAssistant(v) {
   if (typeof v !== 'string') return null;
   const t = v
@@ -170,6 +180,8 @@ function createServer(deps) {
         pidChain: Array.isArray(data.pid_chain) ? data.pid_chain.filter((n) => Number.isFinite(n) && n > 0) : null,
         tmuxSocket: normTmuxSocket(data.tmux_socket),
         tmuxClient: normTmuxClient(data.tmux_client),
+        terminalApp: normTerminalApp(data.terminal_app),
+        terminalTty: normTerminalTty(data.terminal_tty),
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
         agentId: 'claude-code',
         headless: data.headless === true,

@@ -59,6 +59,7 @@ function makeElement(tag, id) {
   });
   el.getAttribute = (k) => (k in el._attrs ? el._attrs[k] : (k === 'class' ? el.className : null));
   el.setAttribute = (k, v) => { el._attrs[k] = String(v); };
+  el.removeAttribute = (k) => { delete el._attrs[k]; };
   el.addEventListener = (ev, fn) => { (el._listeners[ev] = el._listeners[ev] || []).push(fn); };
   el.removeEventListener = () => {};
   el.dispatch = (ev, arg) => { for (const fn of el._listeners[ev] || []) fn(arg || { stopPropagation() {}, preventDefault() {} }); };
@@ -103,15 +104,18 @@ function createStubWorld() {
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)
-  const handlers = { event: null, stats: null, config: null };
+  const handlers = { event: null, stats: null, config: null, meme: null };
   const calls = []; // record of preload calls for assertions
 
   const pet = {
     onEvent: (cb) => { handlers.event = cb; },
     onStats: (cb) => { handlers.stats = cb; },
     onConfig: (cb) => { handlers.config = cb; },
+    onMeme: (cb) => { handlers.meme = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
+    getMemeCatalog: () => Promise.resolve({ schemaVersion: 1, items: [] }),
+    triggerMeme: (...a) => { calls.push(['triggerMeme', a]); return Promise.resolve({ ok: true, submitted: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
     setWinPos: (...a) => calls.push(['setWinPos', a]),
     setPetSize: (...a) => calls.push(['setPetSize', a]),

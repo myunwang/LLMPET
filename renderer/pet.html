@@ -60,6 +60,11 @@
 
       <!-- 按工具动作时头顶飘出的道具 emoji -->
       <div id="prop" class="prop"></div>
+      <!-- 表情包：选择后固定出现在桌宠右侧，并同步播放配置的语音包 -->
+      <div id="meme-player" class="meme-player hidden" aria-live="polite">
+        <img id="meme-image" alt="" draggable="false" />
+        <div id="meme-caption" class="meme-caption"></div>
+      </div>
       <!-- 召唤 subagent 时弹出的小分身 -->
       <div id="sidekick" class="sidekick">🐙</div>
 
@@ -102,15 +107,23 @@
       <!-- 会话列表 HUD：左键弹出，每行 状态点 + 图标 + 会话名 + 上下文用量% -->
       <div id="sesslist" class="sesslist hidden">
         <div class="sl-top">
-          <span class="sl-title">🗂️ 会话</span>
+          <button id="sl-back" class="sl-back hidden" title="返回会话">‹</button>
+          <span class="sl-title" id="sl-title">🗂️ 会话</span>
           <span class="sl-sub" id="sl-sub"></span>
           <span class="sl-close" id="sl-close" title="关闭">✕</span>
         </div>
-        <div class="sl-scroll" id="sl-rows"></div>
-        <div class="sl-foot">
-          <button id="sl-new">🚀 新开 Claude</button>
-          <button id="sl-new-codex" class="hidden">🛰️ 新开 Codex</button>
-          <button id="sl-panel">📊 详情</button>
+        <div id="sl-session-view">
+          <div class="sl-scroll" id="sl-rows"></div>
+          <div class="sl-foot">
+            <button id="sl-new">🚀 新开 Claude</button>
+            <button id="sl-new-codex" class="hidden">🛰️ 新开 Codex</button>
+            <button id="sl-panel">📊 详情</button>
+          </div>
+        </div>
+        <div id="sl-meme-view" class="sl-meme-view hidden">
+          <div id="sl-meme-session" class="sl-meme-session"></div>
+          <div id="sl-meme-grid" class="sl-meme-grid"></div>
+          <div id="sl-meme-status" class="sl-meme-status"></div>
         </div>
       </div>
 

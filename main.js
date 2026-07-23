@@ -10,7 +10,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences, clipboard } = require('electron');
 
 // Give the dev app the public LLMPET identity so it isn't shown as a generic
 // "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
@@ -30,6 +30,8 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { publicCatalog, getMeme } = require('./backend/meme-catalog');
+const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const transport = require('./backend/transport');
 
 const PRELOAD = path.join(__dirname, 'preload.js');
@@ -48,6 +50,7 @@ let server = null;
 let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
+let commandDispatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
@@ -548,6 +551,10 @@ function bootBackend() {
     onDirty: scheduleEmit,
   });
   core.startStaleCleanup();
+  commandDispatcher = createCommandDispatcher({
+    copyText: (text) => clipboard.writeText(text),
+    focusSession,
+  });
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
@@ -727,6 +734,35 @@ function registerIpc() {
   });
   ipcMain.on('focus-session', (_e, sessionId) => {
     focusSession(core.getSession(sessionId));
+  });
+  ipcMain.handle('meme-catalog', () => publicCatalog());
+  ipcMain.handle('meme-trigger', async (e, sessionId, memeId) => {
+    const meme = getMeme(memeId);
+    if (!meme) return { ok: false, submitted: false, message: '未知表情包，已拒绝执行。' };
+    const session = typeof sessionId === 'string' && core ? core.getSession(sessionId) : null;
+    if (!session || session.headless || session.ended || session.state === 'sleeping') {
+      return { ok: false, submitted: false, message: '目标 session 已离线或不可交互，请重新选择。' };
+    }
+    const senderState = stateOfSender(e.sender);
+    if (!senderState || (senderState.agent !== 'all' && adapter.agentOf(session) !== senderState.agent)) {
+      return { ok: false, submitted: false, message: '目标 session 不属于当前桌宠，已拒绝误发。' };
+    }
+    const publicMeme = publicCatalog().items.find((item) => item.id === meme.id);
+    sendWin(senderState.win, 'pet:meme', {
+      ...publicMeme,
+      sessionId: session.id,
+      project: session.sessionTitle || path.basename(session.cwd || '') || String(session.id).slice(-6),
+      ts: Date.now(),
+    });
+    if (!commandDispatcher) return { ok: false, submitted: false, message: 'Prompt 下发器尚未就绪。' };
+    const result = await commandDispatcher.dispatch(session, meme.prompt.text);
+    log('meme', `${meme.id} → ${String(session.id).slice(-6)} agent=${adapter.agentOf(session)} route=${result.route || '-'} submitted=${!!result.submitted}`);
+    return {
+      ...result,
+      memeId: meme.id,
+      sessionId: session.id,
+      routeInfo: routeForSession(session),
+    };
   });
 
   // Left-click primary action for the NON-pending case (pending is decided in

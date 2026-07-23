@@ -662,6 +662,13 @@ body.skin-cat #cat { display: flex; }
 .sl-sub { font-size: 10.5px; color: #9a9aa0; margin-left: 2px; flex: 1; }
 .sl-close { font-size: 12px; color: #9a9aa0; cursor: pointer; padding: 2px 6px; border-radius: 7px; }
 .sl-close:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.sl-back {
+  width: 24px; height: 24px; flex: 0 0 24px; border: 0; border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08); color: #fff; cursor: pointer;
+  font-size: 22px; line-height: 20px;
+}
+.sl-back:hover { background: rgba(255, 255, 255, 0.15); }
+.sl-back.hidden { display: none; }
 .sl-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .sl-scroll::-webkit-scrollbar { width: 7px; }
 .sl-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
@@ -692,12 +699,69 @@ body.skin-cat #cat { display: flex; }
   background: rgba(255, 255, 255, 0.1); color: #c2c2c8; }
 .sl-ctx.mid { background: rgba(255, 176, 32, 0.2); color: #ffc266; }
 .sl-ctx.high { background: rgba(255, 90, 82, 0.24); color: #ff7b73; }
+.sl-meme-entry {
+  flex: 0 0 auto; border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px; background: rgba(255, 255, 255, 0.07); color: #eeeef2;
+  padding: 6px 9px; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.sl-meme-entry:hover { border-color: rgba(217, 119, 87, 0.75); background: rgba(217, 119, 87, 0.18); }
 
 .sl-empty { text-align: center; color: #9a9aa0; font-size: 12px; padding: 18px 8px; }
 .sl-foot { display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .sl-foot button { flex: 1; font-size: 11.5px; font-weight: 600; color: #e8e8ec; background: rgba(255, 255, 255, 0.08);
   border: none; border-radius: 9px; padding: 7px 0; cursor: pointer; }
 .sl-foot button:hover { background: rgba(255, 255, 255, 0.16); }
+#sl-session-view.hidden { display: none; }
+.sl-meme-view.hidden { display: none; }
+.sl-meme-session {
+  margin: 0 4px 8px; padding: 8px 10px; border-radius: 10px;
+  background: rgba(217, 119, 87, 0.11); color: #dfb09a;
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-meme-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  overflow-y: auto; padding: 1px 4px 4px;
+}
+.sl-meme-card {
+  min-width: 0; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+  padding: 8px; background: rgba(255, 255, 255, 0.035); color: #fff;
+  text-align: left; cursor: pointer;
+}
+.sl-meme-card:hover { border-color: rgba(217, 119, 87, 0.75); background: rgba(217, 119, 87, 0.1); }
+.sl-meme-card:disabled { opacity: 0.55; cursor: wait; }
+.sl-meme-thumb {
+  display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+  border-radius: 8px; margin-bottom: 7px; background: rgba(0, 0, 0, 0.25);
+}
+.sl-meme-label { display: block; font-size: 12px; font-weight: 750; line-height: 1.3; }
+.sl-meme-desc { display: block; margin-top: 3px; color: #94949b; font-size: 10px; line-height: 1.35; }
+.sl-meme-status { min-height: 17px; padding: 7px 5px 0; font-size: 10.5px; color: #9a9aa0; }
+.sl-meme-status.ok { color: #5bd478; }
+.sl-meme-status.warn { color: #ffbd59; }
+.sl-meme-status.error { color: #ff7b73; }
+
+/* 表情包播放层只渲染媒体本身，不加卡片背景；扩宽后的透明窗口中贴在宠物右侧。 */
+.meme-player {
+  position: absolute; z-index: 22; bottom: 82px; left: calc(50% + 112px);
+  width: 260px; pointer-events: none;
+  opacity: 1; transform: translateX(0) scale(1);
+  animation: memeEnter 0.2s ease-out;
+}
+.meme-player.hidden { display: none; }
+.meme-player img {
+  display: block; width: 260px; max-height: 180px; object-fit: contain;
+  background: transparent; border: 0; border-radius: 0;
+  filter: drop-shadow(0 7px 13px rgba(0, 0, 0, 0.35));
+}
+.meme-caption {
+  width: max-content; max-width: 250px; margin: 5px auto 0; padding: 4px 9px;
+  border-radius: 999px; background: rgba(25, 25, 28, 0.82); color: #fff;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+@keyframes memeEnter {
+  from { opacity: 0; transform: translateX(-14px) scale(0.92); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
 
 /* ── Needs Input / 授权卡片（重做，深色，对齐参考项目）──────────── */
 .ask {
@@ -867,7 +931,7 @@ body.skin-cat #cat { display: flex; }
 
 /* 弹层标题栏可拖动整窗（内容长时可挪开），按钮/输入/选项/行不拖 */
 .ask-head, .sl-top, .tp-top { -webkit-app-region: drag; cursor: move; }
-.ask-opt, .ask-btn, .ask-term, .ask-other input, .sl-row, .sl-foot button,
+.ask-opt, .ask-btn, .ask-term, .ask-other input, .sl-row, .sl-foot button, .sl-back, .sl-meme-entry, .sl-meme-card,
 .sl-close, .tp-close, .tp-ops button, .tp-act, #ask-text { -webkit-app-region: no-drag; }
 
 /* SVG icon (替代 emoji) 的内联样式：1em 大小、跟随文本颜色，垂直对齐文本 */

@@ -149,6 +149,16 @@ const tpTodoSec = document.getElementById('tp-todo-sec');
 const sesslist = document.getElementById('sesslist');
 const slRows = document.getElementById('sl-rows');
 const slSub = document.getElementById('sl-sub');
+const slTitle = document.getElementById('sl-title');
+const slBack = document.getElementById('sl-back');
+const slSessionView = document.getElementById('sl-session-view');
+const slMemeView = document.getElementById('sl-meme-view');
+const slMemeSession = document.getElementById('sl-meme-session');
+const slMemeGrid = document.getElementById('sl-meme-grid');
+const slMemeStatus = document.getElementById('sl-meme-status');
+const memePlayer = document.getElementById('meme-player');
+const memeImage = document.getElementById('meme-image');
+const memeCaption = document.getElementById('meme-caption');
 
 let askActive = false;
 let askQueue = []; // 当前所有待处理的选择/输入（每项含 project）
@@ -652,6 +662,10 @@ function closeTodoPop() {
 
 // ---------- 会话列表 HUD（左键弹出）----------
 let sessListOpen = false;
+let memeCatalog = { schemaVersion: 1, items: [] };
+let memeTarget = null;
+let memeTimer = null;
+let memeAudio = null;
 // Claude 橙色 burst（小图标）
 const CLAUDE_ICON =
   '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
@@ -722,7 +736,13 @@ function renderSessList() {
       `<span class="sl-icon" title="${s.agent === 'codex' ? 'Codex' : 'Claude'}">${agentIcon(s)}</span>` +
       `<div class="sl-main"><div class="sl-name">${esc(s.project)}</div>` +
       `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
-      ctx;
+      ctx +
+      `<button class="sl-meme-entry" title="给这个 session 发一个表情包">🎭 表情包</button>`;
+    const memeBtn = row.querySelector('.sl-meme-entry');
+    memeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMemePage(s);
+    });
     row.addEventListener('click', () => {
       window.pet.focusSession(s.sessionId || '');
       rlog('sesslist', 'focus ' + (s.project || ''));
@@ -732,11 +752,83 @@ function renderSessList() {
   }
 }
 
+async function loadMemeCatalog() {
+  try {
+    const next = await window.pet.getMemeCatalog();
+    if (next && Array.isArray(next.items)) memeCatalog = next;
+  } catch (err) {
+    rlog('meme', 'catalog failed ' + (err && err.message ? err.message : err));
+  }
+  return memeCatalog;
+}
+
+function setMemeStatus(text, kind = '') {
+  slMemeStatus.textContent = text || '';
+  slMemeStatus.className = 'sl-meme-status' + (kind ? ' ' + kind : '');
+}
+
+async function openMemePage(session) {
+  memeTarget = session;
+  slSessionView.classList.add('hidden');
+  slMemeView.classList.remove('hidden');
+  slBack.classList.remove('hidden');
+  slTitle.textContent = '🎭 选择表情包';
+  slSub.textContent = '';
+  slMemeSession.textContent = `${session.agent === 'codex' ? 'Codex' : 'Claude'} · ${session.project}`;
+  slMemeGrid.innerHTML = '';
+  setMemeStatus('正在读取表情包…');
+  await loadMemeCatalog();
+  if (!memeTarget || memeTarget.sessionId !== session.sessionId) return;
+  slMemeGrid.innerHTML = '';
+  for (const meme of memeCatalog.items) {
+    const card = document.createElement('button');
+    card.className = 'sl-meme-card';
+    card.innerHTML =
+      `<img class="sl-meme-thumb" src="../assets/memes/${esc(meme.media.gif)}" alt="">` +
+      `<span class="sl-meme-label">${esc(meme.label)}</span>` +
+      `<span class="sl-meme-desc">${esc(meme.description)}</span>`;
+    card.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      card.disabled = true;
+      setMemeStatus('正在投递到指定 session…');
+      const target = memeTarget;
+      closeSessList();
+      let result;
+      try {
+        result = await window.pet.triggerMeme(target.sessionId, meme.id);
+      } catch (err) {
+        result = { ok: false, submitted: false, message: err && err.message ? err.message : '表情包执行失败' };
+      }
+      card.disabled = false;
+      if (result && result.ok) {
+        memeCaption.textContent = result.submitted ? `${meme.label} · Prompt 已直发` : `${meme.label} · Prompt 已复制`;
+      } else {
+        memeCaption.textContent = (result && result.message) || '表情包执行失败';
+        if (memePlayer.classList.contains('hidden')) showBubble(memeCaption.textContent, 3600, true);
+      }
+      rlog('meme', `${meme.id} target=${String(target.sessionId || '').slice(-6)} submitted=${!!(result && result.submitted)}`);
+    });
+    slMemeGrid.appendChild(card);
+  }
+  setMemeStatus(memeCatalog.items.length ? '点击后会播放 GIF/语音，并把对应 Prompt 发给当前 session。' : '还没有可用表情包。');
+  fitPopup(sesslist);
+}
+
+function showSessionPage() {
+  memeTarget = null;
+  slMemeView.classList.add('hidden');
+  slSessionView.classList.remove('hidden');
+  slBack.classList.add('hidden');
+  slTitle.textContent = '🗂️ 会话';
+  renderSessList();
+  fitPopup(sesslist);
+}
+
 function openSessList() {
   if (radialOpen) closeRadial();
   if (todoPopOpen) closeTodoPop();
   hideAsk();
-  renderSessList();
+  showSessionPage();
   sesslist.classList.remove('hidden');
   sessListOpen = true;
   rlog('sesslist', 'open ' + visibleSessions().length);
@@ -746,9 +838,41 @@ function closeSessList() {
   if (!sessListOpen) return;
   sesslist.classList.add('hidden');
   sessListOpen = false;
+  memeTarget = null;
   rlog('sesslist', 'close');
   resetPetSize();
 }
+
+function playMeme(meme) {
+  if (!meme || !meme.media) return;
+  clearTimeout(memeTimer);
+  if (memeAudio) {
+    try { memeAudio.pause(); } catch {}
+    memeAudio = null;
+  }
+  memeImage.src = `../assets/memes/${meme.media.gif}`;
+  memeImage.alt = meme.label || '表情包';
+  memeCaption.textContent = `${meme.label || '表情包'} · ${meme.project || ''}`;
+  memePlayer.classList.remove('hidden');
+  try { window.pet.setPetSize(760, 340); } catch {}
+  if (!muted && typeof window.Audio === 'function') {
+    try {
+      memeAudio = new window.Audio(`../assets/memes/${meme.media.audio}`);
+      memeAudio.volume = 0.9;
+      const p = memeAudio.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {}
+  }
+  memeTimer = setTimeout(() => {
+    memePlayer.classList.add('hidden');
+    memeImage.removeAttribute('src');
+    if (memeAudio) { try { memeAudio.pause(); } catch {} }
+    memeAudio = null;
+    if (!askActive && !sessListOpen && !todoPopOpen) resetPetSize();
+  }, Number(meme.media.durationMs) || 3000);
+}
+
+window.pet.onMeme(playMeme);
 function toggleSessList() { sessListOpen ? closeSessList() : openSessList(); }
 
 // 工具 -> 干活动作；道具 emoji 的运动变体
@@ -1343,6 +1467,7 @@ document.getElementById('tp-close').addEventListener('click', (e) => { e.stopPro
 
 // 会话列表 HUD：关闭 + 底部操作（新开按钮按本窗口的 agent 分流）
 document.getElementById('sl-close').addEventListener('click', (e) => { e.stopPropagation(); closeSessList(); });
+slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
 const slNewBtn = document.getElementById('sl-new');
 const slNewCodexBtn = document.getElementById('sl-new-codex');
 if (AGENT === 'codex') slNewBtn.textContent = '🛰️ 新开 Codex';
@@ -1485,6 +1610,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
     territorySupported = !!cfg.territorySupported;
     applySkin(cfg.skin || 'mascot');
   }
+  await loadMemeCatalog();
   const s = await window.pet.getStats();
   // 有快照就按真实聚合态亮相；之前无条件 setState('idle') 会把刚算出的
   // working/waiting 盖掉，启动瞬间总是先闪一下空闲。getStats 落空但推送

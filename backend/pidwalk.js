@@ -106,7 +106,10 @@ function winBase(name) {
 }
 
 function resolveWin(startPid, maxDepth, cacheKey) {
-  const empty = { sourcePid: startPid || null, pidChain: startPid ? [startPid] : [], editor: null, headless: false, tmuxSocket: null, tmuxClient: null };
+  const empty = {
+    sourcePid: startPid || null, pidChain: startPid ? [startPid] : [], editor: null,
+    headless: false, tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
+  };
   if (!startPid) return empty;
   // The hook's ppid is a transient PowerShell wrapper (different every event),
   // so the cache is keyed by the Claude Code session id instead.
@@ -138,22 +141,29 @@ function resolveWin(startPid, maxDepth, cacheKey) {
     if (TERMINALS.has(base) && !(i === 0 && HOOK_SHELLS.has(base))) terminalPid = pid; // keep walking: WindowsTerminal sits above cmd/pwsh
     lastGood = pid;
   }
-  const result = { sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless, tmuxSocket: null, tmuxClient: null };
+  const result = {
+    sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
+    tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
+  };
   if (cacheKey) winCacheWrite(cacheKey, result);
   return result;
 }
 
-// Returns { sourcePid, pidChain, editor, headless, tmuxSocket, tmuxClient }.
+// Returns focus fields plus an exact input route when one is observable. tmux's
+// pane id and the process tty are stable per session; a GUI app pid is not.
 // `cacheKey` (Windows only): a stable per-session id so hot hooks skip PowerShell.
 function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
   const tmuxSocket = typeof process.env.TMUX === 'string' && process.env.TMUX.startsWith('/')
     ? process.env.TMUX.split(',')[0] : null;
+  const tmuxClient = tmuxSocket && typeof process.env.TMUX_PANE === 'string'
+    ? process.env.TMUX_PANE.trim() || null : null;
   if (process.platform === 'win32') {
     return resolveWin(startPid, maxDepth, cacheKey);
   }
   const chain = [];
   let pid = startPid;
   let terminalPid = null;
+  let terminalApp = null;
   let lastGood = pid;
   let editor = null;
   let headless = false;
@@ -170,7 +180,7 @@ function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
       const cmd = ps(pid, 'command');
       if ((name === 'claude' || /claude-code|@anthropic-ai/.test(cmd)) && HEADLESS_RE.test(' ' + cmd)) headless = true;
     }
-    if (TERMINALS.has(name)) terminalPid = pid;
+    if (TERMINALS.has(name)) { terminalPid = pid; terminalApp = name; }
     if (SYSTEM_ROOTS.has(name)) break;
     lastGood = pid;
     const ppid = parseInt(ps(pid, 'ppid'), 10);
@@ -178,7 +188,12 @@ function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
     pid = ppid;
   }
 
-  return { sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless, tmuxSocket, tmuxClient: null };
+  const ttyRaw = ps(startPid, 'tty');
+  const terminalTty = ttyRaw && ttyRaw !== '?' ? ttyRaw : null;
+  return {
+    sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
+    tmuxSocket, tmuxClient, terminalApp, terminalTty,
+  };
 }
 
 module.exports = { resolve };

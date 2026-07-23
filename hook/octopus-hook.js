@@ -136,6 +136,9 @@ function buildBody(event, p) {
       if (r.pidChain && r.pidChain.length) body.pid_chain = r.pidChain;
       if (r.editor) body.editor = r.editor;
       if (r.tmuxSocket) body.tmux_socket = r.tmuxSocket;
+      if (r.tmuxClient) body.tmux_client = r.tmuxClient;
+      if (r.terminalApp) body.terminal_app = r.terminalApp;
+      if (r.terminalTty) body.terminal_tty = r.terminalTty;
       body.headless = r.headless === true; // background `claude -p` runs
     } catch {}
   }
