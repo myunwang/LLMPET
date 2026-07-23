@@ -211,6 +211,22 @@ async function main() {
     const b = hook.buildBody('UserPromptSubmit', { session_id: 'x1', prompt: 'hi' });
     assert(b && b.state === 'thinking' && b.session_id === 'x1');
   });
+  check('表情包原生续聊不伪装成 headless，也不覆盖原窗口路由', () => {
+    const prev = process.env.LLMPET_MEME_RESUME;
+    process.env.LLMPET_MEME_RESUME = '1';
+    try {
+      const b = hook.buildBody('UserPromptSubmit', { session_id: 'x1-resume', prompt: 'hi' });
+      assert(b && b.headless === false && b.external_resume === true);
+      assert.strictEqual(b.source_pid, undefined);
+    } finally {
+      if (prev === undefined) delete process.env.LLMPET_MEME_RESUME;
+      else process.env.LLMPET_MEME_RESUME = prev;
+    }
+  });
+  const extSid = 'external-resume-session';
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: extSid, cwd: '/Users/me/proj-ext', external_resume: true });
+  await post('/state', { state: 'sweeping', event: 'SessionEnd', session_id: extSid, cwd: '/Users/me/proj-ext', external_resume: true });
+  check('原生续聊进程退出不把原 session 标记为 ended', () => assert.strictEqual(core.getSession(extSid).ended, false));
   const opSid = 'op-label-jjjj';
   await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: opSid, cwd: '/Users/me/proj-op' });
   await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: opSid, cwd: '/Users/me/proj-op' });

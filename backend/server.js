@@ -185,6 +185,7 @@ function createServer(deps) {
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
         agentId: 'claude-code',
         headless: data.headless === true,
+        externalResume: data.external_resume === true,
         transcriptPath: normTranscriptPath(data.transcript_path),
         model: typeof data.model === 'string' && data.model.trim() ? data.model.trim() : null,
         sessionTitle: typeof data.session_title === 'string' && data.session_title.trim() ? data.session_title.trim() : null,

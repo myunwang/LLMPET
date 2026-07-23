@@ -193,7 +193,7 @@ function createCore(options = {}) {
 
     // SessionEnd（含 /clear → sweeping）标记会话已结束：之后无论落在什么状态，
     // 陈旧清理都会按「已结束」回收，不再因终端 pid 还活着而永久留在列表里。
-    if (event === 'SessionEnd') s.ended = true;
+    if (event === 'SessionEnd' && f.externalResume !== true) s.ended = true;
     else if (WORK_START_EVENTS.has(event) || event === 'SessionStart') s.ended = false;
 
     // 「同项目已有活跃会话」判定：点进正在执行的任务时，ccd 可能 fork 出全新

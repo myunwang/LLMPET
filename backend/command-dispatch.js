@@ -1,8 +1,12 @@
 'use strict';
 
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const { findCli } = require('./launch');
 
 const MAX_PROMPT_CHARS = 12000;
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f-]{27,40}$/i;
 const TERMINAL_PASTE_SCRIPT = [
   'on run argv',
   '  set wantedTTY to item 1 of argv',
@@ -44,6 +48,11 @@ function routeForSession(session, platform = process.platform) {
   if (platform === 'darwin' && app === 'terminal' && cleanTty(session.terminalTty)) {
     return { kind: 'mac-terminal', label: '精确直发 · Terminal', exact: true };
   }
+  if (SESSION_ID_RE.test(String(session.id || ''))) {
+    return session.agentId === 'codex'
+      ? { kind: 'codex-resume', label: '精确续聊 · Codex', exact: true }
+      : { kind: 'claude-resume', label: '精确续聊 · Claude', exact: true };
+  }
   return { kind: 'manual', label: '安全模式 · 复制并聚焦', exact: false };
 }
 
@@ -66,6 +75,9 @@ function validPrompt(prompt) {
 function createCommandDispatcher(options = {}) {
   const platform = options.platform || process.platform;
   const execImpl = options.execFile || execFile;
+  const spawnImpl = options.spawn || spawn;
+  const findCliImpl = options.findCli || findCli;
+  const resumeProbeMs = Number.isFinite(options.resumeProbeMs) ? options.resumeProbeMs : 650;
   const copyText = typeof options.copyText === 'function' ? options.copyText : () => {};
   const focus = typeof options.focusSession === 'function' ? options.focusSession : async () => false;
 
@@ -83,6 +95,65 @@ function createCommandDispatcher(options = {}) {
         ? '无法证明能精确定位输入框：Prompt 已复制并聚焦目标 session，请粘贴后回车。'
         : '无法精确定位目标 session：Prompt 已复制，请手动打开后粘贴。'),
     };
+  }
+
+  function nativeResume(session, prompt, kind) {
+    const name = kind === 'codex-resume' ? 'codex' : 'claude';
+    const cli = findCliImpl(name);
+    const cwd = session.cwd && fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+    const args = kind === 'codex-resume'
+      ? ['exec', 'resume', '--json', '--skip-git-repo-check', session.id, prompt]
+      : ['--print', '--resume', session.id, '--output-format', 'stream-json', '--verbose', prompt];
+    return new Promise((resolve) => {
+      let child;
+      let settled = false;
+      let spawned = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      try {
+        child = spawnImpl(cli, args, {
+          cwd,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+          env: { ...process.env, LLMPET_MEME_RESUME: '1' },
+        });
+      } catch (err) {
+        finish({ ok: false, submitted: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
+        return;
+      }
+      child.once('error', (err) => {
+        finish({ ok: false, submitted: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
+      });
+      child.once('spawn', () => {
+        spawned = true;
+        if (typeof child.unref === 'function') child.unref();
+        setTimeout(() => {
+          if (settled) return;
+          if (child.exitCode != null && child.exitCode !== 0) {
+            finish({ ok: false, submitted: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${child.exitCode}）。` });
+            return;
+          }
+          finish({
+            ok: true,
+            submitted: true,
+            copied: false,
+            focused: false,
+            route: kind,
+            pid: child.pid || null,
+            message: `已按 session ID 交给 ${name === 'codex' ? 'Codex' : 'Claude'} 继续执行。`,
+          });
+        }, resumeProbeMs);
+      });
+      child.once('exit', (code) => {
+        if (!settled && spawned && code !== 0) {
+          finish({ ok: false, submitted: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${code}）。` });
+        }
+      });
+    });
   }
 
   async function dispatch(session, prompt) {
@@ -110,6 +181,12 @@ function createCommandDispatcher(options = {}) {
       return stageFallback(session, prompt, 'Terminal 标签页定位或输入失败；Prompt 已复制并聚焦目标 session。');
     }
 
+    if (route.kind === 'codex-resume' || route.kind === 'claude-resume') {
+      const resumed = await nativeResume(session, prompt, route.kind);
+      if (resumed.ok) return resumed;
+      return stageFallback(session, prompt, resumed.message + ' Prompt 已复制并尝试聚焦目标 session。');
+    }
+
     return stageFallback(session, prompt);
   }
 
@@ -122,5 +199,6 @@ module.exports = {
   cleanTty,
   routeForSession,
   validPrompt,
+  SESSION_ID_RE,
   createCommandDispatcher,
 };
