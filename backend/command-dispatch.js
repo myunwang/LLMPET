@@ -1,12 +1,15 @@
 'use strict';
 
 const { execFile, spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const { findCli } = require('./launch');
 
 const MAX_PROMPT_CHARS = 12000;
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f-]{27,40}$/i;
+const CLAUDE_DESKTOP_ID_RE = /^local_[0-9a-f]{8}-[0-9a-f-]{27,40}$/i;
 const TERMINAL_PASTE_SCRIPT = [
   'on run argv',
   '  set wantedTTY to item 1 of argv',
@@ -43,6 +46,85 @@ const CODEX_DESKTOP_PASTE_SCRIPT = [
   'end tell',
   'return "ok"',
 ].join('\n');
+const NATIVE_HELPER_SOURCE = path.join(__dirname, 'drag-window.swift');
+let nativeHelperPromise = null;
+
+function ensureNativeHelper(execImpl = execFile) {
+  if (nativeHelperPromise) return nativeHelperPromise;
+  const packaged = process.resourcesPath
+    ? path.join(process.resourcesPath, 'drag-window')
+    : null;
+  if (packaged) {
+    try {
+      fs.accessSync(packaged, fs.constants.X_OK);
+      nativeHelperPromise = Promise.resolve(packaged);
+      return nativeHelperPromise;
+    } catch {}
+  }
+  let sourceHash;
+  try {
+    sourceHash = crypto.createHash('sha256')
+      .update(fs.readFileSync(NATIVE_HELPER_SOURCE))
+      .digest('hex').slice(0, 16);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const output = path.join(os.tmpdir(), `octopus-drag-window-${sourceHash}`);
+  try {
+    fs.accessSync(output, fs.constants.X_OK);
+    nativeHelperPromise = Promise.resolve(output);
+    return nativeHelperPromise;
+  } catch {}
+  nativeHelperPromise = new Promise((resolve, reject) => {
+    execImpl('/usr/bin/swiftc', [
+      '-O', NATIVE_HELPER_SOURCE,
+      '-F', '/System/Library/PrivateFrameworks',
+      '-framework', 'SkyLight',
+      '-framework', 'ApplicationServices',
+      '-framework', 'AppKit',
+      '-o', output,
+    ], { timeout: 20000, windowsHide: true }, (error, _stdout, stderr) => {
+      if (error) {
+        nativeHelperPromise = null;
+        reject(new Error(String(stderr || error.message || error).trim()));
+      } else {
+        resolve(output);
+      }
+    });
+  });
+  return nativeHelperPromise;
+}
+
+function claudeDesktopSessionsRoot(homeDir = os.homedir()) {
+  return `${homeDir}/Library/Application Support/Claude/claude-code-sessions`;
+}
+
+function resolveClaudeDesktopSessionId(cliSessionId, root = claudeDesktopSessionsRoot()) {
+  if (!SESSION_ID_RE.test(String(cliSessionId || '')) || !fs.existsSync(root)) return null;
+  const pending = [{ dir: root, depth: 0 }];
+  while (pending.length) {
+    const current = pending.pop();
+    let entries;
+    try { entries = fs.readdirSync(current.dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const fp = `${current.dir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (current.depth < 3) pending.push({ dir: fp, depth: current.depth + 1 });
+        continue;
+      }
+      if (!entry.isFile() || !/^local_[0-9a-f-]+\.json$/i.test(entry.name)) continue;
+      try {
+        const meta = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (
+          meta &&
+          meta.cliSessionId === cliSessionId &&
+          CLAUDE_DESKTOP_ID_RE.test(String(meta.sessionId || ''))
+        ) return meta.sessionId;
+      } catch {}
+    }
+  }
+  return null;
+}
 
 function cleanTty(value) {
   if (typeof value !== 'string') return null;
@@ -68,10 +150,18 @@ function routeForSession(session, platform = process.platform) {
   ) {
     return { kind: 'codex-desktop', label: '精确直发 · Codex 客户端', exact: true };
   }
+  if (
+    platform === 'darwin' &&
+    session.agentId !== 'codex' &&
+    resolveClaudeDesktopSessionId(session.id)
+  ) {
+    return { kind: 'claude-desktop', label: '精确直发 · Claude 客户端', exact: true };
+  }
   if (SESSION_ID_RE.test(String(session.id || ''))) {
-    return session.agentId === 'codex'
-      ? { kind: 'codex-resume', label: '精确续聊 · Codex', exact: true }
-      : { kind: 'claude-resume', label: '精确续聊 · Claude', exact: true };
+    if (session.agentId === 'codex') {
+      return { kind: 'codex-resume', label: '精确续聊 · Codex', exact: true };
+    }
+    return { kind: 'claude-resume', label: '精确续聊 · Claude', exact: true };
   }
   return { kind: 'manual', label: '安全模式 · 复制并聚焦', exact: false };
 }
@@ -104,6 +194,13 @@ function transcriptHasPrompt(text, prompt) {
       if (obj.type === 'event_msg' && p && p.type === 'user_message' && matches(p.message)) return true;
       if (obj.type === 'response_item' && p && p.role === 'user' && Array.isArray(p.content)) {
         if (p.content.some((part) => part && matches(part.text))) return true;
+      }
+      if (obj.type === 'user' && obj.message && obj.message.role === 'user') {
+        const content = obj.message.content;
+        if (matches(content)) return true;
+        if (Array.isArray(content) && content.some((part) => part && part.type === 'text' && matches(part.text))) {
+          return true;
+        }
       }
     } catch {}
   }
@@ -156,6 +253,13 @@ function createCommandDispatcher(options = {}) {
   const copyText = typeof options.copyText === 'function' ? options.copyText : () => {};
   const focus = typeof options.focusSession === 'function' ? options.focusSession : async () => false;
   const openCodexThread = typeof options.openCodexThread === 'function' ? options.openCodexThread : async () => false;
+  const openClaudeThread = typeof options.openClaudeThread === 'function' ? options.openClaudeThread : async () => false;
+  const resolveClaudeSession = typeof options.resolveClaudeDesktopSession === 'function'
+    ? options.resolveClaudeDesktopSession
+    : resolveClaudeDesktopSessionId;
+  const getNativeHelper = typeof options.getNativeHelper === 'function'
+    ? options.getNativeHelper
+    : () => ensureNativeHelper(execImpl);
   const verifyPrompt = typeof options.verifyPrompt === 'function'
     ? options.verifyPrompt
     : (session, prompt, startSize) => waitForTranscriptPrompt(session.transcriptPath, prompt, startSize);
@@ -218,7 +322,11 @@ function createCommandDispatcher(options = {}) {
           }
           finish({
             ok: true,
-            submitted: true,
+            // A spawned Claude process has not necessarily authenticated or
+            // appended the prompt yet. Its caller verifies the transcript
+            // before reporting submitted=true.
+            submitted: kind === 'codex-resume',
+            launched: true,
             copied: false,
             focused: false,
             route: kind,
@@ -238,7 +346,15 @@ function createCommandDispatcher(options = {}) {
   async function dispatch(session, prompt) {
     if (!session) return { ok: false, submitted: false, message: '目标 session 不存在，请重新选择。' };
     if (!validPrompt(prompt)) return { ok: false, submitted: false, message: 'Prompt 为空或过长，已拒绝下发。' };
-    const route = routeForSession(session, platform);
+    let route = routeForSession(session, platform);
+    if (
+      platform === 'darwin' &&
+      session.agentId !== 'codex' &&
+      SESSION_ID_RE.test(String(session.id || '')) &&
+      resolveClaudeSession(session.id)
+    ) {
+      route = { kind: 'claude-desktop', label: '精确直发 · Claude 客户端', exact: true };
+    }
 
     if (route.kind === 'tmux') {
       const typed = await runFile(execImpl, 'tmux', ['-S', session.tmuxSocket, 'send-keys', '-t', session.tmuxClient, '-l', '--', prompt]);
@@ -302,7 +418,103 @@ function createCommandDispatcher(options = {}) {
       };
     }
 
-    if (route.kind === 'codex-resume' || route.kind === 'claude-resume') {
+    if (route.kind === 'claude-desktop') {
+      const desktopSessionId = resolveClaudeSession(session.id);
+      if (!desktopSessionId) {
+        return stageFallback(session, prompt, 'Claude 客户端会话映射已失效；Prompt 已复制。');
+      }
+      let startSize = 0;
+      try { startSize = fs.statSync(session.transcriptPath).size; } catch {}
+      let opened = false;
+      try { opened = (await openClaudeThread(desktopSessionId)) !== false; } catch {}
+      if (!opened) {
+        return stageFallback(session, prompt, 'Claude 客户端无法打开指定 session；Prompt 已复制。');
+      }
+      await new Promise((resolve) => setTimeout(resolve, desktopOpenDelayMs));
+      // Deep-linking selects the right session but does not focus its editor.
+      // Locate the actual AXTextArea ("Prompt"), set its value directly, then
+      // submit so the Desktop-owned SDK stream and UI update together.
+      let helper;
+      try { helper = await getNativeHelper(); } catch (error) {
+        try { copyText(prompt); } catch {}
+        return {
+          ok: true,
+          submitted: false,
+          copied: true,
+          focused: opened,
+          route: 'claude-desktop',
+          message: `Claude 原生输入助手准备失败（${error.message || error}）；Prompt 已保留在剪贴板。`,
+        };
+      }
+      const sent = await runFile(execImpl, helper, ['--set-claude-prompt', prompt, 'submit']);
+      if (!sent.ok || sent.stdout !== 'ok') {
+        try { copyText(prompt); } catch {}
+        const reason = sent.stdout || sent.error || 'unknown';
+        return {
+          ok: true,
+          submitted: false,
+          copied: true,
+          focused: opened,
+          route: 'claude-desktop',
+          message: `已打开指定 Claude session，但原生输入失败（${reason}）；Prompt 已保留在剪贴板。`,
+        };
+      }
+      const verified = await verifyPrompt(session, prompt, startSize);
+      if (verified) {
+        return {
+          ok: true,
+          submitted: true,
+          copied: false,
+          focused: true,
+          route: 'claude-desktop',
+          message: '已发送到所选 Claude 客户端 session，并在对话记录中确认。',
+        };
+      }
+      try { copyText(prompt); } catch {}
+      return {
+        ok: true,
+        submitted: false,
+        copied: true,
+        focused: true,
+        route: 'claude-desktop',
+        message: '已打开指定 Claude session 并尝试发送，但未在对话记录中确认；Prompt 已保留在剪贴板。',
+      };
+    }
+
+    if (route.kind === 'claude-resume') {
+      const cli = findCliImpl('claude');
+      const auth = await runFile(execImpl, cli, ['auth', 'status']);
+      let loggedIn = false;
+      try { loggedIn = auth.ok && JSON.parse(auth.stdout).loggedIn === true; } catch {}
+      if (!loggedIn) {
+        return stageFallback(
+          session,
+          prompt,
+          'Claude CLI 当前未登录，已阻止后台续聊；Prompt 已复制并尝试聚焦目标 session。',
+        );
+      }
+      let startSize = 0;
+      try { startSize = fs.statSync(session.transcriptPath).size; } catch {}
+      const resumed = await nativeResume(session, prompt, route.kind);
+      if (!resumed.ok) {
+        return stageFallback(session, prompt, resumed.message + ' Prompt 已复制并尝试聚焦目标 session。');
+      }
+      const verified = await verifyPrompt(session, prompt, startSize);
+      if (verified) {
+        return {
+          ...resumed,
+          submitted: true,
+          message: '已通过 Claude CLI 续聊所选 session，并在共享对话记录中确认 Prompt。',
+        };
+      }
+      return {
+        ...resumed,
+        submitted: false,
+        message: 'Claude CLI 已启动，但未在共享对话记录中确认 Prompt；未将启动进程误报为发送成功。',
+      };
+    }
+
+    if (route.kind === 'codex-resume') {
       const resumed = await nativeResume(session, prompt, route.kind);
       if (resumed.ok) return resumed;
       return stageFallback(session, prompt, resumed.message + ' Prompt 已复制并尝试聚焦目标 session。');
@@ -318,11 +530,14 @@ module.exports = {
   MAX_PROMPT_CHARS,
   TERMINAL_PASTE_SCRIPT,
   CODEX_DESKTOP_PASTE_SCRIPT,
+  ensureNativeHelper,
   cleanTty,
   routeForSession,
+  resolveClaudeDesktopSessionId,
   validPrompt,
   transcriptHasPrompt,
   waitForTranscriptPrompt,
   SESSION_ID_RE,
+  CLAUDE_DESKTOP_ID_RE,
   createCommandDispatcher,
 };

@@ -286,6 +286,30 @@ func axString(_ element: AXUIElement, _ attribute: CFString) -> String? {
   return value as? String
 }
 
+func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+  var raw: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &raw) == .success,
+        let raw, CFGetTypeID(raw) == CFArrayGetTypeID() else { return [] }
+  let array = unsafeBitCast(raw, to: CFArray.self)
+  return (0..<CFArrayGetCount(array)).map { index in
+    unsafeBitCast(CFArrayGetValueAtIndex(array, index), to: AXUIElement.self)
+  }
+}
+
+func findPromptTextArea(_ root: AXUIElement) -> AXUIElement? {
+  var pending = [root]
+  var inspected = 0
+  while let element = pending.popLast(), inspected < 20_000 {
+    inspected += 1
+    if axString(element, kAXRoleAttribute as CFString) == (kAXTextAreaRole as String),
+       axString(element, kAXDescriptionAttribute as CFString) == "Prompt" {
+      return element
+    }
+    pending.append(contentsOf: axChildren(element))
+  }
+  return nil
+}
+
 func axElement(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? {
   var value: CFTypeRef?
   guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
@@ -427,6 +451,58 @@ func physicalMouseButtonIsDown() -> Bool {
 }
 
 let windowCommand = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+if windowCommand == "--set-claude-prompt" && CommandLine.arguments.count >= 3 {
+  guard AXIsProcessTrusted() else {
+    fputs("accessibility permission required\n", stderr)
+    exit(3)
+  }
+  guard let app = NSRunningApplication.runningApplications(
+    withBundleIdentifier: "com.anthropic.claudefordesktop").first else {
+    fputs("claude-not-running\n", stderr)
+    exit(4)
+  }
+  let pid = Int32(app.processIdentifier)
+  let application = AXUIElementCreateApplication(pid_t(pid))
+  guard let promptArea = findPromptTextArea(application) else {
+    fputs("prompt-not-found\n", stderr)
+    exit(4)
+  }
+  let prompt = CommandLine.arguments[2] as CFString
+  guard AXUIElementSetAttributeValue(
+    promptArea, kAXValueAttribute as CFString, prompt) == .success else {
+    fputs("prompt-write-failed\n", stderr)
+    exit(5)
+  }
+  _ = AXUIElementSetAttributeValue(
+    promptArea, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+  if let window = axElement(promptArea, kAXWindowAttribute as CFString) {
+    _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+  }
+  app.activate(options: [])
+  usleep(120_000)
+  if CommandLine.arguments.count > 3 && CommandLine.arguments[3] == "submit" {
+    let source = CGEventSource(stateID: .privateState)
+    guard let down = CGEvent(
+      keyboardEventSource: source, virtualKey: 36, keyDown: true),
+      let up = CGEvent(
+        keyboardEventSource: source, virtualKey: 36, keyDown: false) else {
+      fputs("submit-event-failed\n", stderr)
+      exit(5)
+    }
+    guard SLEventPostToPid(pid, down) == 0 else {
+      fputs("submit-key-down-failed\n", stderr)
+      exit(5)
+    }
+    usleep(25_000)
+    guard SLEventPostToPid(pid, up) == 0 else {
+      fputs("submit-key-up-failed\n", stderr)
+      exit(5)
+    }
+  }
+  print("ok")
+  exit(0)
+}
+
 if windowCommand == "--inspect-pid" && CommandLine.arguments.count >= 3 {
   guard let pid = Int32(CommandLine.arguments[2]) else {
     fputs("bad --inspect-pid argument\n", stderr)

@@ -740,16 +740,18 @@ body.skin-cat #cat { display: flex; }
 .sl-meme-status.warn { color: #ffbd59; }
 .sl-meme-status.error { color: #ff7b73; }
 
-/* 表情包播放层只渲染媒体本身，不加卡片背景；扩宽后的透明窗口中贴在宠物右侧。 */
+/* 表情包播放层只渲染媒体本身，不加卡片背景。
+   left/top/width 由 JS 按当前皮肤的真实 DOMRect 计算；固定 CSS 坐标会在
+   cat/mascot/pixel 三种尺寸之间漂移，也会在窗口被气泡重算时遭到裁切。 */
 .meme-player {
-  position: absolute; z-index: 22; bottom: 82px; left: calc(50% + 112px);
-  width: 260px; pointer-events: none;
+  position: absolute; z-index: 22;
+  left: 0; top: 0; width: 260px; pointer-events: none;
   opacity: 1; transform: translateX(0) scale(1);
   animation: memeEnter 0.2s ease-out;
 }
 .meme-player.hidden { display: none; }
 .meme-player img {
-  display: block; width: 260px; max-height: 180px; object-fit: contain;
+  display: block; width: 100%; height: auto; max-height: 180px; object-fit: contain;
   background: transparent; border: 0; border-radius: 0;
   filter: drop-shadow(0 7px 13px rgba(0, 0, 0, 0.35));
 }

@@ -184,7 +184,22 @@ const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '
 const POPUP_W = 520;
 const POPUP_BOTTOM = 200;
 const ASK_VIEWPORT_MAX_H = 520;
+const MEME_WINDOW_W = 760;
+const MEME_WINDOW_H = 340;
+const MEME_MEDIA_W = 260;
+const MEME_GAP = 14;
+const MEME_EDGE_PAD = 10;
+let memeLayoutActive = false;
 let fitPopupSeq = 0;
+function setRequestedPetSize(w, h) {
+  let width = Number(w) || 0;
+  let height = Number(h) || 0;
+  if (memeLayoutActive) {
+    width = Math.max(width, MEME_WINDOW_W);
+    height = Math.max(height, MEME_WINDOW_H);
+  }
+  try { window.pet.setPetSize(width, height); } catch {}
+}
 function fitPopup(el) {
   if (!el) return;
   const seq = ++fitPopupSeq;
@@ -199,19 +214,23 @@ function fitPopup(el) {
       el.style.maxHeight = prev;
       const viewportH = el === askEl ? Math.min(contentH, ASK_VIEWPORT_MAX_H) : contentH;
       const winH = Math.max(340, POPUP_BOTTOM + viewportH + 24);
-      try { window.pet.setPetSize(POPUP_W, winH); } catch {}
+      setRequestedPetSize(POPUP_W, winH);
     };
 
     if (Math.abs((window.innerWidth || 0) - POPUP_W) > 2) {
       // 第一拍只扩宽，第二拍在正确的横向排版下测真实高度。
-      try { window.pet.setPetSize(POPUP_W, Math.max(340, window.innerHeight || 340)); } catch {}
+      setRequestedPetSize(POPUP_W, Math.max(340, window.innerHeight || 340));
       requestAnimationFrame(() => requestAnimationFrame(measure));
     } else {
       measure();
     }
   });
 }
-function resetPetSize() { fitPopupSeq++; try { window.pet.setPetSize(0, 0); } catch {} }
+function resetPetSize() {
+  fitPopupSeq++;
+  if (memeLayoutActive) setRequestedPetSize(MEME_WINDOW_W, MEME_WINDOW_H);
+  else setRequestedPetSize(0, 0);
+}
 
 // 从快照重建队列（多任务都在、且标明项目）
 function refreshAsk(stats) {
@@ -843,6 +862,47 @@ function closeSessList() {
   resetPetSize();
 }
 
+function alignMemePlayer() {
+  if (!memeLayoutActive || memePlayer.classList.contains('hidden')) return;
+  const petEl = curSkinEl();
+  if (!petEl) return;
+  const petRect = petEl.getBoundingClientRect();
+  const docEl = document.documentElement;
+  const viewportW = Math.max(1, window.innerWidth || (docEl && docEl.clientWidth) || MEME_WINDOW_W);
+  const viewportH = Math.max(1, window.innerHeight || (docEl && docEl.clientHeight) || MEME_WINDOW_H);
+  const naturalW = Number(memeImage.naturalWidth) || 16;
+  const naturalH = Number(memeImage.naturalHeight) || 9;
+  const availableRight = viewportW - petRect.right - MEME_GAP - MEME_EDGE_PAD;
+  const availableLeft = petRect.left - MEME_GAP - MEME_EDGE_PAD;
+  const preferred = currentMemePlacement === 'pet-left' ? 'left' : 'right';
+  let side = preferred;
+  if (side === 'right' && availableRight < 120 && availableLeft > availableRight) side = 'left';
+  if (side === 'left' && availableLeft < 120 && availableRight > availableLeft) side = 'right';
+  const available = Math.max(120, side === 'right' ? availableRight : availableLeft);
+  const mediaW = Math.min(MEME_MEDIA_W, available);
+  const mediaH = Math.min(180, mediaW * naturalH / naturalW);
+  let left = side === 'right'
+    ? petRect.right + MEME_GAP
+    : petRect.left - MEME_GAP - mediaW;
+  let top = petRect.top + (petRect.height - mediaH) / 2;
+  left = Math.max(MEME_EDGE_PAD, Math.min(left, viewportW - mediaW - MEME_EDGE_PAD));
+  // Caption sits below the image; reserve a small footer so it cannot be cut.
+  top = Math.max(MEME_EDGE_PAD, Math.min(top, viewportH - mediaH - 34));
+  memePlayer.style.left = `${Math.round(left)}px`;
+  memePlayer.style.top = `${Math.round(top)}px`;
+  memePlayer.style.width = `${Math.round(mediaW)}px`;
+  memePlayer.dataset.side = side;
+}
+
+function restoreSizeAfterMeme() {
+  if (askActive) fitPopup(askEl);
+  else if (sessListOpen) fitPopup(sesslist);
+  else if (todoPopOpen) fitPopup(todopop);
+  else if (!bubble.classList.contains('hidden')) fitPopup(bubble);
+  else resetPetSize();
+}
+
+let currentMemePlacement = 'pet-right';
 function playMeme(meme) {
   if (!meme || !meme.media) return;
   clearTimeout(memeTimer);
@@ -850,11 +910,17 @@ function playMeme(meme) {
     try { memeAudio.pause(); } catch {}
     memeAudio = null;
   }
+  memeLayoutActive = true;
+  currentMemePlacement = meme.media.placement === 'pet-left' ? 'pet-left' : 'pet-right';
   memeImage.src = `../assets/memes/${meme.media.gif}`;
   memeImage.alt = meme.label || '表情包';
   memeCaption.textContent = `${meme.label || '表情包'} · ${meme.project || ''}`;
   memePlayer.classList.remove('hidden');
-  try { window.pet.setPetSize(760, 340); } catch {}
+  setRequestedPetSize(MEME_WINDOW_W, MEME_WINDOW_H);
+  if (meme.reaction && meme.reaction.state) {
+    transient(meme.reaction.state, Number(meme.reaction.durationMs) || Number(meme.media.durationMs) || 3000);
+  }
+  requestAnimationFrame(() => requestAnimationFrame(alignMemePlayer));
   if (!muted && typeof window.Audio === 'function') {
     try {
       memeAudio = new window.Audio(`../assets/memes/${meme.media.audio}`);
@@ -868,10 +934,12 @@ function playMeme(meme) {
     memeImage.removeAttribute('src');
     if (memeAudio) { try { memeAudio.pause(); } catch {} }
     memeAudio = null;
-    if (!askActive && !sessListOpen && !todoPopOpen) resetPetSize();
+    memeLayoutActive = false;
+    restoreSizeAfterMeme();
   }, Number(meme.media.durationMs) || 3000);
 }
 
+memeImage.addEventListener('load', alignMemePlayer);
 window.pet.onMeme(playMeme);
 function toggleSessList() { sessListOpen ? closeSessList() : openSessList(); }
 
@@ -1133,6 +1201,12 @@ window.pet.onEvent((ev) => {
   // 你正在答面板/打字时：新的待答任务只悄悄进队列(不抢面板)，其余动画/彩带/气泡/状态变化一律不打断
   if (isInteracting()) {
     if ((ev.kind === 'waiting' || ev.kind === 'needsinput') && ev.choice) enqueueChoice(ev.choice);
+    return;
+  }
+  // 表情包刚下发时，紧随其后的 user-turn / operation 正是这条 Prompt 自己
+  // 产生的。不能让它们在几十毫秒内把配置好的「汗流浃背」应对盖成 thinking /
+  // working；错误、授权和需回复等高优先级事件仍继续穿透并接管。
+  if (memeLayoutActive && ['user-turn', 'operation', 'say', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)) {
     return;
   }
   switch (ev.kind) {
@@ -1661,5 +1735,8 @@ setInterval(() => {
 // 气泡、皮肤切换和窗口自适应都可能改变本体在透明窗里的局部位置。
 // 窗口尺寸变化(fitPopup/resetPetSize)在渲染端表现为 resize 事件,按事件上报;
 // 常驻轮询只留一个低频兜底,不必每 500ms 强制一次 getBoundingClientRect 回流。
-window.addEventListener('resize', () => requestAnimationFrame(reportPetVisualBounds));
+window.addEventListener('resize', () => requestAnimationFrame(() => {
+  reportPetVisualBounds();
+  alignMemePlayer();
+}));
 setInterval(reportPetVisualBounds, 3000);

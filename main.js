@@ -555,6 +555,10 @@ function bootBackend() {
     copyText: (text) => clipboard.writeText(text),
     focusSession,
     openCodexThread: (sessionId) => shell.openExternal(`codex://threads/${encodeURIComponent(sessionId)}`),
+    // Claude's web hand-off uses /code/, but Claude Desktop 1.24012 opens that
+    // route in an empty auxiliary "Code" window. Local desktop sessions live in
+    // the main Epitaxy view; this route focuses its real prompt editor.
+    openClaudeThread: (sessionId) => shell.openExternal(`claude://claude.ai/epitaxy/${encodeURIComponent(sessionId)}`),
   });
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
@@ -757,7 +761,11 @@ function registerIpc() {
     });
     if (!commandDispatcher) return { ok: false, submitted: false, message: 'Prompt 下发器尚未就绪。' };
     const result = await commandDispatcher.dispatch(session, meme.prompt.text);
-    log('meme', `${meme.id} → ${String(session.id).slice(-6)} agent=${adapter.agentOf(session)} route=${result.route || '-'} submitted=${!!result.submitted}`);
+    log(
+      'meme',
+      `${meme.id} → ${String(session.id).slice(-6)} agent=${adapter.agentOf(session)} ` +
+        `route=${result.route || '-'} submitted=${!!result.submitted} detail=${result.message || '-'}`,
+    );
     return {
       ...result,
       memeId: meme.id,

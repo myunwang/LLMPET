@@ -1,6 +1,6 @@
 {
   "name": "llmpet",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "桌面宠物：实时呈现 Claude Code 与 OpenAI Codex 的状态、消息、用量和 Claude 授权",
   "main": "main.js",
   "license": "MIT",

@@ -2,12 +2,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const { RENDER_STATE_WORDS } = require('../shared/states');
 
 const CATALOG_PATH = path.join(__dirname, '..', 'assets', 'memes', 'catalog.json');
 const MEME_ROOT = path.dirname(CATALOG_PATH);
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 const MEDIA_RE = /^[a-z0-9][a-z0-9._/-]{1,180}$/i;
 const MAX_PROMPT_CHARS = 12000;
+const REACTION_STATES = new Set(RENDER_STATE_WORDS);
 
 function safeMediaPath(value) {
   if (typeof value !== 'string' || !MEDIA_RE.test(value) || value.includes('..')) return null;
@@ -27,6 +29,10 @@ function validateItem(raw) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_CHARS) {
     throw new Error(`${raw.id}: prompt 为空或过长`);
   }
+  const reaction = raw.reaction;
+  if (!reaction || typeof reaction !== 'object' || !REACTION_STATES.has(reaction.state)) {
+    throw new Error(`${raw.id}: reaction.state 不合法`);
+  }
   return Object.freeze({
     id: raw.id,
     label: String(raw.label || raw.id).slice(0, 80),
@@ -42,6 +48,11 @@ function validateItem(raw) {
     prompt: Object.freeze({
       version: Math.max(1, Math.floor(Number(raw.prompt.version) || 1)),
       text: prompt.trim(),
+    }),
+    reaction: Object.freeze({
+      state: reaction.state,
+      durationMs: Math.max(800, Math.min(30000, Number(reaction.durationMs) || 3000)),
+      label: String(reaction.label || '').slice(0, 80),
     }),
   });
 }
@@ -72,6 +83,7 @@ function publicCatalog() {
       category: item.category,
       tags: [...item.tags],
       media: { ...item.media },
+      reaction: { ...item.reaction },
       promptVersion: item.prompt.version,
     })),
   };
