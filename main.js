@@ -30,11 +30,13 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { createCodexRateLimits } = require('./backend/codex-rate-limits');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
+const { beginDrag, nextDragBounds } = require('./backend/window-drag');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -59,11 +61,14 @@ let server = null;
 let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
+let codexRateLimitClient = null; // Codex App Server /status 配额读取器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
+let codexAppServerLimitsAt = 0; // App Server 新数据优先；过期后允许 rollout 接棒
+let codexLimitsLogSig = '';
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
 // 巡视拖拽期间主宠强制穿透，renderer 不得抢回鼠标（uiBusy / visualRect /
@@ -76,7 +81,7 @@ const petState = new Map(); // id → { agent, win, customSize, visualRect, uiBu
 const petStates = () => [...petState.values()].filter((s) => s.win && !s.win.isDestroyed());
 const stateOfSender = (sender) => petState.get(sender.id) || null;
 const primaryPetState = () => (petWin && !petWin.isDestroyed() ? petState.get(petWin.webContents.id) : null);
-const anyUiBusy = () => petStates().some((s) => s.uiBusy);
+const anyUiBusy = () => petStates().some((s) => s.uiBusy || s.drag);
 const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.visualRect : null; };
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
@@ -100,6 +105,7 @@ function frontendConfig(agent = 'all') {
     territorySupported: process.platform === 'darwin' && agent !== 'codex',
     agent,
     petMode: c.petMode,
+    codexChipMode: c.codexChipMode,
     lang: c.lang,
     pinnedSessions: c.pinnedSessions,
     archivedSessions: c.archivedSessions,
@@ -119,6 +125,7 @@ function targetSize(st) {
 
 function applyPetSize(st) {
   if (!st || !st.win || st.win.isDestroyed()) return;
+  if (st.drag) { st.resizeAfterDrag = true; return; }
   const win = st.win;
   const { w } = targetSize(st);
   let { h } = targetSize(st);
@@ -190,7 +197,10 @@ function makePetWindow(agent) {
   win.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent } });
 
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
-  const st = { agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true };
+  const st = {
+    agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true,
+    drag: null, resizeAfterDrag: false,
+  };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
   const wcId = win.webContents.id;
@@ -573,6 +583,24 @@ function scheduleEmit() {
   emitDebounce = setTimeout(() => { emitDebounce = null; emitStats(); }, 150);
 }
 
+function updateCodexLimits(limits, source) {
+  if (!limits) return;
+  const now = Date.now();
+  if (source === 'app-server') {
+    codexAppServerLimitsAt = now;
+  } else if (codexAppServerLimitsAt && now - codexAppServerLimitsAt < 10 * 60 * 1000) {
+    return;
+  }
+  codexLimits = { ...limits, source };
+  const sig = [source, codexLimits.usedPercent, codexLimits.windowMinutes,
+    codexLimits.secondaryUsedPercent, codexLimits.secondaryWindowMinutes].join(':');
+  if (sig !== codexLimitsLogSig) {
+    codexLimitsLogSig = sig;
+    log('codex-rate', `quota source=${source} primary=${codexLimits.usedPercent ?? '-'}@${codexLimits.windowMinutes ?? '-'}m secondary=${codexLimits.secondaryUsedPercent ?? '-'}@${codexLimits.secondaryWindowMinutes ?? '-'}m`);
+  }
+  scheduleEmit();
+}
+
 function broadcastConfig() {
   for (const st of petStates()) sendWin(st.win, 'pet:config', frontendConfig(st.agent));
   sendPanel('panel:config', frontendConfig('all'));
@@ -627,7 +655,8 @@ function bootBackend() {
     openClaudeThread: (sessionId) => shell.openExternal(`claude://claude.ai/epitaxy/${encodeURIComponent(sessionId)}`),
   });
 
-  // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
+  // Codex backend: documented lifecycle hooks provide live activity; the
+  // rollout watcher remains a read-only fallback for older Codex builds.
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
   if (process.env.LLMPET_NO_CODEX === '1') {
     log('main', 'LLMPET_NO_CODEX=1 — Codex watcher disabled');
@@ -640,9 +669,17 @@ function bootBackend() {
       core,
       // 开发/E2E 可用 LLMPET_CODEX_DIR 指到假目录，不碰真实 ~/.codex
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
-      onRateLimits: (rl) => { codexLimits = rl; scheduleEmit(); },
+      onRateLimits: (rl) => updateCodexLimits(rl, 'rollout'),
     });
     codexWatch.start();
+    // New Codex builds expose the same quota data as /status through the
+    // documented App Server API. Keep rollout parsing above as the fallback.
+    if (process.env.OCTOPUS_NO_NET !== '1') {
+      codexRateLimitClient = createCodexRateLimits({
+        onRateLimits: (rl) => updateCodexLimits(rl, 'app-server'),
+      });
+      codexRateLimitClient.start();
+    }
   }
 
   metering = createMetering();
@@ -726,10 +763,10 @@ function bootBackend() {
   server.start();
 
   // Install hooks once the server has a port (defer so listen wins the race).
-  // OCTOPUS_NO_HOOKS=1 skips touching ~/.claude/settings.json (dev/verify mode).
+  // OCTOPUS_NO_HOOKS=1 skips touching Claude and Codex hook config (dev/verify mode).
   setTimeout(() => {
     if (process.env.OCTOPUS_NO_HOOKS === '1') {
-      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude Code hook install');
+      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude/Codex hook install');
       return;
     }
     const port = server.getPort();
@@ -775,19 +812,36 @@ function registerIpc() {
     if (agent === 'all') return lastStats || buildStats();
     return buildStats(agent);
   });
-  ipcMain.handle('get-win-pos', (e) => {
-    const win = senderPetWin(e);
-    if (!win) return [0, 0];
-    const b = win.getBounds();
-    return [b.x, b.y];
+  ipcMain.on('begin-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.win || st.win.isDestroyed()) return;
+    const b = st.win.getBounds();
+    const size = targetSize(st);
+    try {
+      size.h = Math.min(size.h, screen.getDisplayMatching(b).workArea.height);
+    } catch {}
+    st.drag = beginDrag(
+      b,
+      screen.getCursorScreenPoint(),
+      { width: size.w, height: size.h },
+    );
+    st.resizeAfterDrag = false;
   });
 
-  ipcMain.on('set-win-pos', (e, x, y) => {
-    const win = senderPetWin(e);
-    if (win && Number.isFinite(x) && Number.isFinite(y)) {
-      const b = win.getBounds();
-      win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
-    }
+  ipcMain.on('update-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.drag || !st.win || st.win.isDestroyed()) return;
+    const bounds = nextDragBounds(st.drag, screen.getCursorScreenPoint());
+    if (bounds) st.win.setBounds(bounds);
+  });
+
+  ipcMain.on('end-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.drag) return;
+    st.drag = null;
+    const resizeAfterDrag = st.resizeAfterDrag;
+    st.resizeAfterDrag = false;
+    if (resizeAfterDrag) applyPetSize(st);
   });
 
   ipcMain.on('open-panel', openPanel);
@@ -1055,6 +1109,13 @@ function applySkin(skin, agent) {
   broadcastConfig();
   refreshTrayMenu();
 }
+function applyCodexChipMode(codexChipMode) {
+  if (!['usage', 'weeklyRemaining'].includes(codexChipMode)) return;
+  config.save({ codexChipMode });
+  broadcastConfig();
+  refreshTrayMenu();
+  log('main', `codexChipMode → ${codexChipMode}`);
+}
 
 // 补齐当前 petMode 应有的窗口（被单独收起的宠从托盘找回来）。主宠身份变化
 // (all⇄claude)时原地重载渲染器——不销毁窗口，位置不动、Codex 宠不闪。
@@ -1133,6 +1194,7 @@ function refreshTrayMenu() {
   const budget = Number(cfg.budget5h) || 0;
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
+  const codexChipMode = cfg.codexChipMode || 'usage';
   const lang = cfg.lang || 'zh';
   tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -1155,6 +1217,10 @@ function refreshTrayMenu() {
       { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
       { label: t('skin.pixel'), type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
       { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
+    ] }] : []),
+    ...(petMode === 'duo' ? [{ label: t('tray.codexChip'), submenu: [
+      { label: t('tray.codexChipUsage'), type: 'radio', checked: codexChipMode === 'usage', click: () => applyCodexChipMode('usage') },
+      { label: t('tray.codexChipWeekly'), type: 'radio', checked: codexChipMode === 'weeklyRemaining', click: () => applyCodexChipMode('weeklyRemaining') },
     ] }] : []),
     { label: t('tray.shape'), submenu: [
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
@@ -1262,6 +1328,7 @@ app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
   try { if (travelManager) travelManager.shutdown(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
+  try { if (codexRateLimitClient) codexRateLimitClient.stop(); } catch {}
   try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}

@@ -235,6 +235,7 @@ function createCodexWatch(deps) {
   function baseFields(t) {
     const f = {
       agentId: 'codex',
+      eventSource: 'codex-rollout',
       headless: false,
       transcriptPath: t.fp,
     };

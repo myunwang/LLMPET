@@ -58,19 +58,20 @@ Claude Code ──(生命周期 hook)──► octopus-hook.js ──HTTP POST /
 
 > **「Claude 客户端消息」**指的是 Claude Code（CLI agent）的回复内容——`Stop` 时从 transcript 抽最后一段 assistant 文本（截断 + 密钥脱敏），对应桌宠的 `💬` 气泡。（不是 Claude 桌面聊天 App 的消息。）
 
-### 🛰️ Codex 后端（零配置、只读）
+### 🛰️ Codex 后端（官方 hooks + 只读回退）
 
 除 Claude Code 外，桌宠也能盯 [OpenAI Codex](https://github.com/openai/codex)（CLI / Desktop）：
 
 ```
-Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.jsonl
-                                          │ (codex-watch 增量 tail，只读)
-                                          ▼
-                    同一个会话状态机 (core, agentId: 'codex') ──► 桌宠/面板
+Codex CLI / Desktop ──官方生命周期 hooks──► octopus-hook.js ──► /state
+                  └─旧版 rollout JSONL──► codex-watch（只读回退/计量）──┘
+                                                        ▼
+                         同一个会话状态机 (core, agentId: 'codex') ──► 桌宠/面板
 ```
 
-- **不装任何钩子**：Codex 只有一个全局 `notify` 配置位（常被 ChatGPT 桌面 App 占用），所以走「监听 rollout 文件」——增量 tail、零配置、卸载无残留。
-- 事件映射：`user_message→思考`；首个 `exec_command/apply_patch` 后整轮保持“干活中”（工具结果和中间 reasoning 不会误降成思考），直到 `task_complete→完成庆祝+💬` 或 `turn_aborted→中断徽标`；`token_count→上下文%`。guardian / auto-review 等 subagent 内部线程自动过滤，长会话恢复时只读取新增事件、不重放历史。
+- **新版实时通道**：首次启动会合并写入 `~/.codex/hooks.json`，注册 `SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop …`。其他程序的 hooks 保留不动；托盘“卸载钩子”也只删除 LLMPET 条目并先备份。Codex 若提示新 hook 待审核，请在 Codex 中运行 `/hooks` 并信任 LLMPET 的 `octopus-hook.js` 命令。
+- **旧版兼容回退**：仍增量 tail `~/.codex/sessions/**/*.jsonl`。hooks 与 rollout 同时报告时会跨来源去重；长会话恢复只读新增事件，不重放历史。
+- 事件映射：`UserPromptSubmit→思考`；`PreToolUse/PostToolUse→干活中`；`Stop→完成庆祝+💬`；`PermissionRequest→等待处理`。guardian / auto-review 等 subagent rollout 仍自动过滤。
 - **用量与额度分开**：按 rollout 每条 `last_token_usage` 建立去重台账，显示今日 / 本机留存历史 token；套餐 5h 主窗口与周窗口仍单独读取 `rate_limits`。本地 token 台账不冒充 OpenAI 账单或账号全生命周期统计。
 - **两种形态**（托盘 → 设置 → 分身）：
   - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 蓝终端块）；
@@ -104,7 +105,7 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci               # 按 package-lock.json 安装（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci）
-npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
+npm start            # 启动桌宠（首次启动会注册 Claude Code / Codex 钩子）
 ```
 
 启动后新开的 Claude Code / Codex 会话会被感知；近期仍活跃的 Codex rollout 也会静默恢复到会话列表。右键桌宠可切三款皮肤和单宠/双宠模式。
@@ -115,7 +116,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
 
-- 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
+- 首次启动会把钩子合并写进 `~/.claude/settings.json` 与 `~/.codex/hooks.json`（可逆）。Codex 若提示待审核，请运行 `/hooks` 信任 LLMPET 命令；之后新开的会话即被桌宠感知。
 - **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
 - 会话右侧的 **🧳** = 打开青蛙旅行：让对应 agent 在该项目中执行一次独立、只读探索，回来后展示明信片并累计成长 token。
 - 会话面板底部的 **🐱 闲逛** = 打开可见 CLI，不带项目、不带任务和工具，让猫猫自己随便想想、聊聊。
@@ -125,7 +126,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - **🥊 领地模式**（macOS）：右键桌宠点“巡视”可立即扫描并执行一次；托盘可开启“自动巡逻”，开启后立即首巡、随后定时轮询（默认关）。两条定律：①**猫爪在上**——检测到别的桌面宠物（Desktop Goose / BongoCat / Shimeji 等）在跑，就把自己的窗口层级抬到最上，谁也不许压着咱（无需额外权限）；②**巡视行动**——发现对方窗口，小章鱼走过去把它一步步**顶到屏幕边上**。巡视需要**辅助功能**权限（移动别人的窗口）；没授权时「巡视」仍会执行猫爪在上，只是不推窗。对付 AXPosition 失效的透明窗桌宠时，会像 Computer Use 一样显示独立的橙色爪软件光标；底层兼容拖拽仍只在你**输入空闲 ≥2s** 时执行，期间隐藏系统光标，结束或异常都会补发 mouseUp 并把原光标复位，你手上有活时则静默撤退。自定义对手：`~/.octopus/config.json` 的 `territoryRivals` 数组加进程名关键词。
 
 ### 开发 / 验证开关
-- `OCTOPUS_NO_HOOKS=1 npm start` —— 启动但**不动** `~/.claude/settings.json`（只验证主进程 / 界面）。
+- `OCTOPUS_NO_HOOKS=1 npm start` —— 启动但**不动** Claude/Codex 的 hook 配置（只验证主进程 / 界面）。
 - `OCTOPUS_ALLOW_MULTI=1 npm start` —— 跳过多实例防护（默认：实例锁 + 启动探测到别的 LLMPET 实例就退出 + 存活期间守护 `runtime.json` 不被其他副本抢走）。
 - `OCTOPUS_NO_NET=1 npm start` —— **完全离线**：关掉唯一的外联请求（每 24h 拉一次 [LiteLLM 公开价目表](https://github.com/BerriAI/litellm)，只下载、不上传任何本地数据），花费改用内置估算单价。
 - `OCTOPUS_DEBUG=1 npm start` —— 开放 `GET /debug`（默认关闭，会暴露会话 cwd / 标题等，仅本机回环可访问）。
@@ -169,12 +170,13 @@ main.js                 Electron 主进程：窗口 / IPC / 托盘 / 启动编�
 preload.js              前后端唯一接口（contextBridge）
 renderer/  assets/      桌宠 + 面板的视觉与渲染
 hook/
-  octopus-hook.js        Claude Code 触发的钩子脚本（读 stdin/transcript，POST /state）
+  octopus-hook.js        Claude Code / Codex 共用钩子脚本（读 stdin，POST /state）
 backend/
   transport.js          端口发现 / runtime 文件 / 标识头 / 钩子→server 传输 / node 定位
   transcript.js         transcript 解析（assistant 文本 / 上下文用量 / API 错误 / 标题）
   pidwalk.js            进程树解析（定位会话所在终端）
-  hookinstall.js        merge-safe 钩子安装器（合并不覆盖 / 原子写 / 卸载备份）
+  hookinstall.js        Claude merge-safe 钩子安装器
+  codex-hookinstall.js  Codex merge-safe 钩子安装器（原子写 / 卸载备份）
   launch.js             开终端跑 claude
   core.js               会话存储 + 状态机 + 快照 + 陈旧清理
   server.js             本地 HTTP server（/state /permission /health）

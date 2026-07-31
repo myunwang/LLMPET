@@ -18,7 +18,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Three skins** — Octopus 🐙, Pixel Monster 👾, and Salary Cat 🐱.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
-LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex integration is read-only: LLMPET tails local rollout files and does not modify Codex configuration.
+LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code and current Codex builds connect through their public hook systems; legacy Codex rollout files remain a read-only fallback and metering source.
 
 ## Salary Cat states
 
@@ -61,7 +61,7 @@ Useful commands:
 npm test                 # full headless regression suite
 npm run package:mac:dev  # local ad-hoc-signed macOS package
 npm run package:win      # Windows installer + portable ZIP
-npm run uninstall:hooks  # remove LLMPET's Claude hooks safely
+npm run uninstall:hooks  # remove LLMPET's Claude/Codex hooks safely
 ```
 
 ## How the integrations work
@@ -76,13 +76,15 @@ LLMPET registers merge-safe lifecycle and permission hooks in `~/.claude/setting
 
 ### OpenAI Codex
 
-LLMPET does not install Codex hooks. It incrementally and read-only tails:
+LLMPET merge-safely registers documented lifecycle hooks in `~/.codex/hooks.json`. Other applications' handlers are preserved, and uninstall removes only LLMPET entries after making a backup. When Codex marks the new command for review, run `/hooks` and trust LLMPET's `octopus-hook.js` handler.
+
+For older Codex builds, LLMPET still incrementally and read-only tails:
 
 ```text
 ~/.codex/sessions/YYYY/MM/DD/*.jsonl
 ```
 
-It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
+Hook and rollout events map into the same state machine and are deduplicated across sources. The rollout fallback filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
 
 ## Travel Frog
 
@@ -124,18 +126,18 @@ Patrol mode is currently macOS-only.
 
 - The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
-- Codex rollout access is read-only.
+- Codex lifecycle hooks post only to LLMPET's loopback server; legacy rollout access is read-only.
 - Background network access is limited to the optional daily LiteLLM pricing download. A Travel Frog run contacts Anthropic or OpenAI only after you explicitly press **Depart**; `OCTOPUS_NO_NET=1` disables LLMPET's pricing fetch, but does not override a CLI trip you explicitly start.
 - Electron runs with `contextIsolation` enabled and `nodeIntegration` disabled.
 - Claude hook installation is merge-safe, atomic, reversible, and backed up before uninstall.
 
 ## Configuration and development flags
 
-- `OCTOPUS_NO_HOOKS=1 npm start` — launch without changing Claude settings.
+- `OCTOPUS_NO_HOOKS=1 npm start` — launch without changing Claude or Codex hook settings.
 - `OCTOPUS_ALLOW_MULTI=1 npm start` — bypass single-instance protection for development.
 - `OCTOPUS_NO_NET=1 npm start` — disable all external network requests.
 - `OCTOPUS_DEBUG=1 npm start` — expose the local `/debug` endpoint.
-- `LLMPET_NO_CODEX=1 npm start` — disable Codex rollout watching.
+- `LLMPET_NO_CODEX=1 npm start` — disable Codex monitoring.
 - `LLMPET_CODEX_DIR=<dir> npm start` — use a custom rollout directory for testing.
 
 ## Contributors

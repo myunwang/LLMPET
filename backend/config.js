@@ -23,6 +23,7 @@ const DEFAULTS = Object.freeze({
   territoryRivals: [],    // 用户自定义的对手进程名特征(叠加在内置名单上)
   petMode: 'single',      // 'single' 一只宠监控全部后端 | 'duo' Claude/Codex 各一只
   skinCodex: 'cat',       // 双宠模式里 Codex 宠的形象（和主形象错开才认得出谁是谁）
+  codexChipMode: 'usage', // 'usage' 默认统计 | 'weeklyRemaining' 周额度剩余
   petPositionCodex: null, // {x,y} | null — Codex 宠的落脚点
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
@@ -59,6 +60,12 @@ function sanitize(raw) {
   }
   if (raw.petMode === 'duo' || raw.petMode === 'single') out.petMode = raw.petMode;
   if (['mascot', 'pixel', 'cat'].includes(raw.skinCodex)) out.skinCodex = raw.skinCodex;
+  if (['usage', 'weeklyRemaining'].includes(raw.codexChipMode)) {
+    out.codexChipMode = raw.codexChipMode;
+  } else if (raw.codexTagMode === 'weeklyRemaining') {
+    // Migrate the short-lived, incorrectly named setting from the first build.
+    out.codexChipMode = 'weeklyRemaining';
+  }
   if (raw.petPositionCodex && Number.isFinite(raw.petPositionCodex.x) && Number.isFinite(raw.petPositionCodex.y)) {
     out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// LLMPET compatibility hook — run by Claude Code as: node octopus-hook.js <Event>
+// LLMPET compatibility hook:
+//   Claude Code: node octopus-hook.js <Event>
+//   Codex:       node octopus-hook.js <Event> codex
 //
 // Reads the hook's stdin JSON, derives a pet state, enriches it from the session
 // transcript (Claude's last message, context usage, API errors, title), figures
@@ -19,6 +21,7 @@ const EVENT_STATE = {
   UserPromptSubmit: 'thinking',
   PreToolUse: 'working',
   PostToolUse: 'working',
+  PermissionRequest: 'notification',
   PostToolUseFailure: 'error',
   Stop: 'attention',
   StopFailure: 'error',
@@ -51,9 +54,10 @@ function readStdin() {
 
 function count(v) { return Array.isArray(v) ? v.length : 0; }
 
-function buildBody(event, p) {
+function buildBody(event, p, source = 'claude') {
   let state = EVENT_STATE[event];
   if (!state) return null;
+  const isCodex = source === 'codex';
   // A subagent launch may surface as PreToolUse(Task) without SubagentStart.
   if (event === 'PreToolUse' && p.tool_name === 'Task') state = 'juggling';
   // /clear shows up as SessionEnd(source=clear) → context sweep, not sleep.
@@ -66,12 +70,18 @@ function buildBody(event, p) {
   if (typeof p.session_id !== 'string' || !p.session_id) return null;
   const sid = p.session_id;
   const body = { state, event, session_id: sid };
+  if (isCodex) {
+    body.agent_id = 'codex';
+    body.event_source = 'codex-hook';
+  }
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
   // Forward CC's real transcript path so the server never has to re-derive the
   // encoded project dir (its /._→- guess missed '_', breaking the 10s poll for
   // ~30% of projects: interrupt/API-error/context refresh went silent there).
   if (typeof p.transcript_path === 'string' && p.transcript_path) body.transcript_path = p.transcript_path;
-  if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
+  if (typeof p.tool_name === 'string' && p.tool_name) {
+    body.tool_name = isCodex && p.tool_name === 'apply_patch' ? 'Edit' : p.tool_name;
+  }
   if (typeof p.model === 'string' && p.model) body.model = p.model;
   if (p.stop_hook_active === true) body.stop_hook_active = true;
   // StopFailure carries the API/server error kind (CC 2.1.x enum: server_error,
@@ -84,7 +94,10 @@ function buildBody(event, p) {
   body.session_crons_count = count(p.session_crons);
 
   // Transcript-derived enrichment (read the tail once).
-  const entries = transcript.readTail(p.transcript_path);
+  // Codex explicitly does not guarantee its transcript wire format. Its hooks
+  // already provide the stable fields LLMPET needs, so only Claude uses the
+  // transcript enrichment parser.
+  const entries = isCodex ? null : transcript.readTail(p.transcript_path);
 
   // SessionStart 来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
   // resume/compact 进入已有任务不该触发「新会话欢迎」。有的环境（ccd）不带
@@ -112,6 +125,9 @@ function buildBody(event, p) {
       }
     }
   }
+  if (isCodex && event === 'Stop' && typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim()) {
+    body.assistant_last_output = p.last_assistant_message;
+  }
   if (!body.session_title && event === 'UserPromptSubmit') {
     const pt = transcript.promptTitle(p.prompt);
     if (pt) body.session_title = pt;
@@ -135,7 +151,7 @@ function buildBody(event, p) {
   if (memeResume) {
     body.headless = false;
     body.external_resume = true;
-  } else if (FOCUS_EVENTS.has(event)) {
+  } else if (!isCodex && FOCUS_EVENTS.has(event)) {
     try {
       const r = pidwalk.resolve(process.ppid, 10, sid);
       if (r.sourcePid) body.source_pid = r.sourcePid;
@@ -153,10 +169,11 @@ function buildBody(event, p) {
 
 function main() {
   const event = process.argv[2];
+  const source = process.argv[3] === 'codex' ? 'codex' : 'claude';
   if (!EVENT_STATE[event]) process.exit(0);
   readStdin().then((payload) => {
     let body;
-    try { body = buildBody(event, payload || {}); } catch { body = null; }
+    try { body = buildBody(event, payload || {}, source); } catch { body = null; }
     if (!body) process.exit(0);
     transport.postState(body, () => process.exit(0));
     setTimeout(() => process.exit(0), 250); // never hang Claude Code

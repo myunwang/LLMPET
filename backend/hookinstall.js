@@ -225,10 +225,17 @@ module.exports = {
 
 // CLI: `node backend/hookinstall.js` installs; `--uninstall` removes.
 if (require.main === module) {
+  const { registerCodexHooks, unregisterCodexHooks } = require('./codex-hookinstall');
   if (process.argv.includes('--uninstall')) {
-    console.log(unregisterHooks({ backup: true }));
+    console.log({
+      claude: unregisterHooks({ backup: true }),
+      codex: unregisterCodexHooks({ backup: true }),
+    });
   } else {
     const runtime = readRuntimeConfig();
-    console.log(registerHooks(runtime && runtime.port, runtime && runtime.token));
+    console.log({
+      claude: registerHooks(runtime && runtime.port, runtime && runtime.token),
+      codex: registerCodexHooks(),
+    });
   }
 }

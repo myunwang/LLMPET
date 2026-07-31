@@ -202,8 +202,9 @@ function createStubWorld() {
 
 // Load renderer/pet.js (and anything else, e.g. a future shared module) into
 // the stub world. Returns the world for driving + assertions.
-function loadRenderer(files) {
+function loadRenderer(files, options = {}) {
   const world = createStubWorld();
+  if (typeof options.search === 'string') world.sandbox.location.search = options.search;
   vm.createContext(world.sandbox);
   for (const f of files) {
     const code = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
