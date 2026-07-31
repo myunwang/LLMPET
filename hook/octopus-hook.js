@@ -14,6 +14,7 @@ const transport = require('../backend/transport');
 const transcript = require('../backend/transcript');
 const pidwalk = require('../backend/pidwalk');
 const { detectEmotion } = require('../backend/emotion');
+const { recoverPackagedApp } = require('../backend/startup');
 
 const EVENT_STATE = {
   SessionStart: 'idle',
@@ -194,8 +195,22 @@ function main() {
     let body;
     try { body = buildBody(event, payload || {}, source); } catch { body = null; }
     if (!body) return finish();
-    transport.postState(body, finish);
-    setTimeout(finish, 250); // never hang Claude Code
+    let delivered = false;
+    const recover = () => {
+      if (!delivered) recoverPackagedApp({ hookDir: __dirname });
+    };
+    transport.postState(body, (ok) => {
+      delivered = ok === true;
+      if (!delivered) recover();
+      finish();
+    });
+    setTimeout(() => {
+      // A stale runtime file can make transport exhaust several dead ports. Do
+      // not hold up Codex/Claude; wake the packaged app and let the next event
+      // arrive through the newly restored server.
+      recover();
+      finish();
+    }, 250); // never hang Claude Code
   }).catch(finish);
 }
 

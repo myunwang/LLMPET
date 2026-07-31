@@ -14,7 +14,7 @@
     "package:mac:dev": "LLMPET_MAC_SIGN_MODE=adhoc bash scripts/package-mac.sh",
     "verify:mac": "bash scripts/verify-mac-release.sh",
     "package:win": "electron-builder --win --publish never",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/metering.js && node test/codex-metering.js && node test/travel.js && node test/session-preferences.js && node test/territory.js && node test/window-drag.js && node test/codex-watch.js && node test/codex-hooks.js && node test/codex-rate-limits.js && node test/codex-integration.js && node test/meme-actions.js && node test/i18n.js && node test/popup-style.js && node test/branding.js && node test/mac-release.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/metering.js && node test/codex-metering.js && node test/travel.js && node test/session-preferences.js && node test/territory.js && node test/window-drag.js && node test/codex-watch.js && node test/codex-hooks.js && node test/startup-recovery.js && node test/codex-rate-limits.js && node test/codex-integration.js && node test/meme-actions.js && node test/i18n.js && node test/popup-style.js && node test/branding.js && node test/mac-release.js"
   },
   "devDependencies": {
     "@electron/notarize": "2.5.0",
@@ -45,7 +45,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
     }
   }
 }

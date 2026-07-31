@@ -25,6 +25,8 @@ assert(/codexRateLimitClient\.start\(\)/.test(main), 'main process must start th
 assert(/if \(codexWatch\) codexWatch\.stop\(\)/.test(main), 'app shutdown must stop the Codex watcher');
 assert(/data\.agent_id === 'codex' \? 'codex' : 'claude-code'/.test(server), 'Codex hook events must retain their agent identity');
 assert(/body\.event_source = 'codex-hook'/.test(hook), 'Codex hook events must identify their source for deduplication');
+assert(/recoverPackagedApp\(\{ hookDir: __dirname \}\)/.test(hook), 'a failed hook delivery must wake the packaged LLMPET app');
+assert(/ensureLoginStartup\(app\)/.test(main), 'the packaged app must keep its login startup registration current');
 assert(/function sendPetEvent\(ev\)/.test(main) && /ev\.agent === 'codex'/.test(main), 'Codex events must route to the Codex pet in duo mode');
 assert(/function createPetWindows\(\)/.test(main) && /makePetWindow\('codex'\)/.test(main), 'duo mode must create an independent Codex pet');
 assert(/petMode: 'single'/.test(config) && /skinCodex: 'cat'/.test(config), 'Codex pet settings must have safe defaults');
@@ -34,6 +36,7 @@ assert(/closePet: \(\) => ipcRenderer\.send\('close-pet'\)/.test(preload), 'a du
 assert(/Claude Code \/ Codex/.test(readme) && /Codex 后端/.test(readme), 'public documentation must describe Codex support');
 assert(pkg.scripts.test.includes('test/codex-watch.js'), 'npm test must execute Codex watcher tests');
 assert(pkg.scripts.test.includes('test/codex-hooks.js'), 'npm test must execute Codex hook tests');
+assert(pkg.scripts.test.includes('test/startup-recovery.js'), 'npm test must execute startup recovery tests');
 assert(pkg.scripts.test.includes('test/codex-rate-limits.js'), 'npm test must execute Codex rate-limit tests');
 assert(pkg.scripts.test.includes('test/codex-integration.js'), 'npm test must execute the Codex integration contract');
 

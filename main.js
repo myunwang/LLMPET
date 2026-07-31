@@ -37,6 +37,7 @@ const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const { beginDrag, nextDragBounds, resizePetBounds } = require('./backend/window-drag');
+const { ensureLoginStartup } = require('./backend/startup');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -1294,6 +1295,9 @@ if (!gotTheLock) {
   app.on('second-instance', () => { try { for (const st of petStates()) st.win.show(); } catch {} });
   app.whenReady().then(async () => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    try {
+      if (ensureLoginStartup(app)) log('main', 'login startup enabled');
+    } catch (e) { log('main', 'login startup unavailable:', e.message); }
     const rival = await findRivalInstance();
     if (rival) {
       log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
