@@ -37,11 +37,12 @@ function nextDragBounds(drag, cursorPoint) {
   return { x, y, width: drag.width, height: drag.height };
 }
 
-// Popups temporarily grow the transparent BrowserWindow around the pet. Keep
-// the visible pet anchored at the same screen-space center and bottom instead
-// of clamping the whole transparent rectangle into the work area: near the
-// right edge that clamp pulled the pet left on every status bubble.
-function resizePetBounds(windowBounds, intendedSize, workArea) {
+// Popups temporarily grow the transparent BrowserWindow around the pet. The
+// outer window must remain inside the display work area, while a renderer-side
+// content offset keeps the visible pet anchored at the same screen-space
+// center and bottom. Carrying the previous offset makes expand -> collapse
+// exactly reversible even when the expanded window was clamped at an edge.
+function resizePetLayout(windowBounds, intendedSize, workArea, contentOffset = { x: 0, y: 0 }) {
   if (
     !finitePoint(windowBounds)
     || !Number.isFinite(windowBounds.width)
@@ -53,22 +54,35 @@ function resizePetBounds(windowBounds, intendedSize, workArea) {
     throw new TypeError('window bounds and intended size must be finite');
   }
 
-  const width = Math.max(1, Math.round(intendedSize.width));
+  let width = Math.max(1, Math.round(intendedSize.width));
   let height = Math.max(1, Math.round(intendedSize.height));
-  const centerX = windowBounds.x + windowBounds.width / 2;
-  const bottom = windowBounds.y + windowBounds.height;
-  let y = Math.round(bottom - height);
+  const offsetX = Number.isFinite(contentOffset.x) ? contentOffset.x : 0;
+  const offsetY = Number.isFinite(contentOffset.y) ? contentOffset.y : 0;
+  const centerX = windowBounds.x + windowBounds.width / 2 + offsetX;
+  const bottom = windowBounds.y + windowBounds.height + offsetY;
 
-  if (
+  const validWorkArea = (
     workArea
     && finitePoint(workArea)
     && Number.isFinite(workArea.width)
     && Number.isFinite(workArea.height)
     && workArea.width > 0
     && workArea.height > 0
-  ) {
+  );
+  if (validWorkArea) {
+    width = Math.min(width, Math.round(workArea.width));
     height = Math.min(height, Math.round(workArea.height));
-    y = Math.round(bottom - height);
+  }
+
+  const idealX = Math.round(centerX - width / 2);
+  const idealY = Math.round(bottom - height);
+  let x = idealX;
+  let y = idealY;
+  if (validWorkArea) {
+    x = Math.min(
+      Math.max(x, Math.round(workArea.x)),
+      Math.round(workArea.x + workArea.width - width),
+    );
     y = Math.min(
       Math.max(y, Math.round(workArea.y)),
       Math.round(workArea.y + workArea.height - height),
@@ -76,11 +90,13 @@ function resizePetBounds(windowBounds, intendedSize, workArea) {
   }
 
   return {
-    x: Math.round(centerX - width / 2),
-    y,
-    width,
-    height,
+    bounds: { x, y, width, height },
+    contentOffset: { x: idealX - x, y: idealY - y },
   };
 }
 
-module.exports = { beginDrag, nextDragBounds, resizePetBounds };
+function resizePetBounds(windowBounds, intendedSize, workArea) {
+  return resizePetLayout(windowBounds, intendedSize, workArea).bounds;
+}
+
+module.exports = { beginDrag, nextDragBounds, resizePetLayout, resizePetBounds };

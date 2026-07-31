@@ -7,6 +7,14 @@ const AGENT = new URLSearchParams(location.search).get('agent') || 'all';
 const AGENT_LABEL = { claude: 'Claude', codex: 'Codex' }[AGENT] || '';
 
 const stage = document.getElementById('stage');
+if (window.pet && typeof window.pet.onContentOffset === 'function') {
+  window.pet.onContentOffset((offset = {}) => {
+    const x = Number.isFinite(offset.x) ? offset.x : 0;
+    const y = Number.isFinite(offset.y) ? offset.y : 0;
+    stage.style.setProperty('--pet-content-offset-x', `${x}px`);
+    stage.style.setProperty('--pet-content-offset-y', `${y}px`);
+  });
+}
 const pixel = document.getElementById('pixel');
 const mascot = document.getElementById('mascot');
 const mascotImg = document.getElementById('mascot-img');

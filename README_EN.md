@@ -130,6 +130,7 @@ Patrol mode is currently macOS-only.
 - Background network access is limited to the optional daily LiteLLM pricing download. A Travel Frog run contacts Anthropic or OpenAI only after you explicitly press **Depart**; `OCTOPUS_NO_NET=1` disables LLMPET's pricing fetch, but does not override a CLI trip you explicitly start.
 - Electron runs with `contextIsolation` enabled and `nodeIntegration` disabled.
 - Claude hook installation is merge-safe, atomic, reversible, and backed up before uninstall.
+- **Start at login and recover after crashes** is an explicit, persisted tray preference and is off by default. When enabled, a hook event that encounters a stopped app is queued locally and replayed after the recovered server starts listening. Choosing **Quit** suppresses hook recovery until the next explicit launch.
 
 ## Configuration and development flags
 

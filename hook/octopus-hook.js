@@ -14,7 +14,11 @@ const transport = require('../backend/transport');
 const transcript = require('../backend/transcript');
 const pidwalk = require('../backend/pidwalk');
 const { detectEmotion } = require('../backend/emotion');
-const { recoverPackagedApp } = require('../backend/startup');
+const { recoveryAllowed, recoverPackagedApp } = require('../backend/startup');
+const {
+  enqueueHookEvent,
+  removePendingHookEvent,
+} = require('../backend/hook-queue');
 
 const EVENT_STATE = {
   SessionStart: 'idle',
@@ -176,6 +180,60 @@ function buildBody(event, p, source = 'claude') {
   return body;
 }
 
+function deliverStateWithRecovery(body, options = {}) {
+  const postState = options.postState || transport.postState;
+  const canRecover = options.canRecover || (() => recoveryAllowed());
+  const enqueue = options.enqueue || ((eventBody) => enqueueHookEvent(eventBody));
+  const discard = options.discard || ((filePath) => removePendingHookEvent(filePath));
+  const recover = options.recover || (() => recoverPackagedApp({ hookDir: __dirname }));
+  const finish = typeof options.finish === 'function' ? options.finish : () => {};
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 250;
+  const setTimer = options.setTimer || setTimeout;
+  const clearTimer = options.clearTimer || clearTimeout;
+  let finished = false;
+  let delivered = false;
+  let queuedPath = null;
+  let timer = null;
+
+  const complete = (ok) => {
+    if (finished) return;
+    finished = true;
+    if (timer) clearTimer(timer);
+    finish(ok);
+  };
+  const queueAndRecover = () => {
+    if (delivered || !canRecover()) return false;
+    if (!queuedPath) queuedPath = enqueue(body);
+    if (!queuedPath) return false;
+    recover();
+    return true;
+  };
+
+  try {
+    postState(body, (ok) => {
+      if (ok === true) {
+        delivered = true;
+        if (queuedPath) discard(queuedPath);
+        complete(true);
+        return;
+      }
+      queueAndRecover();
+      complete(false);
+    });
+  } catch {
+    queueAndRecover();
+    complete(false);
+  }
+
+  if (!finished) {
+    timer = setTimer(() => {
+      queueAndRecover();
+      complete(false);
+    }, timeoutMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  }
+}
+
 function main() {
   const event = process.argv[2];
   const source = process.argv[3] === 'codex' ? 'codex' : 'claude';
@@ -195,24 +253,9 @@ function main() {
     let body;
     try { body = buildBody(event, payload || {}, source); } catch { body = null; }
     if (!body) return finish();
-    let delivered = false;
-    const recover = () => {
-      if (!delivered) recoverPackagedApp({ hookDir: __dirname });
-    };
-    transport.postState(body, (ok) => {
-      delivered = ok === true;
-      if (!delivered) recover();
-      finish();
-    });
-    setTimeout(() => {
-      // A stale runtime file can make transport exhaust several dead ports. Do
-      // not hold up Codex/Claude; wake the packaged app and let the next event
-      // arrive through the newly restored server.
-      recover();
-      finish();
-    }, 250); // never hang Claude Code
+    deliverStateWithRecovery(body, { finish });
   }).catch(finish);
 }
 
 if (require.main === module) main();
-module.exports = { buildBody, codexSuccessOutput, EVENT_STATE };
+module.exports = { buildBody, codexSuccessOutput, deliverStateWithRecovery, EVENT_STATE };

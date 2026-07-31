@@ -20,6 +20,10 @@ html, body {
   justify-content: flex-end;
 }
 
+.pet-anchor {
+  translate: var(--pet-content-offset-x, 0px) var(--pet-content-offset-y, 0px);
+}
+
 /* ---------- 选项面板（点选答案） ---------- */
 .ask {
   max-width: 290px;

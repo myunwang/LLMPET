@@ -117,7 +117,7 @@ function createStubWorld() {
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)
-  const handlers = { event: null, stats: null, config: null, meme: null, travel: null, memeCatalogChanged: null };
+  const handlers = { event: null, stats: null, config: null, meme: null, travel: null, contentOffset: null, memeCatalogChanged: null };
   const calls = []; // record of preload calls for assertions
 
   const pet = {
@@ -126,6 +126,7 @@ function createStubWorld() {
     onConfig: (cb) => { handlers.config = cb; },
     onMeme: (cb) => { handlers.meme = cb; },
     onTravel: (cb) => { handlers.travel = cb; },
+    onContentOffset: (cb) => { handlers.contentOffset = cb; },
     onMemeCatalogChanged: (cb) => { handlers.memeCatalogChanged = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
@@ -138,6 +139,9 @@ function createStubWorld() {
     cancelTravel: () => { calls.push(['cancelTravel']); return Promise.resolve({ ok: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
     setWinPos: (...a) => calls.push(['setWinPos', a]),
+    beginWinDrag: () => calls.push(['beginWinDrag']),
+    updateWinDrag: () => calls.push(['updateWinDrag']),
+    endWinDrag: () => calls.push(['endWinDrag']),
     setPetSize: (...a) => calls.push(['setPetSize', a]),
     setIgnoreMouse: (...a) => calls.push(['setIgnoreMouse', a]),
     setSkin: (...a) => calls.push(['setSkin', a]),

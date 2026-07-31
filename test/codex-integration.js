@@ -26,7 +26,8 @@ assert(/if \(codexWatch\) codexWatch\.stop\(\)/.test(main), 'app shutdown must s
 assert(/data\.agent_id === 'codex' \? 'codex' : 'claude-code'/.test(server), 'Codex hook events must retain their agent identity');
 assert(/body\.event_source = 'codex-hook'/.test(hook), 'Codex hook events must identify their source for deduplication');
 assert(/recoverPackagedApp\(\{ hookDir: __dirname \}\)/.test(hook), 'a failed hook delivery must wake the packaged LLMPET app');
-assert(/ensureLoginStartup\(app\)/.test(main), 'the packaged app must keep its login startup registration current');
+assert(/ensureLoginStartup\(app, \{ enabled \}\)/.test(main), 'the packaged app must honor the explicit login startup preference');
+assert(/startupRecovery: false/.test(config), 'login startup and hook recovery must be opt-in');
 assert(/function sendPetEvent\(ev\)/.test(main) && /ev\.agent === 'codex'/.test(main), 'Codex events must route to the Codex pet in duo mode');
 assert(/function createPetWindows\(\)/.test(main) && /makePetWindow\('codex'\)/.test(main), 'duo mode must create an independent Codex pet');
 assert(/petMode: 'single'/.test(config) && /skinCodex: 'cat'/.test(config), 'Codex pet settings must have safe defaults');

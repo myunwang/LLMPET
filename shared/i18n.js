@@ -46,6 +46,7 @@
     'tray.launchCodex': '🛰️ 唤起 Codex',
     'tray.openLog': '📄 打开日志',
     'tray.uninstallHook': '🧹 卸载 Claude 钩子',
+    'tray.startupRecovery': '　开机启动并在崩溃后恢复',
     'tray.quit': '⏻ 退出',
     'tray.budgetOff': '关闭',
 
@@ -439,6 +440,7 @@
     'tray.launchCodex': '🛰️ Launch Codex',
     'tray.openLog': '📄 Open log',
     'tray.uninstallHook': '🧹 Uninstall Claude hooks',
+    'tray.startupRecovery': '　Start at login and recover after crashes',
     'tray.quit': '⏻ Quit',
     'tray.budgetOff': 'Off',
 
@@ -815,6 +817,7 @@
     'tray.launchCodex': '🛰️ Codex を起動',
     'tray.openLog': '📄 ログを開く',
     'tray.uninstallHook': '🧹 Claude フックを削除',
+    'tray.startupRecovery': '　ログイン時に起動し、クラッシュ後に復旧',
     'tray.quit': '⏻ 終了',
     'tray.budgetOff': 'オフ',
 

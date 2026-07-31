@@ -1,9 +1,9 @@
 'use strict';
 
-// Keep the packaged desktop app available to the lightweight hook process.
-// Login startup covers machine restarts; hook recovery covers an app process
-// that was terminated after login. Recovery is deliberately rate-limited so a
-// burst of lifecycle events cannot create a burst of Electron processes.
+// When the user opts in, keep the packaged desktop app available to the
+// lightweight hook process. Login startup covers machine restarts; hook
+// recovery covers an unexpected process exit. Intentional Quit is persisted,
+// and recovery is rate-limited so event bursts cannot spawn process bursts.
 
 const childProcess = require('child_process');
 const fs = require('fs');
@@ -12,6 +12,8 @@ const path = require('path');
 
 const RECOVERY_COOLDOWN_MS = 30_000;
 const RECOVERY_STAMP_PATH = path.join(os.homedir(), '.octopus', 'hook-recovery.json');
+const CONFIG_PATH = path.join(os.homedir(), '.octopus', 'config.json');
+const INTENTIONAL_QUIT_PATH = path.join(os.homedir(), '.octopus', 'intentional-quit.json');
 
 function recoveryExecutable(hookDir, platform = process.platform) {
   if (!hookDir) return null;
@@ -27,13 +29,52 @@ function ensureLoginStartup(electronApp, options = {}) {
   const executable = options.executable || process.execPath;
   if (!electronApp || !electronApp.isPackaged || !['win32', 'darwin'].includes(platform)) return false;
 
-  const settings = { openAtLogin: true };
+  const settings = { openAtLogin: options.enabled === true };
   if (platform === 'win32') {
     settings.path = executable;
     settings.args = ['--autostart'];
   }
   electronApp.setLoginItemSettings(settings);
   return true;
+}
+
+function startupRecoveryEnabled(options = {}) {
+  if (typeof options.enabled === 'boolean') return options.enabled;
+  const configPath = options.configPath || CONFIG_PATH;
+  const readFileSync = options.readFileSync || fs.readFileSync;
+  try {
+    const saved = JSON.parse(readFileSync(configPath, 'utf8'));
+    return saved && saved.startupRecovery === true;
+  } catch {
+    return false;
+  }
+}
+
+function recoveryAllowed(options = {}) {
+  if (!startupRecoveryEnabled(options)) return false;
+  const quitPath = options.quitPath || INTENTIONAL_QUIT_PATH;
+  const existsSync = options.existsSync || fs.existsSync;
+  try { return !existsSync(quitPath); } catch { return false; }
+}
+
+function recordIntentionalQuit(options = {}) {
+  const quitPath = options.quitPath || INTENTIONAL_QUIT_PATH;
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  try {
+    fs.mkdirSync(path.dirname(quitPath), { recursive: true });
+    const tempPath = `${quitPath}.${process.pid}.${now}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ at: now }), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tempPath, quitPath);
+    try { fs.chmodSync(quitPath, 0o600); } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearIntentionalQuit(options = {}) {
+  const quitPath = options.quitPath || INTENTIONAL_QUIT_PATH;
+  try { fs.unlinkSync(quitPath); return true; } catch { return false; }
 }
 
 function recoverPackagedApp(options = {}) {
@@ -48,6 +89,7 @@ function recoverPackagedApp(options = {}) {
   const writeFileSync = options.writeFileSync || fs.writeFileSync;
   const spawn = options.spawn || childProcess.spawn;
 
+  if (!recoveryAllowed({ ...options, existsSync })) return false;
   if (!executable || !existsSync(executable)) return false;
 
   try {
@@ -72,7 +114,13 @@ function recoverPackagedApp(options = {}) {
 
 module.exports = {
   RECOVERY_COOLDOWN_MS,
+  CONFIG_PATH,
+  INTENTIONAL_QUIT_PATH,
   recoveryExecutable,
   ensureLoginStartup,
+  startupRecoveryEnabled,
+  recoveryAllowed,
+  recordIntentionalQuit,
+  clearIntentionalQuit,
   recoverPackagedApp,
 };

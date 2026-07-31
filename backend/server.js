@@ -153,6 +153,7 @@ function createServer(deps) {
   const core = deps.core;
   const permissions = deps.permissions;
   const shouldDropForDnd = typeof deps.shouldDropForDnd === 'function' ? deps.shouldDropForDnd : () => false;
+  const onListening = typeof deps.onListening === 'function' ? deps.onListening : null;
 
   let server = null;
   let activePort = null;
@@ -327,6 +328,11 @@ function createServer(deps) {
       writeRuntimeConfig(activePort, activeToken);
       log('server', `listening on 127.0.0.1:${activePort}`);
       startRuntimeGuard();
+      if (onListening) {
+        try { onListening({ port: activePort, token: activeToken }); } catch (err) {
+          log('server', 'onListening callback failed:', err.message);
+        }
+      }
     });
 
     server.listen(ports[idx], '127.0.0.1');

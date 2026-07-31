@@ -36,8 +36,13 @@ const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
-const { beginDrag, nextDragBounds, resizePetBounds } = require('./backend/window-drag');
-const { ensureLoginStartup } = require('./backend/startup');
+const { beginDrag, nextDragBounds, resizePetLayout } = require('./backend/window-drag');
+const {
+  ensureLoginStartup,
+  recordIntentionalQuit,
+  clearIntentionalQuit,
+} = require('./backend/startup');
+const { drainPendingHookEvents } = require('./backend/hook-queue');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -87,6 +92,10 @@ const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.v
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
 let statsTimer = null;
+let hookDrainTimer = null;
+let hookDrainPollTimer = null;
+let hookDrainActive = false;
+let appQuitting = false;
 let emitDebounce = null;
 const recentOps = []; // ring for the panel "操作流"; newest first, capped
 
@@ -110,6 +119,7 @@ function frontendConfig(agent = 'all') {
     lang: c.lang,
     pinnedSessions: c.pinnedSessions,
     archivedSessions: c.archivedSessions,
+    startupRecovery: c.startupRecovery,
   };
 }
 
@@ -130,16 +140,18 @@ function applyPetSize(st) {
   const win = st.win;
   const { w, h } = targetSize(st);
   const b = win.getBounds();
-  // Cap the window to the screen's work area so a tall popup can NEVER push the
-  // pet / footer buttons off-screen — the popup scrolls internally instead.
-  // Do not horizontally clamp the transparent outer window: preserving its
-  // center is what keeps a manually positioned pet still when a bubble widens.
+  let layout;
+  // Keep the outer window visible; compensate only the pet visual layer so its
+  // dragged screen-space anchor remains unchanged at display edges.
   try {
     const wa = screen.getDisplayMatching(b).workArea;
-    win.setBounds(resizePetBounds(b, { width: w, height: h }, wa));
+    layout = resizePetLayout(b, { width: w, height: h }, wa, st.contentOffset);
   } catch {
-    win.setBounds(resizePetBounds(b, { width: w, height: h }));
+    layout = resizePetLayout(b, { width: w, height: h }, null, st.contentOffset);
   }
+  win.setBounds(layout.bounds);
+  st.contentOffset = layout.contentOffset;
+  sendWin(win, 'pet:content-offset', st.contentOffset);
 }
 
 // 双宠开关：single 一只宠盯全部后端；duo Claude/Codex 各一只（形象/位置独立）
@@ -193,7 +205,7 @@ function makePetWindow(agent) {
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
   const st = {
     agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true,
-    drag: null, resizeAfterDrag: false,
+    drag: null, resizeAfterDrag: false, contentOffset: { x: 0, y: 0 },
   };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
@@ -217,6 +229,7 @@ function makePetWindow(agent) {
   });
   win.webContents.on('did-finish-load', () => {
     sendWin(win, 'pet:config', frontendConfig(st.agent));
+    sendWin(win, 'pet:content-offset', st.contentOffset);
     if (core) sendWin(win, 'pet:stats', buildStats(st.agent));
   });
   return win;
@@ -615,6 +628,20 @@ function startMemeWatcher() {
 }
 
 // ── backend wiring ────────────────────────────────────────────────────────────
+function schedulePendingHookDrain(delayMs = 0) {
+  if (appQuitting || hookDrainTimer || hookDrainActive) return;
+  hookDrainTimer = setTimeout(() => {
+    hookDrainTimer = null;
+    hookDrainActive = true;
+    drainPendingHookEvents({ postState: transport.postState }, (result) => {
+      hookDrainActive = false;
+      if (result.delivered) log('main', `replayed ${result.delivered} pending hook event(s)`);
+      if (result.remaining > 0) schedulePendingHookDrain(1000);
+    });
+  }, Math.max(0, delayMs));
+  if (hookDrainTimer.unref) hookDrainTimer.unref();
+}
+
 function bootBackend() {
   core = createCore({
     onActivity: (act) => {
@@ -753,8 +780,13 @@ function bootBackend() {
     core,
     permissions,
     shouldDropForDnd: () => false,
+    onListening: () => schedulePendingHookDrain(),
   });
   server.start();
+  hookDrainPollTimer = setInterval(() => {
+    if (server && server.getPort()) schedulePendingHookDrain();
+  }, 5000);
+  if (hookDrainPollTimer.unref) hookDrainPollTimer.unref();
 
   // Install hooks once the server has a port (defer so listen wins the race).
   // OCTOPUS_NO_HOOKS=1 skips touching Claude and Codex hook config (dev/verify mode).
@@ -864,7 +896,7 @@ function registerIpc() {
   ipcMain.on('territory-run-now', runTerritoryNow);
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
-  ipcMain.on('quit-app', () => app.quit());
+  ipcMain.on('quit-app', quitAppIntentionally);
   // 双宠模式：收起自己这只（独立事件——另一只和 app 都不受影响）；
   // 托盘「显示桌宠」或勾选「Codex 桌宠」随时找回来。
   ipcMain.on('close-pet', (e) => {
@@ -1123,6 +1155,7 @@ function ensurePetWindows() {
     if (st && st.agent !== primaryAgent) {
       st.agent = primaryAgent;
       st.customSize = null; st.visualRect = null; st.uiBusy = false; st.mouseIgnoring = true;
+      st.contentOffset = { x: 0, y: 0 };
       petWin.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent: primaryAgent } });
       applyPetSize(st);
     }
@@ -1150,6 +1183,25 @@ function applyBudget(v) {
   config.save({ budget5h: Number(v) || 0 });
   broadcastConfig();
   refreshTrayMenu();
+}
+
+function applyStartupRecovery(on) {
+  const enabled = on === true;
+  config.save({ startupRecovery: enabled });
+  if (enabled) clearIntentionalQuit();
+  try {
+    ensureLoginStartup(app, { enabled });
+  } catch (e) {
+    log('main', 'login startup unavailable:', e.message);
+  }
+  broadcastConfig();
+  refreshTrayMenu();
+  log('main', `startup recovery ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+function quitAppIntentionally() {
+  recordIntentionalQuit();
+  app.quit();
 }
 
 // Language switch (tray → Settings → Language). Main-process copy is baked into
@@ -1202,6 +1254,8 @@ function refreshTrayMenu() {
     { label: t('tray.language'), submenu: i18n.LANGS.map((code) => ({
       label: t('lang.' + code), type: 'radio', checked: lang === code, click: () => applyLang(code),
     })) },
+    { label: t('tray.startupRecovery'), type: 'checkbox', checked: cfg.startupRecovery === true,
+      click: () => applyStartupRecovery(config.get().startupRecovery !== true) },
     { label: petMode === 'duo' ? t('tray.skinClaude') : t('tray.skin'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
       { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
@@ -1246,7 +1300,7 @@ function refreshTrayMenu() {
       try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
       hooks.uninstall();
     } },
-    { label: t('tray.quit'), click: () => app.quit() },
+    { label: t('tray.quit'), click: quitAppIntentionally },
   ]));
 }
 
@@ -1295,8 +1349,10 @@ if (!gotTheLock) {
   app.on('second-instance', () => { try { for (const st of petStates()) st.win.show(); } catch {} });
   app.whenReady().then(async () => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    if (!process.argv.includes('--hook-recovery')) clearIntentionalQuit();
     try {
-      if (ensureLoginStartup(app)) log('main', 'login startup enabled');
+      const enabled = config.get().startupRecovery === true;
+      if (ensureLoginStartup(app, { enabled })) log('main', `login startup ${enabled ? 'enabled' : 'disabled'}`);
     } catch (e) { log('main', 'login startup unavailable:', e.message); }
     const rival = await findRivalInstance();
     if (rival) {
@@ -1322,6 +1378,9 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
+  appQuitting = true;
+  try { if (hookDrainTimer) { clearTimeout(hookDrainTimer); hookDrainTimer = null; } } catch {}
+  try { if (hookDrainPollTimer) { clearInterval(hookDrainPollTimer); hookDrainPollTimer = null; } } catch {}
   try { if (territory) territory.stop(); } catch {}
   try { if (travelManager) travelManager.shutdown(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
