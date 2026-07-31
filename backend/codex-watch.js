@@ -21,8 +21,9 @@
 //   *_approval_request / request_user_input → Notification → 「等你回复」
 //   token_count              → setContextUsage(上下文%) + 全局 rate_limits(5h 窗口)
 //
-// 过滤：thread_source === 'subagent'（guardian / auto-review 等内部线程）整个
-// 文件跳过——它们不是用户会话，会把会话列表刷成审计日志。
+// 子代理：不单独显示，但也不能整文件跳过。Codex 的 subagent rollout 把父
+// session_id 写在 meta 里；它们的活动聚合到父会话，否则父线程等待子代理时会
+// 被误报 idle。多个子代理并行时，任一仍活跃就保持 juggling。
 //
 // 大文件安全：rollout 可达十几 MB。启动 backfill 只探头部(session_meta 必在第
 // 一行)和尾部若干 KB 静默入库（不回放历史、不触发欢迎/庆祝）；此后每轮 poll 只
@@ -245,8 +246,32 @@ function createCodexWatch(deps) {
     return f;
   }
 
+  function rememberSourceState(t, state, event, extra, at = Date.now()) {
+    // core 会把真实 Stop 存成 idle；tracker 也保存稳态，供启动聚合和子代理
+    // 结束后的父状态恢复使用。
+    t.sourceState = event === 'Stop' ? 'idle' : state;
+    t.sourceEvent = event || null;
+    t.sourceStateAt = Number.isFinite(at) ? at : Date.now();
+    if (extra && extra.toolName) t.sourceTool = extra.toolName;
+  }
+
+  function activeSubagentCount(sid) {
+    let n = 0;
+    for (const other of trackers.values()) {
+      if (other.isSubagent && other.sid === sid && other.turnActive) n++;
+    }
+    return n;
+  }
+
   function update(t, state, event, extra) {
-    core.updateSession(t.sid, state, event, { ...baseFields(t), ...extra });
+    rememberSourceState(t, state, event, extra);
+    // 子代理内部的 thinking/tool/reasoning 都代表父会话正在调度子任务。沿用
+    // 原事件名保留工具标签，但聚合态必须保持 juggling。
+    const aggregatedState = t.isSubagent && t.turnActive
+      && state !== 'notification' && state !== 'error'
+      ? 'juggling'
+      : state;
+    core.updateSession(t.sid, aggregatedState, event, { ...baseFields(t), ...extra });
   }
 
   function beginTurn(t) {
@@ -264,6 +289,16 @@ function createCodexWatch(deps) {
     return t.didWorkThisTurn ? 'working' : 'thinking';
   }
 
+  function finishSubagent(t) {
+    t.turnActive = false;
+    t.didWorkThisTurn = false;
+    t.lastAgentMessage = null;
+    const stillActive = activeSubagentCount(t.sid) > 0;
+    const state = stillActive ? 'juggling' : 'working';
+    rememberSourceState(t, state, 'SubagentStop');
+    core.updateSession(t.sid, state, 'SubagentStop', baseFields(t));
+  }
+
   // ── 逐行事件处理（仅 live 流量；backfill 不走这里） ─────────────────────────
   function handleLine(t, obj) {
     const type = obj.type;
@@ -271,12 +306,11 @@ function createCodexWatch(deps) {
 
     if (type === 'session_meta') {
       applyMeta(t, p);
-      if (t.ignored) return;
+      if (t.isSubagent) return; // 子代理不是一条独立 UI 会话
       // 运行期间新出现的会话：SessionStart 进欢迎判定（真正的欢迎等首条 prompt）
       update(t, 'idle', 'SessionStart', { sessionSource: 'startup' });
       return;
     }
-    if (t.ignored) return;
 
     if (type === 'turn_context') {
       if (typeof p.cwd === 'string' && p.cwd) t.cwd = p.cwd;
@@ -315,6 +349,10 @@ function createCodexWatch(deps) {
     switch (et) {
       case 'user_message': {
         beginTurn(t);
+        if (t.isSubagent) {
+          update(t, 'juggling', 'SubagentStart');
+          break;
+        }
         const msg = typeof p.message === 'string' ? p.message : '';
         const extra = {};
         if (!t.titleSet) {
@@ -328,13 +366,17 @@ function createCodexWatch(deps) {
       }
       case 'task_started':
         beginTurn(t);
-        update(t, 'thinking', 'TaskStarted');
+        update(t, t.isSubagent ? 'juggling' : 'thinking', t.isSubagent ? 'SubagentStart' : 'TaskStarted');
         break;
       case 'agent_message':
         // 兜底记住最后一条正文（task_complete 通常自带 last_agent_message）
         if (typeof p.message === 'string' && p.message) t.lastAgentMessage = p.message;
         break;
       case 'task_complete': {
+        if (t.isSubagent) {
+          finishSubagent(t);
+          break;
+        }
         const text = clipAssistant(
           typeof p.last_agent_message === 'string' && p.last_agent_message
             ? p.last_agent_message
@@ -353,6 +395,10 @@ function createCodexWatch(deps) {
         break;
       }
       case 'turn_aborted':
+        if (t.isSubagent) {
+          finishSubagent(t);
+          break;
+        }
         update(t, 'idle', 'TurnAborted');
         t.turnActive = false;
         t.didWorkThisTurn = false;
@@ -384,8 +430,10 @@ function createCodexWatch(deps) {
         update(t, activeTurnState(t), 'Reasoning');
         break;
       case 'token_count': {
-        const cu = toContextUsage(p.info);
-        if (cu) core.setContextUsage(t.sid, cu);
+        if (!t.isSubagent) {
+          const cu = toContextUsage(p.info);
+          if (cu) core.setContextUsage(t.sid, cu);
+        }
         const rl = toRateLimits(p.rate_limits);
         if (rl) { rateLimits = rl; onRateLimits(rl); }
         break;
@@ -405,14 +453,18 @@ function createCodexWatch(deps) {
 
   function applyMeta(t, meta) {
     t.sawMeta = true;
-    t.sid = fileSessionId(t.fp, meta.id || meta.session_id);
+    const src = meta.source;
+    t.isSubagent = meta.thread_source === 'subagent'
+      || !!(src && typeof src === 'object' && src.subagent);
+    t.sourceSid = fileSessionId(t.fp, meta.id);
+    // 官方 Codex hook 约定：subagent 使用父 session_id。rollout 同样携带这个
+    // 逻辑父 ID；以它聚合，绝不能用子 rollout 自己的 id 建 UI 会话。
+    const logicalId = t.isSubagent
+      ? (meta.session_id || meta.parent_thread_id || meta.id)
+      : (meta.session_id || meta.id);
+    t.sid = fileSessionId(t.fp, logicalId);
     if (typeof meta.cwd === 'string' && meta.cwd) t.cwd = meta.cwd;
     if (typeof meta.originator === 'string') t.originator = meta.originator;
-    // guardian / auto-review 等内部子线程：整个文件不是用户会话
-    const src = meta.source;
-    if (meta.thread_source === 'subagent' || (src && typeof src === 'object' && src.subagent)) {
-      t.ignored = true;
-    }
   }
 
   function hydrateMeta(t) {
@@ -424,12 +476,141 @@ function createCodexWatch(deps) {
     if (!t.sid) t.sid = fileSessionId(t.fp, null);
   }
 
-  // ── 启动 backfill：头部读 meta、尾部读近况，静默入库 ─────────────────────────
+  function eventAt(obj, fallback) {
+    const ts = Date.parse(obj && obj.timestamp);
+    return Number.isFinite(ts) ? ts : fallback;
+  }
+
+  // 启动时只更新 tracker 本地状态，不向 core 回放事件。这样既能恢复 Working，
+  // 又不会在重启时补放欢迎、庆祝和气泡。
+  function observeBackfillLine(t, obj, fallbackAt) {
+    const p = obj.payload || {};
+    const at = eventAt(obj, fallbackAt);
+    let state = null;
+    let event = null;
+    let extra = null;
+
+    if (obj.type === 'turn_context') {
+      if (typeof p.cwd === 'string' && p.cwd) t.cwd = p.cwd;
+      if (typeof p.model === 'string' && p.model) t.model = p.model;
+      return;
+    }
+    if (obj.type === 'compacted') {
+      state = 'sweeping'; event = 'PreCompact';
+    } else if (obj.type === 'response_item') {
+      const pt = p.type;
+      if (pt === 'function_call' || pt === 'custom_tool_call') {
+        markWork(t);
+        t.lastTool = mapTool(p.name);
+        state = 'working'; event = 'PreToolUse'; extra = { toolName: t.lastTool };
+      } else if (pt === 'web_search_call') {
+        markWork(t);
+        t.lastTool = 'WebSearch';
+        state = 'working'; event = 'PreToolUse'; extra = { toolName: 'WebSearch' };
+      } else if (pt === 'function_call_output' || pt === 'custom_tool_call_output') {
+        markWork(t);
+        state = 'working'; event = 'PostToolUse'; extra = { toolName: t.lastTool || null };
+      } else if (pt === 'reasoning') {
+        if (!t.turnActive) beginTurn(t);
+        state = activeTurnState(t); event = 'Reasoning';
+      }
+    } else if (obj.type === 'event_msg') {
+      switch (p.type) {
+        case 'user_message':
+        case 'task_started':
+          beginTurn(t);
+          state = 'thinking';
+          event = p.type === 'user_message' ? 'UserPromptSubmit' : 'TaskStarted';
+          break;
+        case 'task_complete':
+          t.turnActive = false;
+          t.didWorkThisTurn = false;
+          state = 'idle'; event = 'Stop';
+          break;
+        case 'turn_aborted':
+          t.turnActive = false;
+          t.didWorkThisTurn = false;
+          state = 'idle'; event = 'TurnAborted';
+          break;
+        case 'context_compacted':
+          state = 'sweeping'; event = 'PreCompact';
+          break;
+        case 'patch_apply_end':
+          markWork(t);
+          state = p.success === false ? 'error' : 'working';
+          event = p.success === false ? 'PostToolUseFailure' : 'PostToolUse';
+          extra = { toolName: 'Edit' };
+          break;
+        case 'mcp_tool_call_end':
+          markWork(t);
+          state = 'working'; event = 'PostToolUse';
+          extra = { toolName: (p.invocation && p.invocation.tool) ? String(p.invocation.tool) : 'Tool' };
+          break;
+        case 'web_search_end':
+          markWork(t);
+          state = 'working'; event = 'PostToolUse'; extra = { toolName: 'WebSearch' };
+          break;
+        case 'agent_reasoning':
+          if (!t.turnActive) beginTurn(t);
+          state = activeTurnState(t); event = 'Reasoning';
+          break;
+        case 'error':
+        case 'stream_error':
+          state = 'error'; event = 'ApiError';
+          break;
+        default:
+          if (/approval_request$/.test(p.type) || p.type === 'request_user_input' || p.type === 'elicitation_request') {
+            state = 'notification'; event = 'Notification';
+          }
+          break;
+      }
+    }
+    if (state) rememberSourceState(t, state, event, extra, at);
+  }
+
+  function seedBackfill(candidates) {
+    const groups = new Map();
+    for (const candidate of candidates) {
+      if (!groups.has(candidate.t.sid)) groups.set(candidate.t.sid, []);
+      groups.get(candidate.t.sid).push(candidate);
+    }
+    const newer = (a, b) => ((a && a.stateAt) || 0) - ((b && b.stateAt) || 0);
+    for (const [sid, group] of groups) {
+      const roots = group.filter((c) => !c.t.isSubagent);
+      const children = group.filter((c) => c.t.isSubagent);
+      const root = roots.sort(newer).at(-1) || null;
+      const rootTerminalAt = root && (root.t.sourceEvent === 'Stop' || root.t.sourceEvent === 'TurnAborted')
+        ? root.stateAt
+        : 0;
+      const activeChildren = children.filter((c) => c.t.turnActive && c.stateAt > rootTerminalAt);
+      const activeChild = activeChildren.sort(newer).at(-1) || null;
+      const chosen = activeChild || root || group.sort(newer).at(-1);
+      const identity = root || chosen;
+      const titled = roots.filter((c) => c.seed.sessionTitle).sort(newer).at(-1);
+      const contextual = roots.filter((c) => c.seed.contextUsage).sort(newer).at(-1);
+      const state = activeChild ? 'juggling' : (chosen.seed.state || 'idle');
+      const lastEvent = activeChild
+        ? { rawEvent: 'SubagentStart', at: activeChild.stateAt }
+        : chosen.seed.lastEvent;
+      core.seedSession({
+        ...identity.seed,
+        id: sid,
+        state,
+        sessionTitle: titled ? titled.seed.sessionTitle : identity.seed.sessionTitle,
+        contextUsage: contextual ? contextual.seed.contextUsage : identity.seed.contextUsage,
+        lastEvent,
+        lastEventTool: activeChild ? activeChild.seed.lastEventTool : chosen.seed.lastEventTool,
+        createdAt: Math.min(...group.map((c) => c.seed.createdAt)),
+        updatedAt: chosen.stateAt,
+      });
+    }
+  }
+
+  // ── 启动 backfill：头部读 meta、尾部读近况，静默聚合入库 ──────────────────────
   function backfill(t, size, mtimeMs) {
     hydrateMeta(t);
     t.offset = size; // 历史不回放，此后只吃新增
     cursors.set(t.fp, { offset: size, carry: '' });
-    if (t.ignored) return;
     if (Date.now() - mtimeMs > BACKFILL_MAX_AGE_MS) return; // 太久没动的不上列表
 
     let title = null;
@@ -441,31 +622,39 @@ function createCodexWatch(deps) {
       if (start > 0) lines.shift(); // 掐头（可能是半行）
       for (const line of lines) {
         const obj = parseLine(line);
-        if (!obj || obj.type !== 'event_msg') continue;
+        if (!obj) continue;
+        observeBackfillLine(t, obj, mtimeMs);
+        if (obj.type !== 'event_msg') continue;
         const p = obj.payload || {};
-        if (p.type === 'user_message' && !title) title = promptTitle(String(p.message || ''));
+        if (!t.isSubagent && p.type === 'user_message' && !title) title = promptTitle(String(p.message || ''));
         if (p.type === 'token_count') {
-          const cu = toContextUsage(p.info);
-          if (cu) contextUsage = cu;
+          if (!t.isSubagent) {
+            const cu = toContextUsage(p.info);
+            if (cu) contextUsage = cu;
+          }
           const rl = toRateLimits(p.rate_limits);
           if (rl && (!rateLimits || rl.ts >= rateLimits.ts)) { rateLimits = rl; onRateLimits(rl); }
         }
       }
     }
-    core.seedSession({
+    const stateAt = t.sourceStateAt || mtimeMs;
+    t.titleSet = !!title;
+    return { t, stateAt, seed: {
       id: t.sid,
       agentId: 'codex',
+      state: t.sourceState || 'idle',
       cwd: t.cwd || '',
       transcriptPath: t.fp,
       sessionTitle: title,
       contextUsage,
+      lastEvent: t.sourceEvent ? { rawEvent: t.sourceEvent, at: stateAt } : null,
+      lastEventTool: t.sourceTool || null,
       originator: t.originator || null,
       sourcePid: null,
       headless: false,
       createdAt: mtimeMs,
-      updatedAt: mtimeMs,
-    });
-    t.titleSet = !!title;
+      updatedAt: stateAt,
+    } };
   }
 
   // ── 增量泵：读新增字节 → 攒整行 → handleLine ────────────────────────────────
@@ -490,8 +679,9 @@ function createCodexWatch(deps) {
   function newTracker(fp, cursor) {
     return {
       fp, sid: null, offset: cursor ? cursor.offset : 0, carry: cursor ? cursor.carry : '',
-      ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null,
+      isSubagent: false, sourceSid: null, sawMeta: false, cwd: null, model: null, lastTool: null,
       lastAgentMessage: null, titleSet: false, turnActive: false, didWorkThisTurn: false,
+      sourceState: null, sourceEvent: null, sourceStateAt: 0, sourceTool: null,
     };
   }
 
@@ -520,6 +710,7 @@ function createCodexWatch(deps) {
       return;
     }
     // ① 发现新文件 → 建 tracker（启动第一轮走静默 backfill，之后按新会话走事件流）
+    const initialSeeds = [];
     for (const { fp, size, mtimeMs } of found) {
       if (trackers.has(fp)) continue;
       if (now - mtimeMs > IDLE_UNTRACK_MS) continue; // 陈年文件不建 tracker
@@ -527,7 +718,8 @@ function createCodexWatch(deps) {
       const t = newTracker(fp, prior);
       trackers.set(fp, t);
       if (!booted) {
-        backfill(t, size, mtimeMs);
+        const candidate = backfill(t, size, mtimeMs);
+        if (candidate) initialSeeds.push(candidate);
       } else if (prior) {
         // 旧/暂停会话恢复：meta 只用于恢复身份，不派发 SessionStart；随后只泵增量。
         hydrateMeta(t);
@@ -537,6 +729,7 @@ function createCodexWatch(deps) {
         log('codex', `new rollout: ${path.basename(fp)}`);
       }
     }
+    if (!booted) seedBackfill(initialSeeds);
     // ② 泵所有已跟踪文件——直接 stat，不依赖本轮扫描列表：旧日期目录里的
     // 长寿会话只在全量扫描轮被「发现」，但每一轮都要跟进它的新增内容。
     for (const [fp, t] of trackers) {
@@ -547,12 +740,6 @@ function createCodexWatch(deps) {
         trackers.delete(fp);
         continue;
       } // 凉了，退场但保留游标
-      if (t.ignored && t.sawMeta) {
-        t.offset = e.size;
-        t.carry = '';
-        cursors.set(fp, { offset: t.offset, carry: '' });
-        continue;
-      } // subagent：光标跟上即可
       pump(t, e.size);
     }
     booted = true;

@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -10,7 +11,7 @@ const {
   codexHooksCurrent,
   CODEX_EVENTS,
 } = require('../backend/codex-hookinstall');
-const { buildBody } = require('../hook/octopus-hook');
+const { buildBody, codexSuccessOutput } = require('../hook/octopus-hook');
 const { createCore } = require('../backend/core');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-codex-hooks-'));
@@ -72,6 +73,27 @@ const stop = buildBody('Stop', {
   last_assistant_message: 'Implemented and tested.',
 }, 'codex');
 assert.strictEqual(stop.assistant_last_output, 'Implemented and tested.');
+assert.deepStrictEqual(codexSuccessOutput('Stop', 'codex'), { continue: true });
+assert.deepStrictEqual(codexSuccessOutput('SubagentStop', 'codex'), { continue: true });
+assert.strictEqual(codexSuccessOutput('Stop', 'claude'), null);
+
+const stopProcess = childProcess.spawnSync(
+  process.execPath,
+  [path.join(__dirname, '..', 'hook', 'octopus-hook.js'), 'Stop', 'codex'],
+  {
+    input: JSON.stringify({
+      session_id: 'codex-stop-output',
+      hook_event_name: 'Stop',
+      last_assistant_message: 'Done.',
+    }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: tmp, USERPROFILE: tmp },
+    timeout: 3000,
+  }
+);
+assert.strictEqual(stopProcess.status, 0, stopProcess.stderr);
+assert.deepStrictEqual(JSON.parse(stopProcess.stdout), { continue: true },
+  'Codex Stop hooks must print valid JSON on stdout');
 
 const permission = buildBody('PermissionRequest', { session_id: 'codex-session' }, 'codex');
 assert.strictEqual(permission.state, 'notification');

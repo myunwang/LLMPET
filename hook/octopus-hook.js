@@ -54,6 +54,14 @@ function readStdin() {
 
 function count(v) { return Array.isArray(v) ? v.length : 0; }
 
+// Codex requires Stop and SubagentStop hooks that exit successfully to return
+// a JSON object on stdout. Other events (and Claude Code) should stay silent.
+function codexSuccessOutput(event, source) {
+  return source === 'codex' && (event === 'Stop' || event === 'SubagentStop')
+    ? { continue: true }
+    : null;
+}
+
 function buildBody(event, p, source = 'claude') {
   let state = EVENT_STATE[event];
   if (!state) return null;
@@ -171,14 +179,25 @@ function main() {
   const event = process.argv[2];
   const source = process.argv[3] === 'codex' ? 'codex' : 'claude';
   if (!EVENT_STATE[event]) process.exit(0);
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    const output = codexSuccessOutput(event, source);
+    if (output) {
+      process.stdout.write(`${JSON.stringify(output)}\n`, () => process.exit(0));
+      return;
+    }
+    process.exit(0);
+  };
   readStdin().then((payload) => {
     let body;
     try { body = buildBody(event, payload || {}, source); } catch { body = null; }
-    if (!body) process.exit(0);
-    transport.postState(body, () => process.exit(0));
-    setTimeout(() => process.exit(0), 250); // never hang Claude Code
-  }).catch(() => process.exit(0));
+    if (!body) return finish();
+    transport.postState(body, finish);
+    setTimeout(finish, 250); // never hang Claude Code
+  }).catch(finish);
 }
 
 if (require.main === module) main();
-module.exports = { buildBody, EVENT_STATE };
+module.exports = { buildBody, codexSuccessOutput, EVENT_STATE };
