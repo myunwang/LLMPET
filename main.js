@@ -36,7 +36,7 @@ const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
-const { beginDrag, nextDragBounds } = require('./backend/window-drag');
+const { beginDrag, nextDragBounds, resizePetBounds } = require('./backend/window-drag');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -127,24 +127,17 @@ function applyPetSize(st) {
   if (!st || !st.win || st.win.isDestroyed()) return;
   if (st.drag) { st.resizeAfterDrag = true; return; }
   const win = st.win;
-  const { w } = targetSize(st);
-  let { h } = targetSize(st);
+  const { w, h } = targetSize(st);
   const b = win.getBounds();
   // Cap the window to the screen's work area so a tall popup can NEVER push the
   // pet / footer buttons off-screen — the popup scrolls internally instead.
+  // Do not horizontally clamp the transparent outer window: preserving its
+  // center is what keeps a manually positioned pet still when a bubble widens.
   try {
     const wa = screen.getDisplayMatching(b).workArea;
-    h = Math.min(h, wa.height);
-    const cx = b.x + b.width / 2;
-    const bottom = b.y + b.height;
-    let x = Math.round(cx - w / 2);
-    let y = Math.round(bottom - h);
-    x = Math.min(Math.max(x, wa.x), wa.x + wa.width - w);
-    y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
-    win.setBounds({ x, y, width: w, height: h });
+    win.setBounds(resizePetBounds(b, { width: w, height: h }, wa));
   } catch {
-    const bottom = b.y + b.height;
-    win.setBounds({ x: b.x, y: Math.round(bottom - h), width: w, height: h });
+    win.setBounds(resizePetBounds(b, { width: w, height: h }));
   }
 }
 

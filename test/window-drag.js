@@ -3,7 +3,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { beginDrag, nextDragBounds } = require('../backend/window-drag');
+const { beginDrag, nextDragBounds, resizePetBounds } = require('../backend/window-drag');
 
 const drag = beginDrag(
   { x: -400, y: -38, width: 323, height: 344 },
@@ -25,6 +25,32 @@ assert.deepStrictEqual(
   nextDragBounds(drag, { x: -289, y: 135 }),
   { x: -389, y: -23, width: 320, height: 340 },
   'the intended logical size must not recycle fractionally rounded getBounds dimensions',
+);
+
+const restingBounds = { x: 1576, y: 676, width: 320, height: 340 };
+const expandedBounds = resizePetBounds(
+  restingBounds,
+  { width: 520, height: 520 },
+  { x: 0, y: 0, width: 1920, height: 1040 },
+);
+assert.deepStrictEqual(
+  expandedBounds,
+  { x: 1476, y: 496, width: 520, height: 520 },
+  'expanding a popup near the right edge must keep the dragged pet center and feet fixed',
+);
+assert.strictEqual(
+  expandedBounds.x + expandedBounds.width / 2,
+  restingBounds.x + restingBounds.width / 2,
+  'popup expansion must not pull the pet left to fit the transparent window on-screen',
+);
+assert.deepStrictEqual(
+  resizePetBounds(
+    expandedBounds,
+    { width: 320, height: 340 },
+    { x: 0, y: 0, width: 1920, height: 1040 },
+  ),
+  restingBounds,
+  'closing the popup must restore the exact dragged resting bounds',
 );
 
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'pet.js'), 'utf8');

@@ -37,4 +37,50 @@ function nextDragBounds(drag, cursorPoint) {
   return { x, y, width: drag.width, height: drag.height };
 }
 
-module.exports = { beginDrag, nextDragBounds };
+// Popups temporarily grow the transparent BrowserWindow around the pet. Keep
+// the visible pet anchored at the same screen-space center and bottom instead
+// of clamping the whole transparent rectangle into the work area: near the
+// right edge that clamp pulled the pet left on every status bubble.
+function resizePetBounds(windowBounds, intendedSize, workArea) {
+  if (
+    !finitePoint(windowBounds)
+    || !Number.isFinite(windowBounds.width)
+    || !Number.isFinite(windowBounds.height)
+    || !intendedSize
+    || !Number.isFinite(intendedSize.width)
+    || !Number.isFinite(intendedSize.height)
+  ) {
+    throw new TypeError('window bounds and intended size must be finite');
+  }
+
+  const width = Math.max(1, Math.round(intendedSize.width));
+  let height = Math.max(1, Math.round(intendedSize.height));
+  const centerX = windowBounds.x + windowBounds.width / 2;
+  const bottom = windowBounds.y + windowBounds.height;
+  let y = Math.round(bottom - height);
+
+  if (
+    workArea
+    && finitePoint(workArea)
+    && Number.isFinite(workArea.width)
+    && Number.isFinite(workArea.height)
+    && workArea.width > 0
+    && workArea.height > 0
+  ) {
+    height = Math.min(height, Math.round(workArea.height));
+    y = Math.round(bottom - height);
+    y = Math.min(
+      Math.max(y, Math.round(workArea.y)),
+      Math.round(workArea.y + workArea.height - height),
+    );
+  }
+
+  return {
+    x: Math.round(centerX - width / 2),
+    y,
+    width,
+    height,
+  };
+}
+
+module.exports = { beginDrag, nextDragBounds, resizePetBounds };
