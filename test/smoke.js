@@ -100,12 +100,24 @@ async function main() {
   });
 
   console.log('\n[2] session lifecycle via /state');
-  r = await post('/state', { state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x' });
+  r = await post('/state', {
+    state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x',
+    wt_session: '977e6134-10f1-4487-b153-e6845b21716f',
+  });
   check('SessionStart accepted', () => { assert.strictEqual(r.status, 200); assert.strictEqual(r.headers['x-octopus-server'], 'octopus'); });
+  check('WT_SESSION is validated and retained', () => {
+    assert.strictEqual(core.getSession(SID).wtSession, '977e6134-10f1-4487-b153-e6845b21716f');
+  });
 
-  r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });
+  r = await post('/state', {
+    state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x',
+    wt_session: 'not-a-guid',
+  });
   check('greet emitted on first prompt（欢迎延迟到首条输入）', () => assert(events.some((e) => e.kind === 'greet')));
   check('session is thinking', () => assert.strictEqual(core.getSession(SID).state, 'thinking'));
+  check('invalid WT_SESSION cannot clobber the prior route', () => {
+    assert.strictEqual(core.getSession(SID).wtSession, '977e6134-10f1-4487-b153-e6845b21716f');
+  });
 
   r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });
   check('user-turn event emitted（第二条起）', () => assert(events.some((e) => e.kind === 'user-turn')));

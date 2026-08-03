@@ -729,6 +729,9 @@ body.skin-cat #cat { display: flex; }
   padding: 9px 10px; border-radius: 11px; cursor: pointer;
 }
 .sl-row:hover { background: rgba(255, 255, 255, 0.07); }
+.sl-row.busy { opacity: 0.62; cursor: wait; }
+.sl-row.focus-error { background: rgba(255, 90, 82, 0.09); }
+.sl-row.focus-error .sl-meta { color: #ff7b73; font-weight: 600; }
 .sl-row.travel-session {
   background: linear-gradient(90deg, rgba(125, 102, 199, 0.12), rgba(217, 119, 87, 0.05));
   border: 1px solid rgba(153, 128, 226, 0.16);

@@ -145,6 +145,7 @@ function buildBody(event, p) {
       if (r.tmuxClient) body.tmux_client = r.tmuxClient;
       if (r.terminalApp) body.terminal_app = r.terminalApp;
       if (r.terminalTty) body.terminal_tty = r.terminalTty;
+      if (r.wtSession) body.wt_session = r.wtSession;
       body.headless = r.headless === true; // background `claude -p` runs
     } catch {}
   }

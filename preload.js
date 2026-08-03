@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('pet', {
   // 原生授权：通过本地 HTTP server 回 CC 决策（allow/deny），不需按键/Accessibility
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
-  focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
+  focusSession: (sessionId) => ipcRenderer.invoke('focus-session', sessionId),
   getMemeCatalog: () => ipcRenderer.invoke('meme-catalog'),
   triggerMeme: (sessionId, memeId) => ipcRenderer.invoke('meme-trigger', sessionId, memeId),
   getTravel: () => ipcRenderer.invoke('travel-get'),

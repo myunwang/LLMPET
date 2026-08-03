@@ -54,6 +54,13 @@ const HEADLESS_RE = /\s(-p|--print)(\s|$)/;
 
 const WIN_CACHE = path.join(os.homedir(), '.octopus', 'pidwalk-cache.json');
 const WIN_CACHE_TTL = 6 * 60 * 60 * 1000;
+const WT_SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeWtSession(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/^\{([^}]+)\}$/, '$1').toLowerCase();
+  return WT_SESSION_RE.test(normalized) ? normalized : null;
+}
 
 function winCacheRead(key) {
   try {
@@ -106,15 +113,17 @@ function winBase(name) {
 }
 
 function resolveWin(startPid, maxDepth, cacheKey) {
+  const wtSession = normalizeWtSession(process.env.WT_SESSION);
   const empty = {
     sourcePid: startPid || null, pidChain: startPid ? [startPid] : [], editor: null,
     headless: false, tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
+    wtSession,
   };
   if (!startPid) return empty;
   // The hook's ppid is a transient PowerShell wrapper (different every event),
   // so the cache is keyed by the Claude Code session id instead.
   const cached = cacheKey ? winCacheRead(cacheKey) : null;
-  if (cached) return cached;
+  if (cached) return { ...cached, wtSession };
 
   let levels;
   try { levels = winWalkChain(startPid, maxDepth); } catch { return empty; }
@@ -143,7 +152,7 @@ function resolveWin(startPid, maxDepth, cacheKey) {
   }
   const result = {
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
-    tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
+    tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null, wtSession,
   };
   if (cacheKey) winCacheWrite(cacheKey, result);
   return result;
@@ -192,8 +201,8 @@ function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
   const terminalTty = ttyRaw && ttyRaw !== '?' ? ttyRaw : null;
   return {
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
-    tmuxSocket, tmuxClient, terminalApp, terminalTty,
+    tmuxSocket, tmuxClient, terminalApp, terminalTty, wtSession: null,
   };
 }
 
-module.exports = { resolve };
+module.exports = { resolve, normalizeWtSession };

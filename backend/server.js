@@ -40,6 +40,11 @@ function normHwnd(v) {
   if (!/^[1-9]\d{0,18}$/.test(t)) return null;
   try { return BigInt(t) <= 9223372036854775807n ? t : null; } catch { return null; }
 }
+function normWtSession(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().replace(/^\{([^}]+)\}$/, '$1').toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t) ? t : null;
+}
 function normTmuxSocket(v) {
   if (typeof v !== 'string') return null;
   const t = v.trim();
@@ -202,6 +207,7 @@ function createServer(deps) {
         editor: data.editor === 'code' || data.editor === 'cursor' ? data.editor : null,
         sourcePid: normNum(data.source_pid),
         wtHwnd: normHwnd(data.wt_hwnd ?? data.wtHwnd),
+        wtSession: normWtSession(data.wt_session ?? data.wtSession),
         pidChain: Array.isArray(data.pid_chain) ? data.pid_chain.filter((n) => Number.isFinite(n) && n > 0) : null,
         tmuxSocket: normTmuxSocket(data.tmux_socket),
         tmuxClient: normTmuxClient(data.tmux_client),

@@ -420,6 +420,51 @@ async function main() {
     });
   }
 
+  console.log('\n[R20] 会话点击等待聚焦结果，失败保留列表并可重试');
+  {
+    const w = world();
+    let focusCalls = 0;
+    let resolveFocus;
+    w.window.pet.focusSession = () => {
+      focusCalls++;
+      return new Promise((resolve) => { resolveFocus = resolve; });
+    };
+    w.handlers.stats(baseStats({
+      sessions: [{ sessionId: 'focus-success', agent: 'codex', project: '终端跳转', state: 'idle', headless: false }],
+    }));
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', { button: 0, pointerId: 1, screenX: 0, screenY: 0 });
+    cat.dispatch('pointerup', { pointerId: 1 });
+    const row = w.elements('sl-rows').children[0];
+    row.dispatch('click');
+    row.dispatch('click');
+    check('聚焦期间同一会话只发出一次请求', () => {
+      assert.strictEqual(focusCalls, 1);
+      assert(row.classList.contains('busy'));
+      assert(!w.elements('sesslist').classList.contains('hidden'));
+    });
+    resolveFocus({ ok: true, route: 'windows-terminal-tab' });
+    await sleep(10);
+    check('成功后关闭会话列表', () => assert(w.elements('sesslist').classList.contains('hidden')));
+
+    const failed = world();
+    failed.window.pet.focusSession = async () => ({ ok: false, route: 'failed', reason: 'cli-not-found' });
+    failed.handlers.stats(baseStats({
+      sessions: [{ sessionId: 'focus-failed', agent: 'claude', project: '恢复失败', state: 'idle', headless: false }],
+    }));
+    const failedCat = failed.elements('cat');
+    failedCat.dispatch('pointerdown', { button: 0, pointerId: 1, screenX: 0, screenY: 0 });
+    failedCat.dispatch('pointerup', { pointerId: 1 });
+    const failedRow = failed.elements('sl-rows').children[0];
+    failedRow.dispatch('click');
+    await sleep(10);
+    check('彻底失败时列表保留并显示本地化错误', () => {
+      assert(!failed.elements('sesslist').classList.contains('hidden'));
+      assert(failedRow.classList.contains('focus-error'));
+      assert(failedRow.querySelector('.sl-meta').textContent.includes('Claude/Codex CLI'));
+    });
+  }
+
   console.log(`\n${failures === 0 ? '✅ RENDERER ALL PASS' : '❌ ' + failures + ' FAILURE(S)'}`);
   process.exit(failures === 0 ? 0 : 1);
 }

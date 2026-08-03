@@ -195,6 +195,11 @@
     'sess.unpin': '取消置顶',
     'sess.archive': '归档',
     'sess.unarchive': '移出归档',
+    'sess.focusing': '正在跳转到终端…',
+    'sess.focusFailed': '没找到对应标签，点击重试',
+    'sess.focusInvalid': '会话已失效，无法恢复',
+    'sess.focusCliMissing': '未找到对应的 Claude/Codex CLI',
+    'sess.focusLaunchFailed': 'Windows Terminal 启动失败，点击重试',
 
     // ── meme picker ─────────────────────────────────────────────────────────
     'meme.entry': '🎭 表情包',
@@ -573,6 +578,11 @@
     'sess.unpin': 'Unpin',
     'sess.archive': 'Archive',
     'sess.unarchive': 'Unarchive',
+    'sess.focusing': 'Switching to terminal…',
+    'sess.focusFailed': 'Could not find that tab — click to retry',
+    'sess.focusInvalid': 'This session can no longer be resumed',
+    'sess.focusCliMissing': 'The matching Claude/Codex CLI was not found',
+    'sess.focusLaunchFailed': 'Windows Terminal failed to open — click to retry',
 
     'meme.entry': '🎭 Meme',
     'meme.entryTitle': 'Send a meme to this session',
@@ -943,6 +953,11 @@
     'sess.unpin': 'ピン留めを解除',
     'sess.archive': 'アーカイブ',
     'sess.unarchive': 'アーカイブ解除',
+    'sess.focusing': 'ターミナルへ移動中…',
+    'sess.focusFailed': 'タブが見つかりません。クリックして再試行',
+    'sess.focusInvalid': 'このセッションは再開できません',
+    'sess.focusCliMissing': '対応する Claude/Codex CLI が見つかりません',
+    'sess.focusLaunchFailed': 'Windows Terminal を開けません。クリックして再試行',
 
     'meme.entry': '🎭 ミーム',
     'meme.entryTitle': 'このセッションにミームを送る',

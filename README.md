@@ -111,12 +111,12 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
-- 钩子在 Windows 下经 PowerShell 运行；「去回复」通过 user32 把会话所在的终端窗口（Windows Terminal / cmd / VS Code 等）带到前台，Windows Terminal 多标签场景只能聚焦到窗口级别。
+- 钩子在 Windows 下经 PowerShell 运行；点击会话时，Windows Terminal 会通过短暂且自动恢复的标题标记定位到对应标签页。旧会话先按 PID 聚焦窗口；标签已关闭或无法精确定位时，会在最近使用的 Terminal 窗口新建标签并恢复对应 Claude / Codex 会话。
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
-- **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
+- **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档。Windows Terminal 下点某行只会跳到对应的现有标签；找不到时提示重试，不会启动替代终端。偏好写入 `~/.octopus/config.json`。
 - 会话右侧的 **🧳** = 打开青蛙旅行：让对应 agent 在该项目中执行一次独立、只读探索，回来后展示明信片并累计成长 token。
 - 会话面板底部的 **🐱 闲逛** = 打开可见 CLI，不带项目、不带任务和工具，让猫猫自己随便想想、聊聊。
 - **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
@@ -202,7 +202,7 @@ test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗�
 | **钩子残留** | 退出后钩子仍在，Claude Code 每个事件会 spawn 一次钩子（连不上 server，100ms 超时） | 影响极小；托盘可一键卸载 |
 | **定价与账单差异** | LiteLLM 公价或内置回退价可能晚于厂商变化；订阅套餐也不按 API 公价结算 | 面板明确标为 API 公价折算；显示价格表时间 / 估算模型，可覆盖价格并重算 |
 | **读 transcript** | 读取本机 `~/.claude` 下的会话记录 | 仅本地、仅 token 计数，不外传、不读正文 |
-| **focusSession** | 「去回复」在 macOS / Windows 生效 | Linux 需原生 helper，暂未实现；Windows 上 SetForegroundWindow 受系统前台锁限制，辅以 SwitchToThisWindow 兜底 |
+| **focusSession** | 「去回复」在 macOS / Windows 生效 | Windows Terminal 通过临时标题 + UI Automation 精确选择标签，失败时恢复到新标签；Linux 需原生 helper，暂未实现 |
 | **本地历史边界** | 删除 / 截断 transcript 或 rollout 后，本地台账无法代表账号完整历史 | 诊断区显示扫描状态；Claude 可从现存 transcript 重建，Codex 明确标为“本机留存历史” |
 | **表情包素材权利** | 部分用户提供的媒体尚无可核验授权链 | `catalog.json` 强制记录 `provenance`；未核清一律标 `unverified` / 禁止宣称可商用，规范见 `assets/memes/README.md` |
 

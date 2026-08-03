@@ -136,6 +136,7 @@ function createCore(options = {}) {
     setField(s, 'terminalApp', f.terminalApp);
     setField(s, 'terminalTty', f.terminalTty);
     setField(s, 'wtHwnd', f.wtHwnd);
+    setField(s, 'wtSession', f.wtSession);
     setField(s, 'ghosttyTerminalId', f.ghosttyTerminalId);
     setField(s, 'originator', f.originator);
     setField(s, 'model', f.model);
@@ -302,6 +303,7 @@ function createCore(options = {}) {
       terminalApp: s.terminalApp || null,
       terminalTty: s.terminalTty || null,
       wtHwnd: s.wtHwnd || null,
+      wtSession: s.wtSession || null,
       ghosttyTerminalId: s.ghosttyTerminalId || null,
     };
   }
