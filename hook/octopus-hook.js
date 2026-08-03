@@ -148,6 +148,7 @@ function buildBody(event, p) {
       if (r.terminalApp) body.terminal_app = r.terminalApp;
       if (r.terminalTty) body.terminal_tty = r.terminalTty;
       if (r.wtSession) body.wt_session = r.wtSession;
+      if (r.wtProcessId) body.wt_process_id = r.wtProcessId;
       if (r.wtHwnd) body.wt_hwnd = r.wtHwnd;
       if (r.wtTabRuntimeId) body.wt_tab_runtime_id = r.wtTabRuntimeId;
       body.headless = r.headless === true; // background `claude -p` runs

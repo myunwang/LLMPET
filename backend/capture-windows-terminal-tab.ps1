@@ -1,10 +1,16 @@
 param(
-  [int]$TimeoutMs = 900
+  [int]$TimeoutMs = 900,
+
+  [int]$ExpectedProcessId = 0
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $TimeoutMs = [Math]::Max(250, [Math]::Min(2000, $TimeoutMs))
+if ($ExpectedProcessId -le 0) {
+  Write-Output '{"ok":false,"reason":"session-correlation-required","hwnd":"","runtimeId":[]}'
+  exit 2
+}
 
 function Write-LlmpetResult {
   param(
@@ -55,6 +61,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $terminalProcess = Get-Process -Id $windowElement.Current.ProcessId -ErrorAction SilentlyContinue
     if (-not $terminalProcess -or $terminalProcess.ProcessName -ne 'WindowsTerminal') {
       $result.reason = 'foreground-not-terminal'
+      Start-Sleep -Milliseconds 30
+      continue
+    }
+    if ($terminalProcess.Id -ne $ExpectedProcessId) {
+      $result.reason = 'foreground-session-mismatch'
       Start-Sleep -Milliseconds 30
       continue
     }

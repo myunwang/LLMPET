@@ -64,6 +64,10 @@ npm run package:win      # Windows インストーラー + ZIP
 npm run uninstall:hooks  # LLMPET の Claude hook を安全に削除
 ```
 
+Windows では、前面ウィンドウの PID、hook のプロセス祖先にある Windows Terminal の PID、そのセッションの `WT_SESSION` が一致した場合だけタブルートをキャッシュします。後から動くバックグラウンドの tool event が、別の選択中タブで上書きすることはありません。通常のタブ移動に昇格は不要です。管理者として開いた Terminal の移動はトレイで明示的に有効化でき、実際の LLMPET ユーザー用に Limited 権限のログオンタスクを登録します。UAC は有効化時またはログオン時だけで、セッションをクリックするたびには表示されず、インストーラーを強制的に端末全体向けに変更しません。
+
+`powershell -ExecutionPolicy Bypass -File scripts/validate-windows-terminal-focus.ps1` を実行すると、タスク登録、broker 再接続、ルート相関の JSONL 証跡を生成できます。`-WindowHandle`、`-RuntimeId`、`-ExpectedProcessId` を指定すれば、実在するタブへの厳密な移動も再現できます。
+
 ## 連携の仕組み
 
 ### Claude Code

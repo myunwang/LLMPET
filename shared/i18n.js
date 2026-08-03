@@ -42,9 +42,13 @@
     'tray.launchClaude': '🚀 唤起 Claude',
     'tray.launchCodex': '🛰️ 唤起 Codex',
     'tray.openLog': '📄 打开日志',
+    'tray.terminalFocusBroker': '　🪟 高权限终端标签跳转（启用及登录时需授权）',
     'tray.uninstallHook': '🧹 卸载 Claude 钩子',
     'tray.quit': '⏻ 退出',
     'tray.budgetOff': '关闭',
+    'broker.configTitle': '终端跳转助手',
+    'broker.enableFailed': '没能启用终端跳转助手；请查看日志后重试。',
+    'broker.disableFailed': '没能停用终端跳转助手；请查看日志后重试。',
 
     'skin.mascot': '章鱼',
     'skin.pixel': '像素怪兽',
@@ -199,6 +203,7 @@
     'sess.focusFailed': '没能切换到该标签，点击重试',
     'sess.focusInvalid': '该终端标签已关闭或失效',
     'sess.focusRouteMissing': '还没有标签定位信息；在该会话活动后重试',
+    'sess.focusBrokerUnavailable': '终端跳转助手未启用；请在托盘设置中开启',
 
     // ── meme picker ─────────────────────────────────────────────────────────
     'meme.entry': '🎭 表情包',
@@ -433,9 +438,13 @@
     'tray.launchClaude': '🚀 Launch Claude',
     'tray.launchCodex': '🛰️ Launch Codex',
     'tray.openLog': '📄 Open log',
+    'tray.terminalFocusBroker': '　🪟 Elevated terminal tab focus (approval at setup/login)',
     'tray.uninstallHook': '🧹 Uninstall Claude hooks',
     'tray.quit': '⏻ Quit',
     'tray.budgetOff': 'Off',
+    'broker.configTitle': 'Terminal focus helper',
+    'broker.enableFailed': 'Could not enable the terminal focus helper. Check the log and retry.',
+    'broker.disableFailed': 'Could not disable the terminal focus helper. Check the log and retry.',
 
     'skin.mascot': 'Octopus',
     'skin.pixel': 'Pixel monster',
@@ -581,6 +590,7 @@
     'sess.focusFailed': 'Could not switch to that tab — click to retry',
     'sess.focusInvalid': 'That terminal tab is closed or no longer available',
     'sess.focusRouteMissing': 'No tab location yet — retry after activity in that session',
+    'sess.focusBrokerUnavailable': 'The terminal focus helper is disabled — enable it from the tray settings',
 
     'meme.entry': '🎭 Meme',
     'meme.entryTitle': 'Send a meme to this session',
@@ -807,9 +817,13 @@
     'tray.launchClaude': '🚀 Claude を起動',
     'tray.launchCodex': '🛰️ Codex を起動',
     'tray.openLog': '📄 ログを開く',
+    'tray.terminalFocusBroker': '　🪟 管理者ターミナルのタブ移動（有効化・ログイン時に承認）',
     'tray.uninstallHook': '🧹 Claude フックを削除',
     'tray.quit': '⏻ 終了',
     'tray.budgetOff': 'オフ',
+    'broker.configTitle': 'ターミナル移動ヘルパー',
+    'broker.enableFailed': 'ターミナル移動ヘルパーを有効にできませんでした。ログを確認して再試行してください。',
+    'broker.disableFailed': 'ターミナル移動ヘルパーを無効にできませんでした。ログを確認して再試行してください。',
 
     'skin.mascot': 'タコ',
     'skin.pixel': 'ドット怪獣',
@@ -955,6 +969,7 @@
     'sess.focusFailed': 'そのタブへ移動できません。クリックして再試行',
     'sess.focusInvalid': 'そのターミナルタブは閉じられたか無効です',
     'sess.focusRouteMissing': 'タブ位置が未取得です。そのセッションで操作した後に再試行してください',
+    'sess.focusBrokerUnavailable': 'ターミナル移動ヘルパーが無効です。トレイ設定から有効にしてください',
 
     'meme.entry': '🎭 ミーム',
     'meme.entryTitle': 'このセッションにミームを送る',

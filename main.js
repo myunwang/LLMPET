@@ -26,7 +26,8 @@ const { createPermissions } = require('./backend/permission');
 const { createServer } = require('./backend/server');
 const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
-const { focusSession, focusSessionTarget } = require('./backend/focus');
+const { focusSession, focusSessionTarget, shutdownTerminalFocusBroker } = require('./backend/focus');
+const { configureTerminalFocusBroker } = require('./backend/terminal-focus-broker-control');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
@@ -1127,6 +1128,23 @@ function applyLang(lang) {
   log('main', `lang → ${lang}`);
 }
 
+async function applyTerminalFocusBroker(enabled) {
+  if (process.platform !== 'win32') return;
+  try {
+    if (!enabled) {
+      try { await shutdownTerminalFocusBroker(); } catch {}
+    }
+    const result = await configureTerminalFocusBroker(enabled);
+    if (!result || result.ok !== true) throw new Error(result && result.reason || 'broker-config-failed');
+    config.save({ terminalFocusBrokerEnabled: enabled });
+    log('focus', `optional terminal focus broker ${enabled ? 'enabled' : 'disabled'} task=${result.taskName || '-'}`);
+  } catch (error) {
+    log('focus', `terminal focus broker configuration failed: ${error.message}`);
+    dialog.showErrorBox(t('broker.configTitle'), enabled ? t('broker.enableFailed') : t('broker.disableFailed'));
+  }
+  refreshTrayMenu();
+}
+
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
   let img;
@@ -1185,6 +1203,12 @@ function refreshTrayMenu() {
       { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
       { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
+    ...(process.platform === 'win32' ? [{
+      label: t('tray.terminalFocusBroker'),
+      type: 'checkbox',
+      checked: cfg.terminalFocusBrokerEnabled === true,
+      click: (item) => { applyTerminalFocusBroker(item.checked).catch(() => {}); },
+    }] : []),
     ...(process.platform === 'darwin' ? [
       { label: t('tray.patrol'), type: 'checkbox', checked: !!cfg.territory,
         click: () => applyTerritory(!config.get().territory) },

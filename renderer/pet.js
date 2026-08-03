@@ -892,6 +892,9 @@ function focusFailureText(reason) {
     return t('sess.focusInvalid');
   }
   if (reason === 'route-missing') return t('sess.focusRouteMissing');
+  if (reason === 'broker-unavailable' || reason === 'broker-timeout') {
+    return t('sess.focusBrokerUnavailable');
+  }
   return t('sess.focusFailed');
 }
 

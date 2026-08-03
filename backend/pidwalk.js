@@ -63,6 +63,13 @@ function normalizeWtSession(value) {
   return WT_SESSION_RE.test(normalized) ? normalized : null;
 }
 
+function normalizeWindowsPid(value) {
+  const text = String(value == null ? '' : value).trim();
+  if (!/^[1-9]\d{0,9}$/.test(text)) return null;
+  const result = Number(text);
+  return Number.isSafeInteger(result) && result <= 0xffffffff ? result : null;
+}
+
 function normalizeWtHwnd(value) {
   const text = String(value == null ? '' : value).trim();
   if (!/^[1-9]\d{0,18}$/.test(text)) return null;
@@ -84,6 +91,10 @@ function captureWindowsTerminalTabRoute(options = {}) {
   const execFileSyncFn = options.execFileSync || execFileSync;
   const helperPath = options.helperPath || WT_TAB_CAPTURE_HELPER;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 900;
+  const expectedProcessId = normalizeWindowsPid(options.expectedProcessId);
+  // The selected tab is meaningful only when the foreground Terminal window
+  // belongs to the WindowsTerminal process found in this hook's parent chain.
+  if (!expectedProcessId) return null;
   try {
     const output = execFileSyncFn('powershell.exe', [
       '-NoProfile',
@@ -91,6 +102,7 @@ function captureWindowsTerminalTabRoute(options = {}) {
       '-ExecutionPolicy', 'Bypass',
       '-File', helperPath,
       '-TimeoutMs', String(timeoutMs),
+      '-ExpectedProcessId', String(expectedProcessId),
     ], {
       encoding: 'utf8',
       timeout: timeoutMs + 1500,
@@ -113,16 +125,17 @@ function captureWindowsTerminalTabRoute(options = {}) {
 
 function enrichWindowsTabRoute(base, options = {}) {
   const wtSession = normalizeWtSession(options.wtSession);
+  const expectedProcessId = normalizeWindowsPid(options.expectedProcessId);
   const refresh = options.refresh === true;
   const now = Number.isFinite(options.now) ? options.now : Date.now();
   // Foreground selection is authoritative only while the user starts a session
   // or submits a prompt. Tool hooks can run much later while another Terminal
   // tab is foreground, so they must only reuse a route and never capture one.
-  if (!wtSession || !refresh) {
+  if (!wtSession || !refresh || !expectedProcessId) {
     return { result: base, changed: false };
   }
   const capture = options.capture || captureWindowsTerminalTabRoute;
-  const route = capture();
+  const route = capture({ expectedProcessId });
   return {
     result: { ...base, ...(route || {}), wtTabCaptureAttemptedAt: now },
     changed: true,
@@ -148,6 +161,7 @@ function winCacheRead(key) {
     const hit = all && all[String(key)];
     if (!hit || Date.now() - hit.at > WIN_CACHE_TTL) return null;
     if (hit.result && hit.result.sourcePid && !windowsProcessExists(hit.result.sourcePid)) return null;
+    if (hit.result && hit.result.wtProcessId && !windowsProcessExists(hit.result.wtProcessId)) return null;
     return hit.result;
   } catch {
     return null;
@@ -165,10 +179,11 @@ function readCachedWindowsTerminalTabRoute(cacheKey, options = {}) {
   let cached;
   try { cached = readCache(cacheKey); } catch { return null; }
   const wtSession = normalizeWtSession(cached && cached.wtSession);
+  const wtProcessId = normalizeWindowsPid(cached && cached.wtProcessId);
   const wtHwnd = normalizeWtHwnd(cached && cached.wtHwnd);
   const wtTabRuntimeId = normalizeWtTabRuntimeId(cached && cached.wtTabRuntimeId);
-  return wtSession && wtHwnd && wtTabRuntimeId
-    ? { wtSession, wtHwnd, wtTabRuntimeId }
+  return wtSession && wtProcessId && wtHwnd && wtTabRuntimeId
+    ? { wtSession, wtProcessId, wtHwnd, wtTabRuntimeId }
     : null;
 }
 
@@ -215,7 +230,7 @@ function resolveWin(startPid, maxDepth, cacheKey, options = {}) {
   const empty = {
     sourcePid: startPid || null, pidChain: startPid ? [startPid] : [], editor: null,
     headless: false, tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
-    wtSession, wtHwnd: null, wtTabRuntimeId: null,
+    wtSession, wtProcessId: null, wtHwnd: null, wtTabRuntimeId: null,
   };
   if (!startPid) return empty;
   const captureTab = options.captureWindowsTab || captureWindowsTerminalTabRoute;
@@ -224,11 +239,13 @@ function resolveWin(startPid, maxDepth, cacheKey, options = {}) {
     wtSession,
     refresh: refreshTab,
     capture: captureTab,
+    expectedProcessId: base.wtProcessId,
   });
   // The hook's ppid is a transient PowerShell wrapper (different every event),
   // so the cache is keyed by the Claude Code session id instead.
   let cached = cacheKey ? winCacheRead(cacheKey) : null;
   if (cached && wtSession && cached.wtSession !== wtSession) cached = null;
+  if (cached && !normalizeWindowsPid(cached.wtProcessId)) cached = null;
   if (cached) {
     const enriched = enrichTabRoute({ ...cached, wtSession });
     const result = enriched.result;
@@ -250,6 +267,7 @@ function resolveWin(startPid, maxDepth, cacheKey, options = {}) {
 
   const chain = [];
   let terminalPid = null;
+  let windowsTerminalPid = null;
   let lastGood = null;
   let editor = null;
   let headless = false;
@@ -267,12 +285,13 @@ function resolveWin(startPid, maxDepth, cacheKey, options = {}) {
     // Level 0 is our own transient hook shell wrapper (hookinstall runs the
     // hook via powershell) — never treat it as the user's terminal.
     if (TERMINALS.has(base) && !(i === 0 && HOOK_SHELLS.has(base))) terminalPid = pid; // keep walking: WindowsTerminal sits above cmd/pwsh
+    if (base === 'windowsterminal') windowsTerminalPid = pid;
     lastGood = pid;
   }
   const result = enrichTabRoute({
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
     tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null, wtSession,
-    wtHwnd: null, wtTabRuntimeId: null,
+    wtProcessId: windowsTerminalPid, wtHwnd: null, wtTabRuntimeId: null,
   }).result;
   if (cacheKey) winCacheWrite(cacheKey, result);
   return result;
@@ -322,13 +341,14 @@ function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null, option
   return {
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
     tmuxSocket, tmuxClient, terminalApp, terminalTty, wtSession: null,
-    wtHwnd: null, wtTabRuntimeId: null,
+    wtProcessId: null, wtHwnd: null, wtTabRuntimeId: null,
   };
 }
 
 module.exports = {
   resolve,
   normalizeWtSession,
+  normalizeWindowsPid,
   normalizeWtHwnd,
   normalizeWtTabRuntimeId,
   hasWtTabRoute,

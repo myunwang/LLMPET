@@ -212,6 +212,7 @@ function createServer(deps) {
         cwd: typeof data.cwd === 'string' ? data.cwd : null,
         editor: data.editor === 'code' || data.editor === 'cursor' ? data.editor : null,
         sourcePid: normNum(data.source_pid),
+        wtProcessId: normNum(data.wt_process_id ?? data.wtProcessId),
         wtHwnd: normHwnd(data.wt_hwnd ?? data.wtHwnd),
         wtSession: normWtSession(data.wt_session ?? data.wtSession),
         wtTabRuntimeId: normWtTabRuntimeId(data.wt_tab_runtime_id ?? data.wtTabRuntimeId),

@@ -112,8 +112,11 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
 - 钩子在 Windows 下经 PowerShell 运行；开始会话或提交消息时会记录前台 Windows Terminal 中当前选中的标签身份。点击会话只选择这个已经存在的标签；标签已关闭或暂时没有定位信息时保留菜单并提示重试，绝不会新建终端。
+- 标签身份只有在前台窗口 PID、钩子进程链中的 Windows Terminal PID 和该会话的 `WT_SESSION` 一致时才会写入缓存，切到其他标签后运行的后台工具事件不会覆盖它。
+- 普通 Windows Terminal 标签无需管理员权限。若终端本身以管理员身份运行，可在托盘中显式开启“高权限终端标签跳转”；它不修改安装器范围，启用时会为当前 LLMPET 用户注册 Limited 权限的登录任务，并仅在启用/登录时请求 UAC，点击会话不会再次弹出授权。
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
+- Windows 聚焦验证：`powershell -ExecutionPolicy Bypass -File scripts/validate-windows-terminal-focus.ps1`，输出计划任务、断线重连和标签关联的 JSONL 证据；传入 `-WindowHandle`、`-RuntimeId`、`-ExpectedProcessId` 可复现真实标签聚焦。
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
 - **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档。Windows Terminal 下点某行只会跳到对应的现有标签；找不到时提示重试，不会启动新终端。偏好写入 `~/.octopus/config.json`。

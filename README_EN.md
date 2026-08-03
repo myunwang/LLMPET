@@ -64,6 +64,10 @@ npm run package:win      # Windows installer + portable ZIP
 npm run uninstall:hooks  # remove LLMPET's Claude hooks safely
 ```
 
+On Windows, a tab route is cached only when the foreground window PID matches the Windows Terminal PID in the hook's process ancestry and the hook supplies that session's `WT_SESSION`. Later background tool events cannot replace it with whichever tab is currently selected. Normal tabs need no elevation. Focusing an elevated Terminal is an explicit opt-in tray setting: it registers a Limited logon task for the actual LLMPET user, requests UAC only when enabled or at logon, and never prompts on a session click. It does not force a per-machine installer.
+
+Run `powershell -ExecutionPolicy Bypass -File scripts/validate-windows-terminal-focus.ps1` to produce JSONL evidence for task registration, broker reconnects, and route correlation. Supplying `-WindowHandle`, `-RuntimeId`, and `-ExpectedProcessId` also reproduces an exact live-tab focus.
+
 ## How the integrations work
 
 ### Claude Code
