@@ -482,6 +482,7 @@ function activityToEvents(act) {
         out.push({ kind: 'say', text: clip(plainText(session.assistantLastOutput), 280), emotion: emo, project, ts: Date.now() });
       }
       break;
+    case 'PermissionRequest':
     case 'Notification':
     case 'Elicitation':
       out.push({

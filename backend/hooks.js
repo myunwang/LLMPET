@@ -1,61 +1,104 @@
 'use strict';
 
-// Claude Code hook lifecycle — install/uninstall via backend/hookinstall.js,
-// plus a settings.json watcher that re-registers our hooks if another tool
-// (CC-Switch, manual edits, …) overwrites the file without them.
+// Claude Code + Codex hook lifecycle. Both installers merge only LLMPET-owned
+// handlers and preserve other tools' entries.
 
 const fs = require('fs');
 const path = require('path');
-const { registerHooks, unregisterHooks, hooksCurrent, SETTINGS_PATH } = require('./hookinstall');
+const {
+  registerHooks,
+  unregisterHooks,
+  hooksCurrent: claudeHooksCurrent,
+  SETTINGS_PATH,
+} = require('./hookinstall');
+const {
+  registerCodexHooks,
+  unregisterCodexHooks,
+  codexHooksCurrent,
+  CODEX_HOOKS_PATH,
+} = require('./codex-hookinstall');
 const { log } = require('./log');
 
 const SETTINGS_DIR = path.dirname(SETTINGS_PATH);
 
 function install(port, token) {
+  const result = { claude: null, codex: null };
   try {
     const r = registerHooks(port, token);
     log('hooks', `installed (port ${port}) added=${r.added} updated=${r.updated} skipped=${r.skipped} purged=${r.purged || 0} node=${r.nodeBin}`);
-    return r;
+    result.claude = r;
   } catch (err) {
-    log('hooks', 'install failed:', err.message);
-    return null;
+    log('hooks', 'Claude install failed:', err.message);
   }
+  try {
+    const r = registerCodexHooks();
+    log('codex-hooks', `installed added=${r.added} updated=${r.updated} skipped=${r.skipped} node=${r.nodeBin}`);
+    result.codex = r;
+  } catch (err) {
+    log('codex-hooks', 'install failed:', err.message);
+  }
+  return result;
 }
 
 function uninstall() {
+  const result = { claude: null, codex: null };
   try {
     const r = unregisterHooks({ backup: true });
     log('hooks', `uninstalled removed=${r.removed}${r.backupPath ? ' backup=' + r.backupPath : ''}`);
-    return r;
+    result.claude = r;
   } catch (err) {
-    log('hooks', 'uninstall failed:', err.message);
-    return null;
+    log('hooks', 'Claude uninstall failed:', err.message);
   }
-}
-
-// Watch the ~/.claude directory (not the file — atomic renames swap the inode).
-function startWatcher(getRuntime) {
-  let watcher = null;
-  let debounce = null;
   try {
-    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-    watcher = fs.watch(SETTINGS_DIR, (_e, filename) => {
-      if (filename && filename !== 'settings.json') return;
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        const runtime = getRuntime();
-        if (!runtime || !hooksCurrent(runtime.port, runtime.token)) {
-          log('hooks', 'settings.json lost or changed our hooks — re-registering');
-          if (runtime) install(runtime.port, runtime.token);
-        }
-      }, 800);
-      if (debounce.unref) debounce.unref();
-    });
-    log('hooks', 'settings watcher started');
+    const r = unregisterCodexHooks({ backup: true });
+    log('codex-hooks', `uninstalled removed=${r.removed}${r.backupPath ? ' backup=' + r.backupPath : ''}`);
+    result.codex = r;
   } catch (err) {
-    log('hooks', 'watcher failed:', err.message);
+    log('codex-hooks', 'uninstall failed:', err.message);
   }
-  return () => { if (watcher) { try { watcher.close(); } catch {} } };
+  return result;
 }
 
-module.exports = { install, uninstall, startWatcher, hooksCurrent, SETTINGS_PATH };
+function hooksCurrent(port, token) {
+  return claudeHooksCurrent(port, token) && codexHooksCurrent();
+}
+
+// Watch the parent directories (not the files — atomic renames swap inodes).
+function startWatcher(getRuntime) {
+  const watchers = [];
+  let debounce = null;
+  const targets = [
+    { dir: SETTINGS_DIR, file: path.basename(SETTINGS_PATH), label: 'Claude settings' },
+    { dir: path.dirname(CODEX_HOOKS_PATH), file: path.basename(CODEX_HOOKS_PATH), label: 'Codex hooks' },
+  ];
+
+  for (const target of targets) {
+    try {
+      fs.mkdirSync(target.dir, { recursive: true });
+      const watcher = fs.watch(target.dir, (_e, filename) => {
+        if (filename && filename !== target.file) return;
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          const runtime = getRuntime();
+          if (!runtime || !hooksCurrent(runtime.port, runtime.token)) {
+            log('hooks', `${target.label} lost or changed LLMPET hooks — re-registering`);
+            if (runtime) install(runtime.port, runtime.token);
+          }
+        }, 800);
+        if (debounce.unref) debounce.unref();
+      });
+      watchers.push(watcher);
+    } catch (err) {
+      log('hooks', `${target.label} watcher failed:`, err.message);
+    }
+  }
+  if (watchers.length) log('hooks', 'Claude/Codex settings watchers started');
+  return () => {
+    if (debounce) clearTimeout(debounce);
+    for (const watcher of watchers) {
+      try { watcher.close(); } catch {}
+    }
+  };
+}
+
+module.exports = { install, uninstall, startWatcher, hooksCurrent, SETTINGS_PATH, CODEX_HOOKS_PATH };

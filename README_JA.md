@@ -18,7 +18,7 @@ LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認で�
 - **3 種類のスキン** — タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱。
 - **macOS のパトロールモード** — 対応する他のデスクトップペットを検出し、最前面を維持しながら相手を画面端へ押し出します。
 
-状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex はローカルの rollout ファイルを読み取り専用で監視します。Codex の設定は変更しません。
+状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code と現在の Codex は公開 hook API を利用し、旧版 Codex の rollout ファイル監視は読み取り専用のフォールバックとして残します。
 
 ## 月薪喵スキンの状態
 
@@ -61,7 +61,7 @@ npm start
 npm test                 # ヘッドレス回帰テスト一式
 npm run package:mac:dev  # ローカル用 ad-hoc 署名 macOS パッケージ
 npm run package:win      # Windows インストーラー + ZIP
-npm run uninstall:hooks  # LLMPET の Claude hook を安全に削除
+npm run uninstall:hooks  # LLMPET の Claude / Codex hook を安全に削除
 ```
 
 ## 連携の仕組み
@@ -76,13 +76,15 @@ LLMPET は `~/.claude/settings.json` に、既存設定と安全に共存する�
 
 ### OpenAI Codex
 
-Codex 用の hook はインストールしません。次の rollout を増分かつ読み取り専用で監視します。
+LLMPET は `~/.codex/hooks.json` に公式ライフサイクル hook を既存設定と共存する形で登録します。他のアプリの hook は保持され、アンインストール時もバックアップ後に LLMPET の項目だけを削除します。Codex が新しいコマンドの確認を求めた場合は、`/hooks` を実行して LLMPET の `octopus-hook.js` を信頼してください。
+
+旧版 Codex 向けには、次の rollout も増分かつ読み取り専用で監視します。
 
 ```text
 ~/.codex/sessions/YYYY/MM/DD/*.jsonl
 ```
 
-rollout イベントを共通の状態機械へ変換し、内部 subagent スレッドを除外します。長時間セッションの復帰時も過去イベントを再生せず、新しく追加された部分だけを読み取ります。各イベントの `last_token_usage` から永続的なローカル token 台帳を作り、レート制限とは分けて表示します。この台帳を OpenAI の請求履歴とは表示しません。
+hook と rollout のイベントは同じ状態機械へ変換し、データ源をまたいで重複排除します。rollout フォールバックは内部 subagent スレッドを除外し、長時間セッションの復帰時も過去イベントを再生しません。各イベントの `last_token_usage` から永続的なローカル token 台帳を作り、レート制限とは分けて表示します。この台帳を OpenAI の請求履歴とは表示しません。
 
 ## 旅するカエル
 
@@ -124,18 +126,19 @@ assets/memes/<meme-id>/
 
 - HTTP サーバーは `127.0.0.1` のみにバインドし、loopback / Host / browser-origin の検証に加えて、書き込み API に起動ごとのランダム token を要求します。
 - セッション情報、設定、利用履歴はローカル端末内に保存されます。
-- Codex rollout へのアクセスは読み取り専用です。
+- Codex lifecycle hook は LLMPET の loopback server にだけ送信し、旧版 rollout へのアクセスは読み取り専用です。
 - バックグラウンド通信は、任意の LiteLLM 公開価格表の日次取得だけです。「旅するカエル」はユーザーが **出発**を押した場合にだけ Anthropic / OpenAI へ接続します。`OCTOPUS_NO_NET=1` は LLMPET の価格取得を止めますが、明示的に開始した CLI 旅行までは無効化しません。
 - Electron は `contextIsolation` を有効、`nodeIntegration` を無効にしています。
 - Claude hook の追加は既存設定を上書きせず、原子的かつ取り消し可能で、削除前にはバックアップを作成します。
+- **ログイン時に起動し、クラッシュ後に復旧**はトレイで明示的に有効化する永続設定で、既定では無効です。有効時に停止中のアプリへ届いた hook イベントはローカルへ待避され、復旧した server の listen 後に再送されます。**終了**を選ぶと、次回の明示的な起動まで hook による復活を抑止します。
 
 ## 設定・開発用フラグ
 
-- `OCTOPUS_NO_HOOKS=1 npm start` — Claude 設定を変更せずに起動します。
+- `OCTOPUS_NO_HOOKS=1 npm start` — Claude / Codex の hook 設定を変更せずに起動します。
 - `OCTOPUS_ALLOW_MULTI=1 npm start` — 開発時に単一インスタンス制限を無効化します。
 - `OCTOPUS_NO_NET=1 npm start` — 外部ネットワーク通信を無効化します。
 - `OCTOPUS_DEBUG=1 npm start` — ローカル `/debug` エンドポイントを有効化します。
-- `LLMPET_NO_CODEX=1 npm start` — Codex rollout の監視を無効化します。
+- `LLMPET_NO_CODEX=1 npm start` — Codex の監視を無効化します。
 - `LLMPET_CODEX_DIR=<dir> npm start` — テスト用の rollout ディレクトリを指定します。
 
 ## コントリビューター

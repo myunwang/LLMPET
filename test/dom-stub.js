@@ -117,7 +117,7 @@ function createStubWorld() {
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)
-  const handlers = { event: null, stats: null, config: null, meme: null, travel: null, memeCatalogChanged: null };
+  const handlers = { event: null, stats: null, config: null, meme: null, travel: null, contentOffset: null, memeCatalogChanged: null };
   const calls = []; // record of preload calls for assertions
 
   const pet = {
@@ -126,6 +126,7 @@ function createStubWorld() {
     onConfig: (cb) => { handlers.config = cb; },
     onMeme: (cb) => { handlers.meme = cb; },
     onTravel: (cb) => { handlers.travel = cb; },
+    onContentOffset: (cb) => { handlers.contentOffset = cb; },
     onMemeCatalogChanged: (cb) => { handlers.memeCatalogChanged = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
@@ -138,8 +139,12 @@ function createStubWorld() {
     cancelTravel: () => { calls.push(['cancelTravel']); return Promise.resolve({ ok: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
     setWinPos: (...a) => calls.push(['setWinPos', a]),
+    beginWinDrag: () => calls.push(['beginWinDrag']),
+    updateWinDrag: () => calls.push(['updateWinDrag']),
+    endWinDrag: () => calls.push(['endWinDrag']),
     setPetSize: (...a) => calls.push(['setPetSize', a]),
     setIgnoreMouse: (...a) => calls.push(['setIgnoreMouse', a]),
+    setHitRegions: (...a) => calls.push(['setHitRegions', a]),
     setSkin: (...a) => calls.push(['setSkin', a]),
     toggleMute: () => calls.push(['toggleMute']),
     openPanel: () => calls.push(['openPanel']),
@@ -178,6 +183,15 @@ function createStubWorld() {
     setInterval,
     clearInterval,
     requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    getComputedStyle: (el) => ({
+      display: el && el.classList && el.classList.contains('hidden') ? 'none' : 'block',
+      visibility: 'visible',
+      opacity: '1',
+    }),
+    MutationObserver: class MutationObserver {
+      observe() {}
+      disconnect() {}
+    },
     console,
     Math,
     JSON,
@@ -202,8 +216,9 @@ function createStubWorld() {
 
 // Load renderer/pet.js (and anything else, e.g. a future shared module) into
 // the stub world. Returns the world for driving + assertions.
-function loadRenderer(files) {
+function loadRenderer(files, options = {}) {
   const world = createStubWorld();
+  if (typeof options.search === 'string') world.sandbox.location.search = options.search;
   vm.createContext(world.sandbox);
   for (const f of files) {
     const code = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');

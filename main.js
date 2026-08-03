@@ -30,11 +30,24 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { createCodexRateLimits } = require('./backend/codex-rate-limits');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
+const {
+  beginDrag,
+  nextDragBounds,
+  normalizeHitRegions,
+  resizePetLayout,
+} = require('./backend/window-drag');
+const {
+  ensureLoginStartup,
+  recordIntentionalQuit,
+  clearIntentionalQuit,
+} = require('./backend/startup');
+const { drainPendingHookEvents } = require('./backend/hook-queue');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -59,11 +72,14 @@ let server = null;
 let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
+let codexRateLimitClient = null; // Codex App Server /status 配额读取器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
+let codexAppServerLimitsAt = 0; // App Server 新数据优先；过期后允许 rollout 接棒
+let codexLimitsLogSig = '';
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
 // 巡视拖拽期间主宠强制穿透，renderer 不得抢回鼠标（uiBusy / visualRect /
@@ -76,11 +92,15 @@ const petState = new Map(); // id → { agent, win, customSize, visualRect, uiBu
 const petStates = () => [...petState.values()].filter((s) => s.win && !s.win.isDestroyed());
 const stateOfSender = (sender) => petState.get(sender.id) || null;
 const primaryPetState = () => (petWin && !petWin.isDestroyed() ? petState.get(petWin.webContents.id) : null);
-const anyUiBusy = () => petStates().some((s) => s.uiBusy);
+const anyUiBusy = () => petStates().some((s) => s.uiBusy || s.drag);
 const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.visualRect : null; };
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
 let statsTimer = null;
+let hookDrainTimer = null;
+let hookDrainPollTimer = null;
+let hookDrainActive = false;
+let appQuitting = false;
 let emitDebounce = null;
 const recentOps = []; // ring for the panel "操作流"; newest first, capped
 
@@ -100,9 +120,11 @@ function frontendConfig(agent = 'all') {
     territorySupported: process.platform === 'darwin' && agent !== 'codex',
     agent,
     petMode: c.petMode,
+    codexChipMode: c.codexChipMode,
     lang: c.lang,
     pinnedSessions: c.pinnedSessions,
     archivedSessions: c.archivedSessions,
+    startupRecovery: c.startupRecovery,
   };
 }
 
@@ -119,26 +141,22 @@ function targetSize(st) {
 
 function applyPetSize(st) {
   if (!st || !st.win || st.win.isDestroyed()) return;
+  if (st.drag) { st.resizeAfterDrag = true; return; }
   const win = st.win;
-  const { w } = targetSize(st);
-  let { h } = targetSize(st);
+  const { w, h } = targetSize(st);
   const b = win.getBounds();
-  // Cap the window to the screen's work area so a tall popup can NEVER push the
-  // pet / footer buttons off-screen — the popup scrolls internally instead.
+  let layout;
+  // Keep the outer window visible; compensate only the pet visual layer so its
+  // dragged screen-space anchor remains unchanged at display edges.
   try {
     const wa = screen.getDisplayMatching(b).workArea;
-    h = Math.min(h, wa.height);
-    const cx = b.x + b.width / 2;
-    const bottom = b.y + b.height;
-    let x = Math.round(cx - w / 2);
-    let y = Math.round(bottom - h);
-    x = Math.min(Math.max(x, wa.x), wa.x + wa.width - w);
-    y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
-    win.setBounds({ x, y, width: w, height: h });
+    layout = resizePetLayout(b, { width: w, height: h }, wa, st.contentOffset);
   } catch {
-    const bottom = b.y + b.height;
-    win.setBounds({ x: b.x, y: Math.round(bottom - h), width: w, height: h });
+    layout = resizePetLayout(b, { width: w, height: h }, null, st.contentOffset);
   }
+  win.setBounds(layout.bounds);
+  st.contentOffset = layout.contentOffset;
+  sendWin(win, 'pet:content-offset', st.contentOffset);
 }
 
 // 双宠开关：single 一只宠盯全部后端；duo Claude/Codex 各一只（形象/位置独立）
@@ -190,7 +208,10 @@ function makePetWindow(agent) {
   win.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent } });
 
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
-  const st = { agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true };
+  const st = {
+    agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true,
+    drag: null, resizeAfterDrag: false, contentOffset: { x: 0, y: 0 },
+  };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
   const wcId = win.webContents.id;
@@ -213,6 +234,7 @@ function makePetWindow(agent) {
   });
   win.webContents.on('did-finish-load', () => {
     sendWin(win, 'pet:config', frontendConfig(st.agent));
+    sendWin(win, 'pet:content-offset', st.contentOffset);
     if (core) sendWin(win, 'pet:stats', buildStats(st.agent));
   });
   return win;
@@ -573,6 +595,24 @@ function scheduleEmit() {
   emitDebounce = setTimeout(() => { emitDebounce = null; emitStats(); }, 150);
 }
 
+function updateCodexLimits(limits, source) {
+  if (!limits) return;
+  const now = Date.now();
+  if (source === 'app-server') {
+    codexAppServerLimitsAt = now;
+  } else if (codexAppServerLimitsAt && now - codexAppServerLimitsAt < 10 * 60 * 1000) {
+    return;
+  }
+  codexLimits = { ...limits, source };
+  const sig = [source, codexLimits.usedPercent, codexLimits.windowMinutes,
+    codexLimits.secondaryUsedPercent, codexLimits.secondaryWindowMinutes].join(':');
+  if (sig !== codexLimitsLogSig) {
+    codexLimitsLogSig = sig;
+    log('codex-rate', `quota source=${source} primary=${codexLimits.usedPercent ?? '-'}@${codexLimits.windowMinutes ?? '-'}m secondary=${codexLimits.secondaryUsedPercent ?? '-'}@${codexLimits.secondaryWindowMinutes ?? '-'}m`);
+  }
+  scheduleEmit();
+}
+
 function broadcastConfig() {
   for (const st of petStates()) sendWin(st.win, 'pet:config', frontendConfig(st.agent));
   sendPanel('panel:config', frontendConfig('all'));
@@ -593,6 +633,20 @@ function startMemeWatcher() {
 }
 
 // ── backend wiring ────────────────────────────────────────────────────────────
+function schedulePendingHookDrain(delayMs = 0) {
+  if (appQuitting || hookDrainTimer || hookDrainActive) return;
+  hookDrainTimer = setTimeout(() => {
+    hookDrainTimer = null;
+    hookDrainActive = true;
+    drainPendingHookEvents({ postState: transport.postState }, (result) => {
+      hookDrainActive = false;
+      if (result.delivered) log('main', `replayed ${result.delivered} pending hook event(s)`);
+      if (result.remaining > 0) schedulePendingHookDrain(1000);
+    });
+  }, Math.max(0, delayMs));
+  if (hookDrainTimer.unref) hookDrainTimer.unref();
+}
+
 function bootBackend() {
   core = createCore({
     onActivity: (act) => {
@@ -627,7 +681,8 @@ function bootBackend() {
     openClaudeThread: (sessionId) => shell.openExternal(`claude://claude.ai/epitaxy/${encodeURIComponent(sessionId)}`),
   });
 
-  // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
+  // Codex backend: documented lifecycle hooks provide live activity; the
+  // rollout watcher remains a read-only fallback for older Codex builds.
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
   if (process.env.LLMPET_NO_CODEX === '1') {
     log('main', 'LLMPET_NO_CODEX=1 — Codex watcher disabled');
@@ -640,9 +695,17 @@ function bootBackend() {
       core,
       // 开发/E2E 可用 LLMPET_CODEX_DIR 指到假目录，不碰真实 ~/.codex
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
-      onRateLimits: (rl) => { codexLimits = rl; scheduleEmit(); },
+      onRateLimits: (rl) => updateCodexLimits(rl, 'rollout'),
     });
     codexWatch.start();
+    // New Codex builds expose the same quota data as /status through the
+    // documented App Server API. Keep rollout parsing above as the fallback.
+    if (process.env.OCTOPUS_NO_NET !== '1') {
+      codexRateLimitClient = createCodexRateLimits({
+        onRateLimits: (rl) => updateCodexLimits(rl, 'app-server'),
+      });
+      codexRateLimitClient.start();
+    }
   }
 
   metering = createMetering();
@@ -722,14 +785,19 @@ function bootBackend() {
     core,
     permissions,
     shouldDropForDnd: () => false,
+    onListening: () => schedulePendingHookDrain(),
   });
   server.start();
+  hookDrainPollTimer = setInterval(() => {
+    if (server && server.getPort()) schedulePendingHookDrain();
+  }, 5000);
+  if (hookDrainPollTimer.unref) hookDrainPollTimer.unref();
 
   // Install hooks once the server has a port (defer so listen wins the race).
-  // OCTOPUS_NO_HOOKS=1 skips touching ~/.claude/settings.json (dev/verify mode).
+  // OCTOPUS_NO_HOOKS=1 skips touching Claude and Codex hook config (dev/verify mode).
   setTimeout(() => {
     if (process.env.OCTOPUS_NO_HOOKS === '1') {
-      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude Code hook install');
+      log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude/Codex hook install');
       return;
     }
     const port = server.getPort();
@@ -775,19 +843,36 @@ function registerIpc() {
     if (agent === 'all') return lastStats || buildStats();
     return buildStats(agent);
   });
-  ipcMain.handle('get-win-pos', (e) => {
-    const win = senderPetWin(e);
-    if (!win) return [0, 0];
-    const b = win.getBounds();
-    return [b.x, b.y];
+  ipcMain.on('begin-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.win || st.win.isDestroyed()) return;
+    const b = st.win.getBounds();
+    const size = targetSize(st);
+    try {
+      size.h = Math.min(size.h, screen.getDisplayMatching(b).workArea.height);
+    } catch {}
+    st.drag = beginDrag(
+      b,
+      screen.getCursorScreenPoint(),
+      { width: size.w, height: size.h },
+    );
+    st.resizeAfterDrag = false;
   });
 
-  ipcMain.on('set-win-pos', (e, x, y) => {
-    const win = senderPetWin(e);
-    if (win && Number.isFinite(x) && Number.isFinite(y)) {
-      const b = win.getBounds();
-      win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
-    }
+  ipcMain.on('update-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.drag || !st.win || st.win.isDestroyed()) return;
+    const bounds = nextDragBounds(st.drag, screen.getCursorScreenPoint());
+    if (bounds) st.win.setBounds(bounds);
+  });
+
+  ipcMain.on('end-win-drag', (e) => {
+    const st = stateOfSender(e.sender);
+    if (!st || !st.drag) return;
+    st.drag = null;
+    const resizeAfterDrag = st.resizeAfterDrag;
+    st.resizeAfterDrag = false;
+    if (resizeAfterDrag) applyPetSize(st);
   });
 
   ipcMain.on('open-panel', openPanel);
@@ -816,7 +901,7 @@ function registerIpc() {
   ipcMain.on('territory-run-now', runTerritoryNow);
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
-  ipcMain.on('quit-app', () => app.quit());
+  ipcMain.on('quit-app', quitAppIntentionally);
   // 双宠模式：收起自己这只（独立事件——另一只和 app 都不受影响）；
   // 托盘「显示桌宠」或勾选「Codex 桌宠」随时找回来。
   ipcMain.on('close-pet', (e) => {
@@ -1014,6 +1099,14 @@ function registerIpc() {
     const st = stateOfSender(e.sender);
     const w = st && st.win && !st.win.isDestroyed() ? st.win : null;
     if (!w) return;
+    // Windows Terminal does not reliably forward mousemove back through an
+    // ignored transparent Electron window. Native setShape regions below make
+    // only painted pet/UI areas hittable, so the whole window must stay enabled.
+    if (process.platform === 'win32') {
+      st.mouseIgnoring = !!ignore;
+      try { w.setIgnoreMouseEvents(false); } catch {}
+      return;
+    }
     st.mouseIgnoring = !!ignore; // 记录 renderer 期望的穿透状态(巡视结束后恢复用)
     // 巡视拖拽期间主宠强制穿透：renderer 只能更新“结束后想要的状态”，
     // 不能把最高层章鱼重新变成可点击并挡住目标。Codex 分身不受巡视约束。
@@ -1022,6 +1115,26 @@ function registerIpc() {
   });
 
   // 渲染端上报「用户正在交互」(领地模式据此避战/撤退,别的场景以后也能用)
+  // On Windows use the compositor's native window region for both drawing and
+  // hit testing. Pixels outside these visible renderer rectangles fall through
+  // directly to Terminal/other apps without relying on forwarded mousemove.
+  ipcMain.on('pet-hit-regions', (e, regions) => {
+    if (process.platform !== 'win32') return;
+    const st = stateOfSender(e.sender);
+    const w = st && st.win && !st.win.isDestroyed() ? st.win : null;
+    if (!w) return;
+    const bounds = w.getBounds();
+    const shape = normalizeHitRegions(regions, { width: bounds.width, height: bounds.height });
+    if (!shape.length) return;
+    const shapeKey = shape.map((rect) => `${rect.x},${rect.y},${rect.width},${rect.height}`).join(';');
+    if (shapeKey === st.hitShapeKey) return;
+    try {
+      w.setIgnoreMouseEvents(false);
+      w.setShape(shape);
+      st.hitShapeKey = shapeKey;
+    } catch {}
+  });
+
   ipcMain.on('ui-busy', (e, on) => {
     const st = stateOfSender(e.sender);
     if (st) st.uiBusy = !!on;
@@ -1055,6 +1168,13 @@ function applySkin(skin, agent) {
   broadcastConfig();
   refreshTrayMenu();
 }
+function applyCodexChipMode(codexChipMode) {
+  if (!['usage', 'weeklyRemaining'].includes(codexChipMode)) return;
+  config.save({ codexChipMode });
+  broadcastConfig();
+  refreshTrayMenu();
+  log('main', `codexChipMode → ${codexChipMode}`);
+}
 
 // 补齐当前 petMode 应有的窗口（被单独收起的宠从托盘找回来）。主宠身份变化
 // (all⇄claude)时原地重载渲染器——不销毁窗口，位置不动、Codex 宠不闪。
@@ -1068,6 +1188,7 @@ function ensurePetWindows() {
     if (st && st.agent !== primaryAgent) {
       st.agent = primaryAgent;
       st.customSize = null; st.visualRect = null; st.uiBusy = false; st.mouseIgnoring = true;
+      st.contentOffset = { x: 0, y: 0 };
       petWin.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent: primaryAgent } });
       applyPetSize(st);
     }
@@ -1095,6 +1216,25 @@ function applyBudget(v) {
   config.save({ budget5h: Number(v) || 0 });
   broadcastConfig();
   refreshTrayMenu();
+}
+
+function applyStartupRecovery(on) {
+  const enabled = on === true;
+  config.save({ startupRecovery: enabled });
+  if (enabled) clearIntentionalQuit();
+  try {
+    ensureLoginStartup(app, { enabled });
+  } catch (e) {
+    log('main', 'login startup unavailable:', e.message);
+  }
+  broadcastConfig();
+  refreshTrayMenu();
+  log('main', `startup recovery ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+function quitAppIntentionally() {
+  recordIntentionalQuit();
+  app.quit();
 }
 
 // Language switch (tray → Settings → Language). Main-process copy is baked into
@@ -1133,6 +1273,7 @@ function refreshTrayMenu() {
   const budget = Number(cfg.budget5h) || 0;
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
+  const codexChipMode = cfg.codexChipMode || 'usage';
   const lang = cfg.lang || 'zh';
   tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -1146,6 +1287,8 @@ function refreshTrayMenu() {
     { label: t('tray.language'), submenu: i18n.LANGS.map((code) => ({
       label: t('lang.' + code), type: 'radio', checked: lang === code, click: () => applyLang(code),
     })) },
+    { label: t('tray.startupRecovery'), type: 'checkbox', checked: cfg.startupRecovery === true,
+      click: () => applyStartupRecovery(config.get().startupRecovery !== true) },
     { label: petMode === 'duo' ? t('tray.skinClaude') : t('tray.skin'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
       { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
@@ -1155,6 +1298,10 @@ function refreshTrayMenu() {
       { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
       { label: t('skin.pixel'), type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
       { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
+    ] }] : []),
+    ...(petMode === 'duo' ? [{ label: t('tray.codexChip'), submenu: [
+      { label: t('tray.codexChipUsage'), type: 'radio', checked: codexChipMode === 'usage', click: () => applyCodexChipMode('usage') },
+      { label: t('tray.codexChipWeekly'), type: 'radio', checked: codexChipMode === 'weeklyRemaining', click: () => applyCodexChipMode('weeklyRemaining') },
     ] }] : []),
     { label: t('tray.shape'), submenu: [
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
@@ -1186,7 +1333,7 @@ function refreshTrayMenu() {
       try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
       hooks.uninstall();
     } },
-    { label: t('tray.quit'), click: () => app.quit() },
+    { label: t('tray.quit'), click: quitAppIntentionally },
   ]));
 }
 
@@ -1235,6 +1382,11 @@ if (!gotTheLock) {
   app.on('second-instance', () => { try { for (const st of petStates()) st.win.show(); } catch {} });
   app.whenReady().then(async () => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    if (!process.argv.includes('--hook-recovery')) clearIntentionalQuit();
+    try {
+      const enabled = config.get().startupRecovery === true;
+      if (ensureLoginStartup(app, { enabled })) log('main', `login startup ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (e) { log('main', 'login startup unavailable:', e.message); }
     const rival = await findRivalInstance();
     if (rival) {
       log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
@@ -1259,9 +1411,13 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
+  appQuitting = true;
+  try { if (hookDrainTimer) { clearTimeout(hookDrainTimer); hookDrainTimer = null; } } catch {}
+  try { if (hookDrainPollTimer) { clearInterval(hookDrainPollTimer); hookDrainPollTimer = null; } } catch {}
   try { if (territory) territory.stop(); } catch {}
   try { if (travelManager) travelManager.shutdown(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
+  try { if (codexRateLimitClient) codexRateLimitClient.stop(); } catch {}
   try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}

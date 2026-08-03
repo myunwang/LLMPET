@@ -153,6 +153,7 @@ function createServer(deps) {
   const core = deps.core;
   const permissions = deps.permissions;
   const shouldDropForDnd = typeof deps.shouldDropForDnd === 'function' ? deps.shouldDropForDnd : () => false;
+  const onListening = typeof deps.onListening === 'function' ? deps.onListening : null;
 
   let server = null;
   let activePort = null;
@@ -208,7 +209,8 @@ function createServer(deps) {
         terminalApp: normTerminalApp(data.terminal_app),
         terminalTty: normTerminalTty(data.terminal_tty),
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
-        agentId: 'claude-code',
+        agentId: data.agent_id === 'codex' ? 'codex' : 'claude-code',
+        eventSource: data.event_source === 'codex-hook' ? 'codex-hook' : null,
         headless: data.headless === true,
         externalResume: data.external_resume === true,
         transcriptPath: normTranscriptPath(data.transcript_path),
@@ -326,6 +328,11 @@ function createServer(deps) {
       writeRuntimeConfig(activePort, activeToken);
       log('server', `listening on 127.0.0.1:${activePort}`);
       startRuntimeGuard();
+      if (onListening) {
+        try { onListening({ port: activePort, token: activeToken }); } catch (err) {
+          log('server', 'onListening callback failed:', err.message);
+        }
+      }
     });
 
     server.listen(ports[idx], '127.0.0.1');

@@ -1,7 +1,7 @@
 'use strict';
 
 // codex-watch 单元测试 — 用临时目录伪造 ~/.codex/sessions 的 rollout JSONL，
-// 注入假 core 记录调用：backfill 静默入库、live 事件映射、subagent 过滤、
+// 注入假 core 记录调用：backfill 静默聚合、live 事件映射、subagent 父会话归并、
 // 半行攒批、token_count → 上下文% + rate_limits。
 // Run: node test/codex-watch.js
 
@@ -42,6 +42,7 @@ function mkSessions() {
 
 const UUID_A = '019f5103-921c-7ac1-9a8d-c4f8ff8a67aa';
 const UUID_B = '019f5103-921c-7ac1-9a8d-c4f8ff8a67bb';
+const UUID_C = '019f5103-921c-7ac1-9a8d-c4f8ff8a67cc';
 const line = (o) => JSON.stringify(o) + '\n';
 const meta = (id, extra = {}) => line({ type: 'session_meta', payload: { id, session_id: id, cwd: '/tmp/proj', originator: 'codex-tui', thread_source: 'user', ...extra } });
 
@@ -90,6 +91,7 @@ check('meta+尾部 user_message/token_count → seedSession(不发事件)', () =
   assert.strictEqual(core.seeds[0].cwd, '/tmp/proj');
   assert.strictEqual(core.seeds[0].sessionTitle, '帮我修个 bug');
   assert.strictEqual(core.seeds[0].contextUsage.percent, 10);
+  assert.strictEqual(core.seeds[0].state, 'thinking', '重启后应从尾部恢复正在执行的状态');
   assert.strictEqual(core.updates.length, 0, 'backfill 不应发 updateSession');
 });
 
@@ -182,24 +184,69 @@ check('turn_aborted → TurnAborted(idle)；approval → Notification', () => {
   assert.deepStrictEqual(evs, ['SessionStart:idle', 'Notification:notification', 'TurnAborted:idle']);
 });
 
-console.log('[C4] 过滤与健壮性');
-check('thread_source=subagent 整个文件跳过(含 backfill 与 live)', () => {
+console.log('[C4] 子代理聚合与健壮性');
+check('backfill：活跃 subagent 静默归并到父 session_id，不生成子会话', () => {
   const { root, dir } = mkSessions();
-  // backfill 路径
-  const fp1 = path.join(dir, `rollout-2026-07-11T04-00-00-${UUID_A}.jsonl`);
-  fs.writeFileSync(fp1, meta(UUID_A, { thread_source: 'subagent', source: { subagent: { other: 'guardian' } } })
-    + line({ type: 'event_msg', payload: { type: 'user_message', message: 'internal' } }));
+  const parent = path.join(dir, `rollout-2026-07-11T04-00-00-${UUID_A}.jsonl`);
+  const child = path.join(dir, `rollout-2026-07-11T04-01-00-${UUID_B}.jsonl`);
+  fs.writeFileSync(parent, meta(UUID_A)
+    + line({ timestamp: '2026-07-11T04:00:10Z', type: 'event_msg', payload: { type: 'turn_aborted' } }));
+  fs.writeFileSync(child, meta(UUID_B, {
+    session_id: UUID_A,
+    parent_thread_id: UUID_A,
+    thread_source: 'subagent',
+    source: { subagent: { other: 'worker' } },
+  }) + line({ timestamp: '2026-07-11T04:01:10Z', type: 'event_msg', payload: { type: 'task_started' } }));
   const core = fakeCore();
   const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
   w.tick();
-  // live 路径
-  const fp2 = path.join(dir, `rollout-2026-07-11T05-00-00-${UUID_B}.jsonl`);
-  fs.writeFileSync(fp2, meta(UUID_B, { thread_source: 'subagent' }));
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].id, UUID_A);
+  assert.strictEqual(core.seeds[0].state, 'juggling');
+  assert.strictEqual(core.seeds[0].lastEvent.rawEvent, 'SubagentStart');
+  assert.strictEqual(core.seeds[0].transcriptPath, parent, '会话身份应保留父 rollout');
+  assert.strictEqual(core.updates.length, 0, '启动聚合仍然不能回放事件');
+});
+
+check('live：并行 subagent 归并父会话；一个先结束不释放整体 working', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
   w.tick();
-  fs.appendFileSync(fp2, line({ type: 'event_msg', payload: { type: 'user_message', message: 'still internal' } }));
+  const parent = path.join(dir, `rollout-parent-${UUID_A}.jsonl`);
+  const child1 = path.join(dir, `rollout-child-${UUID_B}.jsonl`);
+  const child2 = path.join(dir, `rollout-child-${UUID_C}.jsonl`);
+  fs.writeFileSync(parent, meta(UUID_A));
   w.tick();
-  assert.strictEqual(core.seeds.length, 0);
-  assert.strictEqual(core.updates.length, 0);
+  const childMeta = (id) => meta(id, {
+    session_id: UUID_A,
+    parent_thread_id: UUID_A,
+    thread_source: 'subagent',
+    source: { subagent: { other: 'worker' } },
+  });
+  fs.writeFileSync(child1, childMeta(UUID_B));
+  fs.writeFileSync(child2, childMeta(UUID_C));
+  w.tick();
+  assert.strictEqual(core.updates.filter((u) => u.event === 'SessionStart').length, 1, '子 rollout 不建独立会话');
+
+  fs.appendFileSync(child1, line({ type: 'event_msg', payload: { type: 'task_started' } }));
+  fs.appendFileSync(child2, line({ type: 'event_msg', payload: { type: 'task_started' } }));
+  w.tick();
+  const starts = core.updates.filter((u) => u.event === 'SubagentStart');
+  assert.strictEqual(starts.length, 2);
+  assert.ok(starts.every((u) => u.sid === UUID_A && u.state === 'juggling'));
+
+  fs.appendFileSync(child1, line({ type: 'event_msg', payload: { type: 'task_complete' } }));
+  w.tick();
+  assert.strictEqual(core.updates.at(-1).sid, UUID_A);
+  assert.strictEqual(core.updates.at(-1).state, 'juggling', '仍有另一个子代理活跃时必须保持 juggling');
+  assert.strictEqual(core.updates.at(-1).event, 'SubagentStop');
+
+  fs.appendFileSync(child2, line({ type: 'event_msg', payload: { type: 'task_complete' } }));
+  w.tick();
+  assert.strictEqual(core.updates.at(-1).sid, UUID_A);
+  assert.strictEqual(core.updates.at(-1).state, 'working');
+  assert.strictEqual(core.updates.at(-1).event, 'SubagentStop');
 });
 
 check('半行写入攒到下一轮，不丢不重', () => {
@@ -252,7 +299,44 @@ check('几天前日期目录里的活跃文件：启动即入库，之后每轮�
   w.tick(); // 第二轮不是全量轮：tracker 直连 stat 也必须泵到
   assert.ok(core.updates.some((u) => u.event === 'TaskStarted'), '非全量轮也要跟进旧目录文件的增量');
 });
-check('35KB+ 超长 session_meta 行完整解析（cwd / subagent 判定不丢）', () => {
+
+check('Windows LastWriteTime 不变时，文件大小增长仍判定为活动', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-stale-mtime-${UUID_B}.jsonl`);
+  const oldTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  fs.writeFileSync(fp, meta(UUID_B)
+    + line({ timestamp: oldTimestamp, type: 'event_msg', payload: { type: 'task_complete' } }));
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(fp, old, old);
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(w._trackers.has(fp), false, '旧事件且无增长时应保持沉睡');
+
+  fs.appendFileSync(fp, line({ type: 'event_msg', payload: { type: 'task_started' } }));
+  fs.utimesSync(fp, old, old); // 模拟 Windows 未推进 LastWriteTime
+  w.tick();
+  assert.strictEqual(w._trackers.has(fp), true, '字节增长必须重新激活 tracker');
+  assert.deepStrictEqual(core.updates.map((u) => u.event), ['TaskStarted']);
+});
+
+check('启动扫描按最后事件时间识别活动，不依赖 LastWriteTime', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-recent-event-${UUID_C}.jsonl`);
+  const eventTime = new Date(Date.now() - 1000).toISOString();
+  fs.writeFileSync(fp, meta(UUID_C)
+    + line({ timestamp: eventTime, type: 'event_msg', payload: { type: 'task_started' } }));
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(fp, old, old);
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1, '近期事件必须进入启动会话列表');
+  assert.strictEqual(core.seeds[0].id, UUID_C);
+  assert.ok(Math.abs(core.seeds[0].updatedAt - Date.parse(eventTime)) < 10);
+});
+
+check('35KB+ 超长 session_meta 行完整解析（cwd / 父会话判定不丢）', () => {
   const { root, dir } = mkSessions();
   const fp = path.join(dir, `rollout-2026-07-11T06-00-00-${UUID_B}.jsonl`);
   const big = {

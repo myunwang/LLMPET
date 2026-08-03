@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('pet', {
   onStats: (cb) => ipcRenderer.on('pet:stats', (_e, data) => cb(data)),
   onMeme: (cb) => ipcRenderer.on('pet:meme', (_e, data) => cb(data)),
   onTravel: (cb) => ipcRenderer.on('pet:travel', (_e, data) => cb(data)),
+  onContentOffset: (cb) => ipcRenderer.on('pet:content-offset', (_e, data) => cb(data)),
   onMemeCatalogChanged: (cb) => ipcRenderer.on('pet:meme-catalog-changed', (_e, data) => cb(data)),
   onPanelStats: (cb) => ipcRenderer.on('panel:stats', (_e, data) => cb(data)),
   onConfig: (cb) => {
@@ -30,9 +31,10 @@ contextBridge.exposeInMainWorld('pet', {
   quit: () => ipcRenderer.send('quit-app'),
   // 双宠模式：只收起自己这只宠（独立事件，另一只和 app 不受影响）
   closePet: () => ipcRenderer.send('close-pet'),
-  // 手动拖动窗口
-  getWinPos: () => ipcRenderer.invoke('get-win-pos'),
-  setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
+  // Main process owns drag coordinates so DOM and BrowserWindow DPI spaces never mix.
+  beginWinDrag: () => ipcRenderer.send('begin-win-drag'),
+  updateWinDrag: () => ipcRenderer.send('update-win-drag'),
+  endWinDrag: () => ipcRenderer.send('end-win-drag'),
   // 唤起 Claude / Codex 客户端
   launchClaude: () => ipcRenderer.send('launch-claude'),
   launchCodex: () => ipcRenderer.send('launch-codex'),
@@ -51,6 +53,7 @@ contextBridge.exposeInMainWorld('pet', {
   primaryAction: () => ipcRenderer.send('primary-action'),
   // 透明空白处点击穿透：渲染端命中测试后切换（true=穿透，鼠标事件仍转发回来）
   setIgnoreMouse: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore),
+  setHitRegions: (regions) => ipcRenderer.send('pet-hit-regions', regions),
   // 选项面板需要更高窗口
   setPetTall: (tall) => ipcRenderer.send('pet-tall', tall),
   // 记事本行动中心需要一大块区域

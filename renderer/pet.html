@@ -9,7 +9,7 @@
   <body>
     <div id="stage">
       <!-- 气泡播报 -->
-      <div id="bubble" class="bubble hidden">
+      <div id="bubble" class="bubble pet-anchor hidden">
         <span id="bubble-text"></span>
       </div>
 
@@ -41,14 +41,14 @@
       </div>
 
       <!-- 思考指示器（thinking 状态：填补 Claude 在想、没输出的空档） -->
-      <div id="think" class="think">
+      <div id="think" class="think pet-anchor">
         <span class="td">💭</span>
         <span class="think-label" data-i18n="state.thinking">思考中</span>
         <span class="dots"><i></i><i></i><i></i></span>
       </div>
 
       <!-- 睡觉指示器（逐渐变大往上飘的 z z Z，醒目） -->
-      <div id="sleep" class="sleep">
+      <div id="sleep" class="sleep pet-anchor">
         <span class="z z1">z</span>
         <span class="z z2">z</span>
         <span class="z z3">Z</span>
@@ -56,50 +56,50 @@
 
 
       <!-- 点击章鱼弹出的泡泡菜单（JS 动态摆放在章鱼四周） -->
-      <div id="radial" class="radial hidden"></div>
+      <div id="radial" class="radial pet-anchor hidden"></div>
 
       <!-- 按工具动作时头顶飘出的道具 emoji -->
-      <div id="prop" class="prop"></div>
+      <div id="prop" class="prop pet-anchor"></div>
       <!-- 表情包：选择后固定出现在桌宠右侧，并同步播放配置的语音包 -->
-      <div id="meme-player" class="meme-player hidden" aria-live="polite">
+      <div id="meme-player" class="meme-player pet-anchor hidden" aria-live="polite">
         <img id="meme-image" alt="" draggable="false" />
         <div id="meme-caption" class="meme-caption"></div>
       </div>
       <!-- 召唤 subagent 时弹出的小分身 -->
-      <div id="sidekick" class="sidekick">🐙</div>
+      <div id="sidekick" class="sidekick pet-anchor">🐙</div>
 
       <!-- 形象二：Claude Code 像素小怪兽 -->
-      <div id="pixel" class="pixel idle">
+      <div id="pixel" class="pixel pet-anchor idle">
         <div class="pixel-zzz">💤</div>
         <div class="pixel-sprite"></div>
         <div class="pixel-ground"></div>
       </div>
 
       <!-- 多会话状态点：每个点 = 一个并行任务，颜色 = 状态 -->
-      <div id="sessions" class="sessions"></div>
+      <div id="sessions" class="sessions pet-anchor"></div>
 
       <!-- 形象四：图标款小章鱼 —— 直接用 tray 图标同一套画法高清重渲的图，100% 还原 -->
-      <div id="mascot" class="mascot idle">
+      <div id="mascot" class="mascot pet-anchor idle">
         <img id="mascot-img" src="../assets/mascot.png" alt="mascot" draggable="false" />
       </div>
 
       <!-- 形象五：月薪喵（猫 meme 表情包皮肤，每个状态一张 GIF，动效由 GIF 自带） -->
-      <div id="cat" class="cat idle">
+      <div id="cat" class="cat pet-anchor idle">
         <img id="cat-img" src="../assets/cat/cat-idle.gif" alt="cat" draggable="false" />
       </div>
 
       <!-- 常驻小额度条 -->
-      <div id="chip" class="chip">
+      <div id="chip" class="chip pet-anchor">
         <span id="chip-cost">$0.000</span>
-        <span class="chip-sep">·</span>
+        <span id="chip-sep" class="chip-sep">·</span>
         <span id="chip-window" data-i18n-title="chip.windowTitle" title="近5小时消耗">5h $0.000</span>
       </div>
 
       <!-- 双宠模式的名牌：这只宠盯的是哪个后端（单宠模式隐藏） -->
-      <div id="agent-tag" class="agent-tag hidden"></div>
+      <div id="agent-tag" class="agent-tag pet-anchor hidden"></div>
 
       <!-- 记事本：有待办时章鱼举起它，点击看 todolist + 操作 -->
-      <div id="notepad" class="notepad hidden" data-i18n-title="todo.notepadTitle" title="待办清单">
+      <div id="notepad" class="notepad pet-anchor hidden" data-i18n-title="todo.notepadTitle" title="待办清单">
         <span class="np-icon">📋</span>
         <span id="np-badge" class="np-badge"></span>
       </div>
@@ -227,6 +227,7 @@
 
     <script src="../shared/i18n.js"></script>
     <script src="../shared/states.js"></script>
+    <script src="../shared/codex-rate-limits.js"></script>
     <script src="icons.js"></script>
     <script src="pet.js"></script>
   </body>

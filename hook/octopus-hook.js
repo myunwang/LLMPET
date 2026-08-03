@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// LLMPET compatibility hook — run by Claude Code as: node octopus-hook.js <Event>
+// LLMPET compatibility hook:
+//   Claude Code: node octopus-hook.js <Event>
+//   Codex:       node octopus-hook.js <Event> codex
 //
 // Reads the hook's stdin JSON, derives a pet state, enriches it from the session
 // transcript (Claude's last message, context usage, API errors, title), figures
@@ -12,6 +14,11 @@ const transport = require('../backend/transport');
 const transcript = require('../backend/transcript');
 const pidwalk = require('../backend/pidwalk');
 const { detectEmotion } = require('../backend/emotion');
+const { recoveryAllowed, recoverPackagedApp } = require('../backend/startup');
+const {
+  enqueueHookEvent,
+  removePendingHookEvent,
+} = require('../backend/hook-queue');
 
 const EVENT_STATE = {
   SessionStart: 'idle',
@@ -19,6 +26,7 @@ const EVENT_STATE = {
   UserPromptSubmit: 'thinking',
   PreToolUse: 'working',
   PostToolUse: 'working',
+  PermissionRequest: 'notification',
   PostToolUseFailure: 'error',
   Stop: 'attention',
   StopFailure: 'error',
@@ -51,9 +59,18 @@ function readStdin() {
 
 function count(v) { return Array.isArray(v) ? v.length : 0; }
 
-function buildBody(event, p) {
+// Codex requires Stop and SubagentStop hooks that exit successfully to return
+// a JSON object on stdout. Other events (and Claude Code) should stay silent.
+function codexSuccessOutput(event, source) {
+  return source === 'codex' && (event === 'Stop' || event === 'SubagentStop')
+    ? { continue: true }
+    : null;
+}
+
+function buildBody(event, p, source = 'claude') {
   let state = EVENT_STATE[event];
   if (!state) return null;
+  const isCodex = source === 'codex';
   // A subagent launch may surface as PreToolUse(Task) without SubagentStart.
   if (event === 'PreToolUse' && p.tool_name === 'Task') state = 'juggling';
   // /clear shows up as SessionEnd(source=clear) → context sweep, not sleep.
@@ -66,12 +83,18 @@ function buildBody(event, p) {
   if (typeof p.session_id !== 'string' || !p.session_id) return null;
   const sid = p.session_id;
   const body = { state, event, session_id: sid };
+  if (isCodex) {
+    body.agent_id = 'codex';
+    body.event_source = 'codex-hook';
+  }
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
   // Forward CC's real transcript path so the server never has to re-derive the
   // encoded project dir (its /._→- guess missed '_', breaking the 10s poll for
   // ~30% of projects: interrupt/API-error/context refresh went silent there).
   if (typeof p.transcript_path === 'string' && p.transcript_path) body.transcript_path = p.transcript_path;
-  if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
+  if (typeof p.tool_name === 'string' && p.tool_name) {
+    body.tool_name = isCodex && p.tool_name === 'apply_patch' ? 'Edit' : p.tool_name;
+  }
   if (typeof p.model === 'string' && p.model) body.model = p.model;
   if (p.stop_hook_active === true) body.stop_hook_active = true;
   // StopFailure carries the API/server error kind (CC 2.1.x enum: server_error,
@@ -84,7 +107,10 @@ function buildBody(event, p) {
   body.session_crons_count = count(p.session_crons);
 
   // Transcript-derived enrichment (read the tail once).
-  const entries = transcript.readTail(p.transcript_path);
+  // Codex explicitly does not guarantee its transcript wire format. Its hooks
+  // already provide the stable fields LLMPET needs, so only Claude uses the
+  // transcript enrichment parser.
+  const entries = isCodex ? null : transcript.readTail(p.transcript_path);
 
   // SessionStart 来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
   // resume/compact 进入已有任务不该触发「新会话欢迎」。有的环境（ccd）不带
@@ -112,6 +138,9 @@ function buildBody(event, p) {
       }
     }
   }
+  if (isCodex && event === 'Stop' && typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim()) {
+    body.assistant_last_output = p.last_assistant_message;
+  }
   if (!body.session_title && event === 'UserPromptSubmit') {
     const pt = transcript.promptTitle(p.prompt);
     if (pt) body.session_title = pt;
@@ -135,7 +164,7 @@ function buildBody(event, p) {
   if (memeResume) {
     body.headless = false;
     body.external_resume = true;
-  } else if (FOCUS_EVENTS.has(event)) {
+  } else if (!isCodex && FOCUS_EVENTS.has(event)) {
     try {
       const r = pidwalk.resolve(process.ppid, 10, sid);
       if (r.sourcePid) body.source_pid = r.sourcePid;
@@ -151,17 +180,82 @@ function buildBody(event, p) {
   return body;
 }
 
+function deliverStateWithRecovery(body, options = {}) {
+  const postState = options.postState || transport.postState;
+  const canRecover = options.canRecover || (() => recoveryAllowed());
+  const enqueue = options.enqueue || ((eventBody) => enqueueHookEvent(eventBody));
+  const discard = options.discard || ((filePath) => removePendingHookEvent(filePath));
+  const recover = options.recover || (() => recoverPackagedApp({ hookDir: __dirname }));
+  const finish = typeof options.finish === 'function' ? options.finish : () => {};
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 250;
+  const setTimer = options.setTimer || setTimeout;
+  const clearTimer = options.clearTimer || clearTimeout;
+  let finished = false;
+  let delivered = false;
+  let queuedPath = null;
+  let timer = null;
+
+  const complete = (ok) => {
+    if (finished) return;
+    finished = true;
+    if (timer) clearTimer(timer);
+    finish(ok);
+  };
+  const queueAndRecover = () => {
+    if (delivered || !canRecover()) return false;
+    if (!queuedPath) queuedPath = enqueue(body);
+    if (!queuedPath) return false;
+    recover();
+    return true;
+  };
+
+  try {
+    postState(body, (ok) => {
+      if (ok === true) {
+        delivered = true;
+        if (queuedPath) discard(queuedPath);
+        complete(true);
+        return;
+      }
+      queueAndRecover();
+      complete(false);
+    });
+  } catch {
+    queueAndRecover();
+    complete(false);
+  }
+
+  if (!finished) {
+    timer = setTimer(() => {
+      queueAndRecover();
+      complete(false);
+    }, timeoutMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  }
+}
+
 function main() {
   const event = process.argv[2];
+  const source = process.argv[3] === 'codex' ? 'codex' : 'claude';
   if (!EVENT_STATE[event]) process.exit(0);
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    const output = codexSuccessOutput(event, source);
+    if (output) {
+      process.stdout.write(`${JSON.stringify(output)}\n`, () => process.exit(0));
+      return;
+    }
+    process.exit(0);
+  };
   readStdin().then((payload) => {
     let body;
-    try { body = buildBody(event, payload || {}); } catch { body = null; }
-    if (!body) process.exit(0);
-    transport.postState(body, () => process.exit(0));
-    setTimeout(() => process.exit(0), 250); // never hang Claude Code
-  }).catch(() => process.exit(0));
+    try { body = buildBody(event, payload || {}, source); } catch { body = null; }
+    if (!body) return finish();
+    deliverStateWithRecovery(body, { finish });
+  }).catch(finish);
 }
 
 if (require.main === module) main();
-module.exports = { buildBody, EVENT_STATE };
+module.exports = { buildBody, codexSuccessOutput, deliverStateWithRecovery, EVENT_STATE };

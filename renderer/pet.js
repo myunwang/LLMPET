@@ -7,6 +7,14 @@ const AGENT = new URLSearchParams(location.search).get('agent') || 'all';
 const AGENT_LABEL = { claude: 'Claude', codex: 'Codex' }[AGENT] || '';
 
 const stage = document.getElementById('stage');
+if (window.pet && typeof window.pet.onContentOffset === 'function') {
+  window.pet.onContentOffset((offset = {}) => {
+    const x = Number.isFinite(offset.x) ? offset.x : 0;
+    const y = Number.isFinite(offset.y) ? offset.y : 0;
+    stage.style.setProperty('--pet-content-offset-x', `${x}px`);
+    stage.style.setProperty('--pet-content-offset-y', `${y}px`);
+  });
+}
 const pixel = document.getElementById('pixel');
 const mascot = document.getElementById('mascot');
 const mascotImg = document.getElementById('mascot-img');
@@ -183,6 +191,7 @@ const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');
 const chipCost = document.getElementById('chip-cost');
 const chipWindow = document.getElementById('chip-window');
+const chipSep = document.getElementById('chip-sep');
 const chip = document.getElementById('chip');
 const sessionsEl = document.getElementById('sessions');
 const radial = document.getElementById('radial');
@@ -1863,6 +1872,7 @@ let transientUntil = 0;   // 短暂状态（happy/error）持续到的时间
 let transientState = null;
 let muted = false;
 let skin = 'mascot';
+let codexChipMode = 'usage';
 let lastWaiting = 0;
 let lastBgZombie = 0; // 后台疑似僵尸数
 let radialOpen = false;
@@ -2328,15 +2338,33 @@ function applyStats(s) {
     // Codex 没有逐 token 价目，额度条显示套餐窗口用量（5h 主窗口 + 周窗口）
     const rl = s.codexLimits;
     const today = s.codexUsage && s.codexUsage.today;
-    chipCost.textContent = today && today.tokens
-      ? compactTokens(today.tokens) + ' tok'
-      : 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
-    chipWindow.textContent = rl && rl.usedPercent != null
-      ? t('chip.quota', { pct: Math.round(rl.usedPercent) })
-        + (rl.secondaryUsedPercent != null ? t('chip.weekly', { pct: Math.round(rl.secondaryUsedPercent) }) : '')
-      : t('chip.quotaNone');
-    chipWindow.title = t('chip.codexTitle');
+    if (codexChipMode === 'weeklyRemaining') {
+      const remaining = window.CodexRateLimits.weeklyRemainingPercent(rl);
+      chipCost.textContent = remaining == null
+        ? t('chip.weeklyRemainingUnavailable')
+        : t('chip.weeklyRemaining', { pct: remaining });
+      chipCost.title = t('chip.codexTitle');
+      chipSep.style.display = 'none';
+      chipWindow.style.display = 'none';
+    } else {
+      chipCost.textContent = today && today.tokens
+        ? compactTokens(today.tokens) + ' tok'
+        : 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
+      chipCost.title = '';
+      chipSep.style.display = '';
+      chipWindow.style.display = '';
+      const primaryIsWeekly = rl && Number(rl.windowMinutes) >= 6 * 24 * 60;
+      chipWindow.textContent = rl && rl.usedPercent != null
+        ? (primaryIsWeekly
+          ? t('chip.weeklyOnly', { pct: Math.round(rl.usedPercent) })
+          : t('chip.quota', { pct: Math.round(rl.usedPercent) })
+            + (rl.secondaryUsedPercent != null ? t('chip.weekly', { pct: Math.round(rl.secondaryUsedPercent) }) : ''))
+        : t('chip.quotaNone');
+      chipWindow.title = t('chip.codexTitle');
+    }
   } else {
+    chipSep.style.display = '';
+    chipWindow.style.display = '';
     chipCost.textContent = '$' + (s.today.cost || 0).toFixed(3);
     chipWindow.textContent = '5h $' + (s.window5h.cost || 0).toFixed(3);
   }
@@ -2420,9 +2448,11 @@ window.pet.onConfig((cfg) => {
   territorySupported = !!cfg.territorySupported;
   if (cfg.lang) applyLang(cfg.lang);
   if (cfg.skin) applySkin(cfg.skin);
+  codexChipMode = cfg.codexChipMode === 'weeklyRemaining' ? 'weeklyRemaining' : 'usage';
   pinnedSessionIds = Array.isArray(cfg.pinnedSessions) ? cfg.pinnedSessions.slice() : [];
   archivedSessionIds = Array.isArray(cfg.archivedSessions) ? cfg.archivedSessions.slice() : [];
   if (sessListOpen && !memeTarget) renderSessList();
+  if (lastStats && AGENT === 'codex') applyStats(lastStats);
 });
 
 // Static markup carries its Chinese text inline (so the window is never blank
@@ -2472,6 +2502,32 @@ function reportPetVisualBounds() {
   try { window.pet.petVisualBounds({ x: r.left, y: r.top, width: r.width, height: r.height }); } catch {}
 }
 
+let hitRegionFrame = 0;
+function reportPetHitRegions() {
+  hitRegionFrame = 0;
+  const regions = [];
+  for (const el of stage.children) {
+    const style = getComputedStyle(el);
+    if (el.classList.contains('hidden') || style.display === 'none' || style.visibility === 'hidden') continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) continue;
+    regions.push({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }
+  try { window.pet.setHitRegions(regions); } catch {}
+}
+
+function schedulePetHitRegions() {
+  if (hitRegionFrame) return;
+  hitRegionFrame = requestAnimationFrame(reportPetHitRegions);
+}
+
+new MutationObserver(schedulePetHitRegions).observe(stage, {
+  attributes: true,
+  childList: true,
+  subtree: true,
+  attributeFilter: ['class', 'style'],
+});
+
 // ====================================================================
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
@@ -2481,17 +2537,17 @@ function attachDrag(el) {
     if (e.button !== 0) return;
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
-    g = { el, pid: e.pointerId, sx: e.screenX, sy: e.screenY, moved: false, win: null };
-    window.pet.getWinPos().then(([wx, wy]) => { if (g) g.win = [wx, wy]; });
+    g = { el, pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
+    window.pet.beginWinDrag();
   });
   el.addEventListener('pointermove', (e) => {
     if (!g) return;
-    const dx = e.screenX - g.sx;
-    const dy = e.screenY - g.sy;
+    const dx = e.clientX - g.sx;
+    const dy = e.clientY - g.sy;
     if (!g.moved && Math.abs(dx) + Math.abs(dy) > 4) g.moved = true;
-    if (g.moved && g.win) {
+    if (g.moved) {
       if (radialOpen) closeRadial();
-      window.pet.setWinPos(g.win[0] + dx, g.win[1] + dy);
+      window.pet.updateWinDrag();
     }
   });
   el.addEventListener('pointerup', () => {
@@ -2500,6 +2556,7 @@ function attachDrag(el) {
     try { el.releasePointerCapture(g.pid); } catch {}
     el.classList.remove('dragging');
     g = null;
+    window.pet.endWinDrag();
     if (!wasMove) {
       // 左键短按 = 会话列表 HUD（状态/会话名/上下文用量一览，点行聚焦该会话）。
       // 权限的允许/拒绝仍由 waiting 事件自动弹气泡，不走这里。
@@ -2507,7 +2564,11 @@ function attachDrag(el) {
       else toggleSessList();
     }
   });
-  el.addEventListener('pointercancel', () => { if (g) el.classList.remove('dragging'); g = null; });
+  el.addEventListener('pointercancel', () => {
+    if (g) el.classList.remove('dragging');
+    g = null;
+    window.pet.endWinDrag();
+  });
   // 右键 = 泡泡菜单
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -2780,6 +2841,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
     territorySupported = !!cfg.territorySupported;
     window.OctoI18n.setLang(cfg.lang || 'zh');
     applySkin(cfg.skin || 'mascot');
+    codexChipMode = cfg.codexChipMode === 'weeklyRemaining' ? 'weeklyRemaining' : 'usage';
   }
   applyStaticI18n();
   await loadMemeCatalog();
@@ -2835,6 +2897,9 @@ setInterval(() => {
 // 常驻轮询只留一个低频兜底,不必每 500ms 强制一次 getBoundingClientRect 回流。
 window.addEventListener('resize', () => requestAnimationFrame(() => {
   reportPetVisualBounds();
+  reportPetHitRegions();
   alignMemePlayer();
 }));
 setInterval(reportPetVisualBounds, 3000);
+setInterval(reportPetHitRegions, 3000);
+schedulePetHitRegions();

@@ -102,6 +102,7 @@ assert.strictEqual(i18n.getLang(), 'zh', 'an unknown language must fall back to 
 
 // ── 6. config accepts exactly the supported languages ────────────────────────
 assert.strictEqual(config.DEFAULTS.lang, 'zh');
+assert.strictEqual(config.DEFAULTS.startupRecovery, false);
 
 // ── 7. meme catalog is localized, prompt included ────────────────────────────
 const catalog = loadCatalog();

@@ -115,6 +115,26 @@ function createCore(options = {}) {
     s[key] = value;
   }
 
+  // Hooks and the rollout watcher can report the same Codex lifecycle event.
+  // Match equivalent cross-source events as a short-lived multiset so batched
+  // rollout reads do not replay animations already delivered by hooks.
+  function isCrossSourceDuplicate(s, incomingState, event, f, now) {
+    if (f.agentId !== 'codex' || !f.eventSource || !event) return false;
+    const key = `${event}\u0000${f.toolName || ''}\u0000${incomingState || ''}`;
+    const recent = Array.isArray(s.codexSourceEvents)
+      ? s.codexSourceEvents.filter((entry) => now - entry.at < 15000)
+      : [];
+    const match = recent.find((entry) => !entry.matched && entry.source !== f.eventSource && entry.key === key);
+    if (match) {
+      match.matched = true;
+      s.codexSourceEvents = recent;
+      return true;
+    }
+    recent.push({ key, source: f.eventSource, at: now, matched: false });
+    s.codexSourceEvents = recent.slice(-64);
+    return false;
+  }
+
   // Ingest one hook state update for a session (Claude Code only).
   function updateSession(sid, incomingState, event, f = {}) {
     const id = sid || 'default';
@@ -159,6 +179,16 @@ function createCore(options = {}) {
       if (s.assistantLastOutput !== f.assistantLastOutput) assistantChanged = true;
       s.assistantLastOutput = f.assistantLastOutput;
       s.assistantLastOutputTruncated = f.assistantLastOutputTruncated === true;
+    }
+
+    if (isCrossSourceDuplicate(s, incomingState, event, f, now)) {
+      s.pendingUserEmotion = null;
+      s.pendingAssistantEmotion = null;
+      s.pendingSessionSource = null;
+      s.updatedAt = now;
+      sessions.set(id, s);
+      onDirty();
+      return s;
     }
 
     // Resolve the stored state.
