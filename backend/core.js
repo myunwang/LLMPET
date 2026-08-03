@@ -135,7 +135,10 @@ function createCore(options = {}) {
     setField(s, 'tmuxClient', f.tmuxClient);
     setField(s, 'terminalApp', f.terminalApp);
     setField(s, 'terminalTty', f.terminalTty);
+    setField(s, 'wtProcessId', f.wtProcessId);
     setField(s, 'wtHwnd', f.wtHwnd);
+    setField(s, 'wtSession', f.wtSession);
+    setField(s, 'wtTabRuntimeId', f.wtTabRuntimeId);
     setField(s, 'ghosttyTerminalId', f.ghosttyTerminalId);
     setField(s, 'originator', f.originator);
     setField(s, 'model', f.model);
@@ -301,7 +304,10 @@ function createCore(options = {}) {
       tmuxClient: s.tmuxClient || null,
       terminalApp: s.terminalApp || null,
       terminalTty: s.terminalTty || null,
+      wtProcessId: s.wtProcessId || null,
       wtHwnd: s.wtHwnd || null,
+      wtSession: s.wtSession || null,
+      wtTabRuntimeId: Array.isArray(s.wtTabRuntimeId) ? s.wtTabRuntimeId : null,
       ghosttyTerminalId: s.ghosttyTerminalId || null,
     };
   }

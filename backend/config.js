@@ -27,6 +27,7 @@ const DEFAULTS = Object.freeze({
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
   archivedSessions: [],   // 会话 HUD 归档项（不影响后端任务本身）
+  terminalFocusBrokerEnabled: false, // Windows 高权限标签聚焦：显式选择加入
 });
 
 let cache = null;
@@ -66,6 +67,7 @@ function sanitize(raw) {
   out.pinnedSessions = sanitizeSessionIds(raw.pinnedSessions);
   out.archivedSessions = sanitizeSessionIds(raw.archivedSessions)
     .filter((id) => !out.pinnedSessions.includes(id));
+  out.terminalFocusBrokerEnabled = raw.terminalFocusBrokerEnabled === true;
   return out;
 }
 
