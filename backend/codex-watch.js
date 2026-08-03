@@ -157,6 +157,9 @@ function createCodexWatch(deps) {
   // offset，会把整份 rollout 当成新会话从头重放，触发旧欢迎/完成/气泡风暴。
   // 启动首轮也会记录所有历史文件的 EOF，使旧会话再次活跃时只吃新增内容。
   const cursors = new Map();
+  // Windows 上 LastWriteTime 可能被延迟、缓存或保留。活跃判断以实际字节增长
+  // 和 rollout 最后一条带 timestamp 的事件为主，mtime 只作为兼容兜底。
+  const fileActivity = new Map();
   let timer = null;
   let booted = false;      // 首轮扫描 = backfill；之后的新文件才是「新会话」
   let tickCount = 0;       // 全量扫描节拍（FULL_SWEEP_TICKS 轮一次）
@@ -178,10 +181,41 @@ function createCodexWatch(deps) {
     return dirs;
   }
 
-  function statEntry(fp) {
+  function readLastEventAt(fp, size) {
+    const start = Math.max(0, size - TAIL_PROBE_BYTES);
+    const tail = readBytes(fp, start, size - start);
+    if (!tail) return 0;
+    const lines = tail.toString('utf8').split('\n');
+    if (start > 0) lines.shift();
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const obj = parseLine(lines[i]);
+      const at = Date.parse(obj && obj.timestamp);
+      if (Number.isFinite(at)) return at;
+    }
+    return 0;
+  }
+
+  function statEntry(fp, now = Date.now()) {
     try {
       const st = fs.statSync(fp);
-      return { fp, size: st.size, mtimeMs: st.mtimeMs };
+      const previous = fileActivity.get(fp);
+      const sizeChanged = !!previous && previous.size !== st.size;
+      const lastEventAt = !previous || sizeChanged
+        ? readLastEventAt(fp, st.size)
+        : previous.lastEventAt;
+      const growthAt = sizeChanged ? now : (previous && previous.growthAt || 0);
+      fileActivity.set(fp, { size: st.size, lastEventAt, growthAt });
+      const mtimeFallback = now - st.mtimeMs <= IDLE_UNTRACK_MS ? st.mtimeMs : 0;
+      const activityAt = Math.max(lastEventAt || 0, growthAt || 0, mtimeFallback);
+      return {
+        fp,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        lastEventAt,
+        growthAt,
+        activityAt,
+        active: activityAt > 0 && now - activityAt <= IDLE_UNTRACK_MS,
+      };
     } catch { return null; }
   }
 
@@ -199,7 +233,7 @@ function createCodexWatch(deps) {
     return out;
   }
 
-  // 全量扫描：递归所有 年/月/日 目录，只收 1h 内仍在写的文件。
+  // 全量扫描：递归所有 年/月/日 目录，只收仍有字节增长或近期事件的文件。
   // rollout 永远留在「会话开始日」的目录里——ChatGPT Desktop 一个对话连聊几天，
   // 文件还在 5 天前的目录里被追加（实测踩坑）。只扫今天/昨天永远看不见它，
   // 所以启动第一轮 + 之后每 FULL_SWEEP_TICKS 轮做一次全量兜底。
@@ -225,7 +259,7 @@ function createCodexWatch(deps) {
             const e = statEntry(path.join(sessionsDir, y, m, d, n));
             if (!e) continue;
             if (onFile) onFile(e);
-            if (now - e.mtimeMs <= IDLE_UNTRACK_MS) out.push(e);
+            if (e.active) out.push(e);
           }
         }
       }
@@ -607,11 +641,12 @@ function createCodexWatch(deps) {
   }
 
   // ── 启动 backfill：头部读 meta、尾部读近况，静默聚合入库 ──────────────────────
-  function backfill(t, size, mtimeMs) {
+  function backfill(t, entry) {
+    const { size, mtimeMs, activityAt, lastEventAt } = entry;
     hydrateMeta(t);
     t.offset = size; // 历史不回放，此后只吃新增
     cursors.set(t.fp, { offset: size, carry: '' });
-    if (Date.now() - mtimeMs > BACKFILL_MAX_AGE_MS) return; // 太久没动的不上列表
+    if (!activityAt || Date.now() - activityAt > BACKFILL_MAX_AGE_MS) return;
 
     let title = null;
     let contextUsage = null;
@@ -623,7 +658,7 @@ function createCodexWatch(deps) {
       for (const line of lines) {
         const obj = parseLine(line);
         if (!obj) continue;
-        observeBackfillLine(t, obj, mtimeMs);
+        observeBackfillLine(t, obj, lastEventAt || mtimeMs);
         if (obj.type !== 'event_msg') continue;
         const p = obj.payload || {};
         if (!t.isSubagent && p.type === 'user_message' && !title) title = promptTitle(String(p.message || ''));
@@ -637,7 +672,7 @@ function createCodexWatch(deps) {
         }
       }
     }
-    const stateAt = t.sourceStateAt || mtimeMs;
+    const stateAt = t.sourceStateAt || lastEventAt || activityAt || mtimeMs;
     t.titleSet = !!title;
     return { t, stateAt, seed: {
       id: t.sid,
@@ -699,7 +734,7 @@ function createCodexWatch(deps) {
       if (fullSweep) {
         const seen = new Set(found.map((f) => f.fp));
         // 首轮把所有历史 rollout 的 EOF 记下来。之后某个旧文件重新活跃时，
-        // 可以从这个游标继续，而不是因为 mtime 变新就误当作全新文件重放。
+        // 可以从这个游标继续，而不是把后续字节增长误当作全新文件重放。
         const rememberAtBoot = !booted
           ? (f) => { if (!cursors.has(f.fp)) cursors.set(f.fp, { offset: f.size, carry: '' }); }
           : null;
@@ -711,14 +746,15 @@ function createCodexWatch(deps) {
     }
     // ① 发现新文件 → 建 tracker（启动第一轮走静默 backfill，之后按新会话走事件流）
     const initialSeeds = [];
-    for (const { fp, size, mtimeMs } of found) {
+    for (const entry of found) {
+      const { fp, size } = entry;
       if (trackers.has(fp)) continue;
-      if (now - mtimeMs > IDLE_UNTRACK_MS) continue; // 陈年文件不建 tracker
+      if (!entry.active) continue;
       const prior = booted ? cursors.get(fp) : null;
       const t = newTracker(fp, prior);
       trackers.set(fp, t);
       if (!booted) {
-        const candidate = backfill(t, size, mtimeMs);
+        const candidate = backfill(t, entry);
         if (candidate) initialSeeds.push(candidate);
       } else if (prior) {
         // 旧/暂停会话恢复：meta 只用于恢复身份，不派发 SessionStart；随后只泵增量。
@@ -735,11 +771,11 @@ function createCodexWatch(deps) {
     for (const [fp, t] of trackers) {
       const e = statEntry(fp);
       if (!e) { trackers.delete(fp); continue; }              // 文件没了
-      if (now - e.mtimeMs > IDLE_UNTRACK_MS) {
+      if (!e.active) {
         cursors.set(fp, { offset: t.offset, carry: t.carry });
         trackers.delete(fp);
         continue;
-      } // 凉了，退场但保留游标
+      } // 没有字节增长且最后事件已过期：退场但保留游标
       pump(t, e.size);
     }
     booted = true;
@@ -757,7 +793,15 @@ function createCodexWatch(deps) {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  return { start, stop, tick, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
+  return {
+    start,
+    stop,
+    tick,
+    getRateLimits: () => rateLimits,
+    _trackers: trackers,
+    _cursors: cursors,
+    _fileActivity: fileActivity,
+  };
 }
 
 module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool };

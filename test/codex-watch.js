@@ -299,6 +299,43 @@ check('几天前日期目录里的活跃文件：启动即入库，之后每轮�
   w.tick(); // 第二轮不是全量轮：tracker 直连 stat 也必须泵到
   assert.ok(core.updates.some((u) => u.event === 'TaskStarted'), '非全量轮也要跟进旧目录文件的增量');
 });
+
+check('Windows LastWriteTime 不变时，文件大小增长仍判定为活动', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-stale-mtime-${UUID_B}.jsonl`);
+  const oldTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  fs.writeFileSync(fp, meta(UUID_B)
+    + line({ timestamp: oldTimestamp, type: 'event_msg', payload: { type: 'task_complete' } }));
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(fp, old, old);
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(w._trackers.has(fp), false, '旧事件且无增长时应保持沉睡');
+
+  fs.appendFileSync(fp, line({ type: 'event_msg', payload: { type: 'task_started' } }));
+  fs.utimesSync(fp, old, old); // 模拟 Windows 未推进 LastWriteTime
+  w.tick();
+  assert.strictEqual(w._trackers.has(fp), true, '字节增长必须重新激活 tracker');
+  assert.deepStrictEqual(core.updates.map((u) => u.event), ['TaskStarted']);
+});
+
+check('启动扫描按最后事件时间识别活动，不依赖 LastWriteTime', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-recent-event-${UUID_C}.jsonl`);
+  const eventTime = new Date(Date.now() - 1000).toISOString();
+  fs.writeFileSync(fp, meta(UUID_C)
+    + line({ timestamp: eventTime, type: 'event_msg', payload: { type: 'task_started' } }));
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(fp, old, old);
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1, '近期事件必须进入启动会话列表');
+  assert.strictEqual(core.seeds[0].id, UUID_C);
+  assert.ok(Math.abs(core.seeds[0].updatedAt - Date.parse(eventTime)) < 10);
+});
+
 check('35KB+ 超长 session_meta 行完整解析（cwd / 父会话判定不丢）', () => {
   const { root, dir } = mkSessions();
   const fp = path.join(dir, `rollout-2026-07-11T06-00-00-${UUID_B}.jsonl`);
