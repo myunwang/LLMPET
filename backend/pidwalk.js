@@ -12,7 +12,6 @@
 // is not free. Used only to power "💬 去回复" focus — purely a convenience signal.
 
 const { execFileSync } = require('child_process');
-const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -84,23 +83,20 @@ function hasWtTabRoute(value) {
 function captureWindowsTerminalTabRoute(options = {}) {
   const execFileSyncFn = options.execFileSync || execFileSync;
   const helperPath = options.helperPath || WT_TAB_CAPTURE_HELPER;
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 1200;
-  const marker = options.marker || `LLMPET-${crypto.randomUUID().replace(/-/g, '')}`;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 900;
   try {
     const output = execFileSyncFn('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',
       '-File', helperPath,
-      '-Marker', marker,
       '-TimeoutMs', String(timeoutMs),
     ], {
       encoding: 'utf8',
       timeout: timeoutMs + 1500,
-      // The helper must inherit the hook's existing ConPTY association. Using
-      // CREATE_NO_WINDOW here would recreate the AttachConsole failure that
-      // caused clicks to open a replacement terminal.
-      windowsHide: false,
+      // Capture uses the selected UI Automation tab in the foreground Terminal
+      // window, so it does not need to attach to or mutate the hook's ConPTY.
+      windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const lines = String(output || '').trim().split(/\r?\n/).filter(Boolean);
@@ -119,9 +115,10 @@ function enrichWindowsTabRoute(base, options = {}) {
   const wtSession = normalizeWtSession(options.wtSession);
   const refresh = options.refresh === true;
   const now = Number.isFinite(options.now) ? options.now : Date.now();
-  const recentlyAttempted = Number.isFinite(base && base.wtTabCaptureAttemptedAt)
-    && now - base.wtTabCaptureAttemptedAt < 60000;
-  if (!wtSession || (!refresh && (hasWtTabRoute(base) || recentlyAttempted))) {
+  // Foreground selection is authoritative only while the user starts a session
+  // or submits a prompt. Tool hooks can run much later while another Terminal
+  // tab is foreground, so they must only reuse a route and never capture one.
+  if (!wtSession || !refresh) {
     return { result: base, changed: false };
   }
   const capture = options.capture || captureWindowsTerminalTabRoute;

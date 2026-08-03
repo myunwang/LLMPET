@@ -111,7 +111,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
-- 钩子在 Windows 下经 PowerShell 运行；会话活动时会通过短暂且自动恢复的标题标记记录 Windows Terminal 标签身份。点击会话只选择这个已经存在的标签；标签已关闭或暂时没有定位信息时保留菜单并提示重试，绝不会新建终端。
+- 钩子在 Windows 下经 PowerShell 运行；开始会话或提交消息时会记录前台 Windows Terminal 中当前选中的标签身份。点击会话只选择这个已经存在的标签；标签已关闭或暂时没有定位信息时保留菜单并提示重试，绝不会新建终端。
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
 

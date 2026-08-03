@@ -91,7 +91,6 @@ async function main() {
 
   let captureOptions = null;
   const captured = captureWindowsTerminalTabRoute({
-    marker: 'LLMPET-0123456789abcdef0123456789abcdef',
     execFileSync: (_bin, args, options) => {
       captureOptions = { args, options };
       return '{"ok":true,"reason":"captured","hwnd":"123456","runtimeId":[42,-7,9001]}\n';
@@ -99,8 +98,9 @@ async function main() {
   });
   assert.deepStrictEqual(captured, { wtHwnd: '123456', wtTabRuntimeId: [42, -7, 9001] });
   assert(captureOptions.args.includes('-File') && captureOptions.args.includes(WT_TAB_CAPTURE_HELPER));
-  assert.strictEqual(captureOptions.options.windowsHide, false,
-    'capture helper must inherit the hook ConPTY instead of creating a detached console');
+  assert(!captureOptions.args.includes('-Marker'));
+  assert.strictEqual(captureOptions.options.windowsHide, true,
+    'foreground UI Automation capture must not flash a PowerShell window');
 
   let captures = 0;
   const existing = enrichWindowsTabRoute(SESSION, {
@@ -111,13 +111,14 @@ async function main() {
   assert.strictEqual(existing.changed, false);
   assert.strictEqual(captures, 0, 'a cached exact route should be reused within the turn');
 
-  const missing = enrichWindowsTabRoute({ wtTabCaptureAttemptedAt: 100000 }, {
+  const missing = enrichWindowsTabRoute({ wtTabCaptureAttemptedAt: 1 }, {
     wtSession: WT_SESSION,
     capture: () => { captures++; return null; },
-    now: 100500,
+    now: 999999,
   });
   assert.strictEqual(missing.changed, false);
-  assert.strictEqual(captures, 0, 'PreToolUse must not retry a failed capture for every tool');
+  assert.strictEqual(captures, 0,
+    'tool hooks must never capture whichever Terminal tab happens to be foreground');
 
   const refreshed = enrichWindowsTabRoute(SESSION, {
     wtSession: WT_SESSION,
@@ -135,25 +136,31 @@ async function main() {
 
   const captureSource = fs.readFileSync(WT_TAB_CAPTURE_HELPER, 'utf8');
   const focusSource = fs.readFileSync(WINDOWS_TERMINAL_HELPER, 'utf8');
-  assert(/finally\s*\{[\s\S]*SetConsoleTitle\(\$originalTitle\)/.test(captureSource),
-    'temporary capture title must always be restored');
+  assert(captureSource.includes('GetForegroundWindow'));
+  assert(captureSource.includes('SelectionItemPattern'));
+  assert(captureSource.includes('IsSelected'));
   assert(captureSource.includes('GetRuntimeId()'));
+  assert(!captureSource.includes('SetConsoleTitle') && !captureSource.includes('AttachConsole'),
+    'capture must not depend on a hook console or mutate the tab title');
   assert(focusSource.includes('SelectionItemPattern'));
   assert(focusSource.includes('Test-RuntimeIdEqual'));
   assert(!focusSource.includes('AttachConsole') && !focusSource.includes('SetConsoleTitle'),
     'click-time focus must not attach to or rename a console');
 
   if (process.platform === 'win32') {
-    for (const [helper, args] of [
-      [WT_TAB_CAPTURE_HELPER, ['-Marker', 'invalid']],
-      [WINDOWS_TERMINAL_HELPER, ['-WindowHandle', 'invalid', '-RuntimeId', 'invalid']],
-    ]) {
-      const parsed = childProcess.spawnSync('powershell.exe', [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helper, ...args,
-      ], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-      assert.strictEqual(parsed.status, 2, parsed.stderr);
-      assert.strictEqual(JSON.parse(parsed.stdout.trim()).reason, 'invalid-arguments');
-    }
+    const captureParsed = childProcess.spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', WT_TAB_CAPTURE_HELPER, '-TimeoutMs', '250',
+    ], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    assert([0, 1].includes(captureParsed.status), captureParsed.stderr);
+    assert.strictEqual(typeof JSON.parse(captureParsed.stdout.trim()).reason, 'string');
+
+    const focusParsed = childProcess.spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', WINDOWS_TERMINAL_HELPER, '-WindowHandle', 'invalid', '-RuntimeId', 'invalid',
+    ], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    assert.strictEqual(focusParsed.status, 2, focusParsed.stderr);
+    assert.strictEqual(JSON.parse(focusParsed.stdout.trim()).reason, 'invalid-arguments');
   }
 
   const backendFocusSource = fs.readFileSync(path.join(__dirname, '..', 'backend', 'focus.js'), 'utf8');
