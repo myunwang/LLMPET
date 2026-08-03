@@ -11,7 +11,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Live agent state** — see thinking, working, parallel subagents, context cleanup, waiting, errors, completion, and idle time as pet animations.
 - **Claude Code approvals** — allow or deny a Claude Code permission request directly from the pet.
 - **Claude Code + Codex sessions** — one pet can watch both backends, or you can enable separate Claude and Codex pets with independent skins and positions.
-- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and jump to the selected Windows Terminal tab. If that tab is gone, LLMPET resumes the Claude or Codex session in a new tab in the most recently used Terminal window.
+- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and jump to the selected existing Windows Terminal tab. If that tab is unavailable, LLMPET reports the failure and never opens a replacement terminal.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.

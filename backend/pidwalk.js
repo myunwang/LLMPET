@@ -12,6 +12,7 @@
 // is not free. Used only to power "💬 去回复" focus — purely a convenience signal.
 
 const { execFileSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -55,11 +56,80 @@ const HEADLESS_RE = /\s(-p|--print)(\s|$)/;
 const WIN_CACHE = path.join(os.homedir(), '.octopus', 'pidwalk-cache.json');
 const WIN_CACHE_TTL = 6 * 60 * 60 * 1000;
 const WT_SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const WT_TAB_CAPTURE_HELPER = path.join(__dirname, 'capture-windows-terminal-tab.ps1');
 
 function normalizeWtSession(value) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().replace(/^\{([^}]+)\}$/, '$1').toLowerCase();
   return WT_SESSION_RE.test(normalized) ? normalized : null;
+}
+
+function normalizeWtHwnd(value) {
+  const text = String(value == null ? '' : value).trim();
+  if (!/^[1-9]\d{0,18}$/.test(text)) return null;
+  try { return BigInt(text) <= 9223372036854775807n ? text : null; } catch { return null; }
+}
+
+function normalizeWtTabRuntimeId(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) return null;
+  const result = value.map(Number);
+  return result.every((entry) => Number.isInteger(entry) && entry >= -2147483648 && entry <= 2147483647)
+    ? result : null;
+}
+
+function hasWtTabRoute(value) {
+  return !!(value && normalizeWtHwnd(value.wtHwnd) && normalizeWtTabRuntimeId(value.wtTabRuntimeId));
+}
+
+function captureWindowsTerminalTabRoute(options = {}) {
+  const execFileSyncFn = options.execFileSync || execFileSync;
+  const helperPath = options.helperPath || WT_TAB_CAPTURE_HELPER;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 1200;
+  const marker = options.marker || `LLMPET-${crypto.randomUUID().replace(/-/g, '')}`;
+  try {
+    const output = execFileSyncFn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', helperPath,
+      '-Marker', marker,
+      '-TimeoutMs', String(timeoutMs),
+    ], {
+      encoding: 'utf8',
+      timeout: timeoutMs + 1500,
+      // The helper must inherit the hook's existing ConPTY association. Using
+      // CREATE_NO_WINDOW here would recreate the AttachConsole failure that
+      // caused clicks to open a replacement terminal.
+      windowsHide: false,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const lines = String(output || '').trim().split(/\r?\n/).filter(Boolean);
+    const parsed = JSON.parse(lines[lines.length - 1] || '');
+    const wtHwnd = normalizeWtHwnd(parsed && parsed.hwnd);
+    const wtTabRuntimeId = normalizeWtTabRuntimeId(parsed && parsed.runtimeId);
+    return parsed && parsed.ok === true && wtHwnd && wtTabRuntimeId
+      ? { wtHwnd, wtTabRuntimeId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function enrichWindowsTabRoute(base, options = {}) {
+  const wtSession = normalizeWtSession(options.wtSession);
+  const refresh = options.refresh === true;
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const recentlyAttempted = Number.isFinite(base && base.wtTabCaptureAttemptedAt)
+    && now - base.wtTabCaptureAttemptedAt < 60000;
+  if (!wtSession || (!refresh && (hasWtTabRoute(base) || recentlyAttempted))) {
+    return { result: base, changed: false };
+  }
+  const capture = options.capture || captureWindowsTerminalTabRoute;
+  const route = capture();
+  return {
+    result: { ...base, ...(route || {}), wtTabCaptureAttemptedAt: now },
+    changed: true,
+  };
 }
 
 function winCacheRead(key) {
@@ -112,22 +182,43 @@ function winBase(name) {
   return String(name).toLowerCase().replace(/\.exe$/, '');
 }
 
-function resolveWin(startPid, maxDepth, cacheKey) {
+function resolveWin(startPid, maxDepth, cacheKey, options = {}) {
   const wtSession = normalizeWtSession(process.env.WT_SESSION);
   const empty = {
     sourcePid: startPid || null, pidChain: startPid ? [startPid] : [], editor: null,
     headless: false, tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null,
-    wtSession,
+    wtSession, wtHwnd: null, wtTabRuntimeId: null,
   };
   if (!startPid) return empty;
+  const captureTab = options.captureWindowsTab || captureWindowsTerminalTabRoute;
+  const refreshTab = options.refreshWindowsTab === true;
+  const enrichTabRoute = (base) => enrichWindowsTabRoute(base, {
+    wtSession,
+    refresh: refreshTab,
+    capture: captureTab,
+  });
   // The hook's ppid is a transient PowerShell wrapper (different every event),
   // so the cache is keyed by the Claude Code session id instead.
-  const cached = cacheKey ? winCacheRead(cacheKey) : null;
-  if (cached) return { ...cached, wtSession };
+  let cached = cacheKey ? winCacheRead(cacheKey) : null;
+  if (cached && wtSession && cached.wtSession !== wtSession) cached = null;
+  if (cached) {
+    const enriched = enrichTabRoute({ ...cached, wtSession });
+    const result = enriched.result;
+    if (cacheKey && (enriched.changed || cached.wtSession !== wtSession)) winCacheWrite(cacheKey, result);
+    return result;
+  }
 
   let levels;
-  try { levels = winWalkChain(startPid, maxDepth); } catch { return empty; }
-  if (!levels.length) return empty;
+  try { levels = winWalkChain(startPid, maxDepth); } catch {
+    const result = enrichTabRoute(empty).result;
+    if (cacheKey) winCacheWrite(cacheKey, result);
+    return result;
+  }
+  if (!levels.length) {
+    const result = enrichTabRoute(empty).result;
+    if (cacheKey) winCacheWrite(cacheKey, result);
+    return result;
+  }
 
   const chain = [];
   let terminalPid = null;
@@ -150,10 +241,11 @@ function resolveWin(startPid, maxDepth, cacheKey) {
     if (TERMINALS.has(base) && !(i === 0 && HOOK_SHELLS.has(base))) terminalPid = pid; // keep walking: WindowsTerminal sits above cmd/pwsh
     lastGood = pid;
   }
-  const result = {
+  const result = enrichTabRoute({
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
     tmuxSocket: null, tmuxClient: null, terminalApp: null, terminalTty: null, wtSession,
-  };
+    wtHwnd: null, wtTabRuntimeId: null,
+  }).result;
   if (cacheKey) winCacheWrite(cacheKey, result);
   return result;
 }
@@ -161,13 +253,13 @@ function resolveWin(startPid, maxDepth, cacheKey) {
 // Returns focus fields plus an exact input route when one is observable. tmux's
 // pane id and the process tty are stable per session; a GUI app pid is not.
 // `cacheKey` (Windows only): a stable per-session id so hot hooks skip PowerShell.
-function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
+function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null, options = {}) {
   const tmuxSocket = typeof process.env.TMUX === 'string' && process.env.TMUX.startsWith('/')
     ? process.env.TMUX.split(',')[0] : null;
   const tmuxClient = tmuxSocket && typeof process.env.TMUX_PANE === 'string'
     ? process.env.TMUX_PANE.trim() || null : null;
   if (process.platform === 'win32') {
-    return resolveWin(startPid, maxDepth, cacheKey);
+    return resolveWin(startPid, maxDepth, cacheKey, options);
   }
   const chain = [];
   let pid = startPid;
@@ -202,7 +294,17 @@ function resolve(startPid = process.ppid, maxDepth = 10, cacheKey = null) {
   return {
     sourcePid: terminalPid || lastGood || null, pidChain: chain, editor, headless,
     tmuxSocket, tmuxClient, terminalApp, terminalTty, wtSession: null,
+    wtHwnd: null, wtTabRuntimeId: null,
   };
 }
 
-module.exports = { resolve, normalizeWtSession };
+module.exports = {
+  resolve,
+  normalizeWtSession,
+  normalizeWtHwnd,
+  normalizeWtTabRuntimeId,
+  hasWtTabRoute,
+  captureWindowsTerminalTabRoute,
+  enrichWindowsTabRoute,
+  WT_TAB_CAPTURE_HELPER,
+};

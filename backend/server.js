@@ -45,6 +45,12 @@ function normWtSession(v) {
   const t = v.trim().replace(/^\{([^}]+)\}$/, '$1').toLowerCase();
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t) ? t : null;
 }
+function normWtTabRuntimeId(v) {
+  if (!Array.isArray(v) || v.length < 1 || v.length > 32) return null;
+  const result = v.map(Number);
+  return result.every((entry) => Number.isInteger(entry) && entry >= -2147483648 && entry <= 2147483647)
+    ? result : null;
+}
 function normTmuxSocket(v) {
   if (typeof v !== 'string') return null;
   const t = v.trim();
@@ -208,6 +214,7 @@ function createServer(deps) {
         sourcePid: normNum(data.source_pid),
         wtHwnd: normHwnd(data.wt_hwnd ?? data.wtHwnd),
         wtSession: normWtSession(data.wt_session ?? data.wtSession),
+        wtTabRuntimeId: normWtTabRuntimeId(data.wt_tab_runtime_id ?? data.wtTabRuntimeId),
         pidChain: Array.isArray(data.pid_chain) ? data.pid_chain.filter((n) => Number.isFinite(n) && n > 0) : null,
         tmuxSocket: normTmuxSocket(data.tmux_socket),
         tmuxClient: normTmuxClient(data.tmux_client),

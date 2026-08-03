@@ -888,9 +888,10 @@ function visibleSessions() {
 }
 
 function focusFailureText(reason) {
-  if (reason === 'invalid-session-id' || reason === 'session-not-found') return t('sess.focusInvalid');
-  if (reason === 'cli-not-found') return t('sess.focusCliMissing');
-  if (reason === 'terminal-launch-failed') return t('sess.focusLaunchFailed');
+  if (reason === 'session-not-found' || reason === 'window-closed' || reason === 'tab-closed') {
+    return t('sess.focusInvalid');
+  }
+  if (reason === 'route-missing') return t('sess.focusRouteMissing');
   return t('sess.focusFailed');
 }
 

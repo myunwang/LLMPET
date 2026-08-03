@@ -137,7 +137,9 @@ function buildBody(event, p) {
     body.external_resume = true;
   } else if (FOCUS_EVENTS.has(event)) {
     try {
-      const r = pidwalk.resolve(process.ppid, 10, sid);
+      const r = pidwalk.resolve(process.ppid, 10, sid, {
+        refreshWindowsTab: event === 'SessionStart' || event === 'UserPromptSubmit',
+      });
       if (r.sourcePid) body.source_pid = r.sourcePid;
       if (r.pidChain && r.pidChain.length) body.pid_chain = r.pidChain;
       if (r.editor) body.editor = r.editor;
@@ -146,6 +148,8 @@ function buildBody(event, p) {
       if (r.terminalApp) body.terminal_app = r.terminalApp;
       if (r.terminalTty) body.terminal_tty = r.terminalTty;
       if (r.wtSession) body.wt_session = r.wtSession;
+      if (r.wtHwnd) body.wt_hwnd = r.wtHwnd;
+      if (r.wtTabRuntimeId) body.wt_tab_runtime_id = r.wtTabRuntimeId;
       body.headless = r.headless === true; // background `claude -p` runs
     } catch {}
   }

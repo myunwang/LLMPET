@@ -11,6 +11,13 @@ const { createCore } = require('../backend/core');
 const { createPermissions } = require('../backend/permission');
 const { createServer } = require('../backend/server');
 const adapter = require('../backend/adapter');
+const pidwalk = require('../backend/pidwalk');
+
+// Hook focus enrichment is covered in session-focus/codex-hooks. Keep this
+// HTTP/state-machine smoke isolated from the real desktop UI Automation tree;
+// otherwise a running packaged LLMPET can race the test runtime guard while
+// several synthetic SessionStart bodies each wait for a nonexistent tab.
+pidwalk.resolve = () => ({ sourcePid: null, pidChain: [], headless: false });
 
 const events = [];
 let dirtyCount = 0;
@@ -103,20 +110,30 @@ async function main() {
   r = await post('/state', {
     state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x',
     wt_session: '977e6134-10f1-4487-b153-e6845b21716f',
+    wt_hwnd: '123456',
+    wt_tab_runtime_id: [42, -7, 9001],
   });
   check('SessionStart accepted', () => { assert.strictEqual(r.status, 200); assert.strictEqual(r.headers['x-octopus-server'], 'octopus'); });
   check('WT_SESSION is validated and retained', () => {
     assert.strictEqual(core.getSession(SID).wtSession, '977e6134-10f1-4487-b153-e6845b21716f');
+    assert.strictEqual(core.getSession(SID).wtHwnd, '123456');
+    assert.deepStrictEqual(core.getSession(SID).wtTabRuntimeId, [42, -7, 9001]);
+    const entry = core.buildSnapshot().sessions.find((session) => session.id === SID);
+    assert.deepStrictEqual(entry.wtTabRuntimeId, [42, -7, 9001]);
   });
 
   r = await post('/state', {
     state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x',
     wt_session: 'not-a-guid',
+    wt_hwnd: '0',
+    wt_tab_runtime_id: ['bad'],
   });
   check('greet emitted on first prompt（欢迎延迟到首条输入）', () => assert(events.some((e) => e.kind === 'greet')));
   check('session is thinking', () => assert.strictEqual(core.getSession(SID).state, 'thinking'));
   check('invalid WT_SESSION cannot clobber the prior route', () => {
     assert.strictEqual(core.getSession(SID).wtSession, '977e6134-10f1-4487-b153-e6845b21716f');
+    assert.strictEqual(core.getSession(SID).wtHwnd, '123456');
+    assert.deepStrictEqual(core.getSession(SID).wtTabRuntimeId, [42, -7, 9001]);
   });
 
   r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });

@@ -28,33 +28,16 @@ const CLI_DIRS = {
   ],
 };
 
-function findWindowsCli(name, execFileSyncFn = execFileSync) {
-  try {
-    const out = execFileSyncFn('where.exe', [name], {
-      encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const matches = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    const runnable = matches.find((entry) => /\.(?:exe|cmd|bat)$/i.test(entry));
-    if (runnable) return runnable;
-  } catch {}
-
-  const home = os.homedir();
-  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-  const candidates = [
-    path.join(appData, 'npm', `${name}.exe`),
-    path.join(appData, 'npm', `${name}.cmd`),
-    path.join(home, '.local', 'bin', `${name}.exe`),
-    path.join(home, '.local', 'bin', `${name}.cmd`),
-    path.join(home, `.${name}`, 'local', `${name}.exe`),
-  ];
-  return candidates.find((candidate) => {
-    try { return fs.statSync(candidate).isFile(); } catch { return false; }
-  }) || null;
-}
-
 function findCli(name) {
   const plat = process.platform;
-  if (plat === 'win32') return findWindowsCli(name) || name;
+  if (plat === 'win32') {
+    try {
+      const out = execFileSync('where', [name], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+      const line = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      if (line) return line;
+    } catch {}
+    return name;
+  }
   const dirs = CLI_DIRS[name] ? CLI_DIRS[name](os.homedir()) : [];
   for (const c of dirs) { try { fs.accessSync(c, fs.constants.X_OK); return c; } catch {} }
   try {
@@ -323,32 +306,6 @@ async function launchCli(name, opts = {}) {
   return { ok: false, message: 'could not open a terminal' };
 }
 
-async function launchCliInRecentWindowsTerminal(name, opts = {}, deps = {}) {
-  const platform = deps.platform || process.platform;
-  if (platform !== 'win32') return { ok: false, code: 'unsupported-platform' };
-  if (name !== 'claude' && name !== 'codex') return { ok: false, code: 'unsupported-cli' };
-
-  const findWindowsCliFn = deps.findWindowsCli || findWindowsCli;
-  const cli = findWindowsCliFn(name);
-  if (!cli) return { ok: false, code: 'cli-not-found' };
-
-  const existsSync = deps.existsSync || fs.existsSync;
-  const workDir = opts.cwd && existsSync(opts.cwd) ? opts.cwd : os.homedir();
-  const cliArgs = Array.isArray(opts.args) ? opts.args.map((arg) => String(arg)) : [];
-  const spawnFn = deps.trySpawn || trySpawn;
-  const command = /\.(?:cmd|bat)$/i.test(cli)
-    ? ['cmd.exe', '/d', '/c', cli, ...cliArgs]
-    : [cli, ...cliArgs];
-  const args = ['-w', '0', 'new-tab', '-d', workDir, '--', ...command];
-  const ok = await spawnFn('wt.exe', args, {
-    cwd: workDir,
-    env: cleanTerminalLaunchEnv(),
-  });
-  return ok
-    ? { ok: true, terminal: 'wt.exe', cli, args, cwd: workDir }
-    : { ok: false, code: 'terminal-launch-failed' };
-}
-
 const launchClaude = (opts = {}) => launchCli('claude', opts);
 const launchCodex = (opts = {}) => launchCli('codex', opts);
 
@@ -356,13 +313,11 @@ module.exports = {
   launchClaude,
   launchCodex,
   launchCli,
-  launchCliInRecentWindowsTerminal,
   closeCliTerminal,
   closeMacTerminalScript,
   travelCliPids,
   findClaude,
   findCli,
-  findWindowsCli,
   buildCandidates,
   cleanTerminalLaunchEnv,
 };

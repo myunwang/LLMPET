@@ -448,7 +448,7 @@ async function main() {
     check('成功后关闭会话列表', () => assert(w.elements('sesslist').classList.contains('hidden')));
 
     const failed = world();
-    failed.window.pet.focusSession = async () => ({ ok: false, route: 'failed', reason: 'cli-not-found' });
+    failed.window.pet.focusSession = async () => ({ ok: false, route: 'failed', reason: 'route-missing' });
     failed.handlers.stats(baseStats({
       sessions: [{ sessionId: 'focus-failed', agent: 'claude', project: '恢复失败', state: 'idle', headless: false }],
     }));
@@ -461,7 +461,7 @@ async function main() {
     check('彻底失败时列表保留并显示本地化错误', () => {
       assert(!failed.elements('sesslist').classList.contains('hidden'));
       assert(failedRow.classList.contains('focus-error'));
-      assert(failedRow.querySelector('.sl-meta').textContent.includes('Claude/Codex CLI'));
+      assert(failedRow.querySelector('.sl-meta').textContent.includes('标签定位信息'));
     });
   }
 
