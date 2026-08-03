@@ -129,16 +129,47 @@ function enrichWindowsTabRoute(base, options = {}) {
   };
 }
 
+function windowsProcessExists(pid, options = {}) {
+  const kill = options.kill || process.kill.bind(process);
+  try {
+    kill(pid, 0);
+    return true;
+  } catch (error) {
+    // Windows can deny PROCESS_TERMINATE access to the packaged Terminal host.
+    // Node surfaces that access denial as EPERM even though signal 0 is only a
+    // liveness probe. ESRCH is the actual "process is gone" result.
+    return !!(error && error.code === 'EPERM');
+  }
+}
+
 function winCacheRead(key) {
   try {
     const all = JSON.parse(fs.readFileSync(WIN_CACHE, 'utf8'));
     const hit = all && all[String(key)];
     if (!hit || Date.now() - hit.at > WIN_CACHE_TTL) return null;
-    if (hit.result && hit.result.sourcePid) process.kill(hit.result.sourcePid, 0); // stale if the terminal died
+    if (hit.result && hit.result.sourcePid && !windowsProcessExists(hit.result.sourcePid)) return null;
     return hit.result;
   } catch {
     return null;
   }
+}
+
+// The hook writes its freshly captured Windows Terminal tab route to disk
+// before posting the state event. In practice the UI can receive/click an
+// older in-memory session snapshot while that hook delivery is still catching
+// up. Read back only the exact route for the same session id; never guess from
+// a title, cwd, process, or whichever tab happens to be selected at click time.
+function readCachedWindowsTerminalTabRoute(cacheKey, options = {}) {
+  if (typeof cacheKey !== 'string' || !cacheKey.trim()) return null;
+  const readCache = options.readCache || winCacheRead;
+  let cached;
+  try { cached = readCache(cacheKey); } catch { return null; }
+  const wtSession = normalizeWtSession(cached && cached.wtSession);
+  const wtHwnd = normalizeWtHwnd(cached && cached.wtHwnd);
+  const wtTabRuntimeId = normalizeWtTabRuntimeId(cached && cached.wtTabRuntimeId);
+  return wtSession && wtHwnd && wtTabRuntimeId
+    ? { wtSession, wtHwnd, wtTabRuntimeId }
+    : null;
 }
 
 function winCacheWrite(key, result) {
@@ -303,5 +334,7 @@ module.exports = {
   hasWtTabRoute,
   captureWindowsTerminalTabRoute,
   enrichWindowsTabRoute,
+  readCachedWindowsTerminalTabRoute,
+  windowsProcessExists,
   WT_TAB_CAPTURE_HELPER,
 };

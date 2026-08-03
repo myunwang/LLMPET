@@ -15,6 +15,7 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const { log } = require('./log');
+const { readCachedWindowsTerminalTabRoute } = require('./pidwalk');
 
 const WT_SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WINDOWS_TERMINAL_HELPER = path.join(__dirname, 'focus-windows-terminal.ps1');
@@ -93,6 +94,28 @@ function normalizeRuntimeId(value) {
   const result = value.map(Number);
   return result.every((entry) => Number.isInteger(entry) && entry >= -2147483648 && entry <= 2147483647)
     ? result : null;
+}
+
+function hydrateWindowsTerminalTabRoute(session, options = {}) {
+  if (!session || typeof session.id !== 'string') return session;
+  if (
+    typeof session.wtSession === 'string' && WT_SESSION_RE.test(session.wtSession) &&
+    normalizeWindowHandle(session.wtHwnd) && normalizeRuntimeId(session.wtTabRuntimeId)
+  ) return session;
+
+  const readCachedRoute = options.readCachedRoute || readCachedWindowsTerminalTabRoute;
+  let cached = null;
+  try { cached = readCachedRoute(session.id); } catch {}
+  if (!cached) return session;
+
+  // A reused UI session id must never be allowed to cross-wire two Terminal
+  // sessions. The disk route is accepted only when the WT_SESSION identities
+  // agree, or when the in-memory event has not supplied one yet.
+  const currentWtSession = typeof session.wtSession === 'string'
+    ? session.wtSession.trim().replace(/^\{([^}]+)\}$/, '$1').toLowerCase()
+    : null;
+  if (currentWtSession && currentWtSession !== cached.wtSession) return session;
+  return { ...session, ...cached };
 }
 
 function activateWindowsTerminalTab(session, options = {}) {
@@ -175,17 +198,19 @@ async function focusSessionTarget(session, options = {}) {
       : { ok: false, route: 'failed', reason: 'focus-unsupported' };
   }
 
+  const target = hydrateWindowsTerminalTabRoute(session, options);
+
   if (
-    typeof session.wtSession !== 'string' ||
-    !WT_SESSION_RE.test(session.wtSession) ||
-    !normalizeWindowHandle(session.wtHwnd) ||
-    !normalizeRuntimeId(session.wtTabRuntimeId)
+    typeof target.wtSession !== 'string' ||
+    !WT_SESSION_RE.test(target.wtSession) ||
+    !normalizeWindowHandle(target.wtHwnd) ||
+    !normalizeRuntimeId(target.wtTabRuntimeId)
   ) {
     return { ok: false, route: 'failed', reason: 'route-missing' };
   }
 
   const exactFocus = options.exactFocus || activateWindowsTerminalTab;
-  const exact = await exactFocus(session);
+  const exact = await exactFocus(target);
   if (exact && exact.ok) {
     log('focus', `focused Windows Terminal tab for session ${String(session.id).slice(-6)}`);
     return { ok: true, route: 'windows-terminal-tab' };
@@ -202,5 +227,6 @@ module.exports = {
   WT_SESSION_RE,
   normalizeWindowHandle,
   normalizeRuntimeId,
+  hydrateWindowsTerminalTabRoute,
   WINDOWS_TERMINAL_HELPER,
 };

@@ -9,6 +9,7 @@ const {
   focusSessionTarget,
   normalizeWindowHandle,
   normalizeRuntimeId,
+  hydrateWindowsTerminalTabRoute,
   WINDOWS_TERMINAL_HELPER,
 } = require('../backend/focus');
 const {
@@ -16,6 +17,8 @@ const {
   enrichWindowsTabRoute,
   hasWtTabRoute,
   normalizeWtTabRuntimeId,
+  readCachedWindowsTerminalTabRoute,
+  windowsProcessExists,
   WT_TAB_CAPTURE_HELPER,
 } = require('../backend/pidwalk');
 
@@ -36,6 +39,25 @@ async function main() {
   assert.strictEqual(normalizeRuntimeId([]), null);
   assert.deepStrictEqual(normalizeWtTabRuntimeId([1, -2, 3]), [1, -2, 3]);
   assert(hasWtTabRoute(SESSION));
+
+  const cachedRoute = readCachedWindowsTerminalTabRoute(SESSION.id, {
+    readCache: (sessionId) => {
+      assert.strictEqual(sessionId, SESSION.id);
+      return SESSION;
+    },
+  });
+  assert.deepStrictEqual(cachedRoute, {
+    wtSession: WT_SESSION,
+    wtHwnd: '123456',
+    wtTabRuntimeId: [42, -7, 9001],
+  });
+  assert.strictEqual(windowsProcessExists(123, { kill: () => {} }), true);
+  assert.strictEqual(windowsProcessExists(123, {
+    kill: () => { const error = new Error('denied'); error.code = 'EPERM'; throw error; },
+  }), true, 'Windows Terminal EPERM means the process exists but cannot be signalled');
+  assert.strictEqual(windowsProcessExists(123, {
+    kill: () => { const error = new Error('gone'); error.code = 'ESRCH'; throw error; },
+  }), false);
 
   let exactCalls = 0;
   let result = await focusSessionTarget(SESSION, {
@@ -58,10 +80,43 @@ async function main() {
 
   result = await focusSessionTarget({ ...SESSION, wtTabRuntimeId: null }, {
     platform: 'win32',
+    readCachedRoute: () => null,
     exactFocus: async () => { throw new Error('missing routes must not invoke the helper'); },
     legacyFocus: async () => { throw new Error('Windows must not focus a possibly wrong window'); },
   });
   assert.deepStrictEqual(result, { ok: false, route: 'failed', reason: 'route-missing' });
+
+  const memoryStale = { ...SESSION, wtHwnd: null, wtTabRuntimeId: null };
+  let hydratedTarget = null;
+  result = await focusSessionTarget(memoryStale, {
+    platform: 'win32',
+    readCachedRoute: (sessionId) => {
+      assert.strictEqual(sessionId, SESSION.id);
+      return {
+        wtSession: WT_SESSION,
+        wtHwnd: '654321',
+        wtTabRuntimeId: [42, 8, 10],
+      };
+    },
+    exactFocus: async (target) => {
+      hydratedTarget = target;
+      return { ok: true };
+    },
+  });
+  assert.deepStrictEqual(result, { ok: true, route: 'windows-terminal-tab' });
+  assert.strictEqual(hydratedTarget.wtHwnd, '654321');
+  assert.deepStrictEqual(hydratedTarget.wtTabRuntimeId, [42, 8, 10]);
+  assert.strictEqual(memoryStale.wtHwnd, null, 'focus hydration must not mutate the core session');
+
+  const mismatchedRoute = hydrateWindowsTerminalTabRoute(memoryStale, {
+    readCachedRoute: () => ({
+      wtSession: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      wtHwnd: '654321',
+      wtTabRuntimeId: [42, 8, 10],
+    }),
+  });
+  assert.strictEqual(mismatchedRoute, memoryStale,
+    'a cache entry for a different WT_SESSION must never be focused');
 
   result = await focusSessionTarget(SESSION, {
     platform: 'win32',
