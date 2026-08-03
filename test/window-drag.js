@@ -3,7 +3,12 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { beginDrag, nextDragBounds, resizePetLayout } = require('../backend/window-drag');
+const {
+  beginDrag,
+  nextDragBounds,
+  normalizeHitRegions,
+  resizePetLayout,
+} = require('../backend/window-drag');
 
 const drag = beginDrag(
   { x: -400, y: -38, width: 323, height: 344 },
@@ -45,6 +50,20 @@ assert.strictEqual(
   restingBounds.x + restingBounds.width / 2,
   'right-edge clamping must not move the visible pet',
 );
+
+assert.deepStrictEqual(
+  normalizeHitRegions(
+    [
+      { x: 90.5, y: 195.25, width: 120, height: 120 },
+      { x: -50, y: -40, width: 30, height: 20 },
+      { x: 10, y: 10, width: 0, height: 8 },
+      { x: Number.NaN, y: 0, width: 10, height: 10 },
+    ],
+    { width: 320, height: 340 },
+  ),
+  [{ x: 74, y: 179, width: 153, height: 153 }],
+  'native Windows hit regions must be padded, integer, clamped and validated',
+);
 assert.ok(expandedRight.bounds.x >= workArea.x);
 assert.ok(expandedRight.bounds.x + expandedRight.bounds.width <= workArea.x + workArea.width);
 
@@ -84,6 +103,14 @@ assert(/screen\.getCursorScreenPoint\(\)/.test(main), 'main process must sample 
 assert(/if \(st\.drag\) \{ st\.resizeAfterDrag = true; return; \}/.test(main), 'popup resize must be deferred while dragging');
 assert(/resizePetLayout\(/.test(main), 'main process must clamp popup windows and calculate a pet offset');
 assert(/pet:content-offset/.test(main) && /pet:content-offset/.test(preload), 'pet offset must cross the preload boundary');
+assert(/ipcMain\.on\('pet-hit-regions'/.test(main) && /w\.setShape\(shape\)/.test(main),
+  'Windows must use a native shaped hit region instead of forwarded transparent-window mousemove');
+assert(/process\.platform === 'win32'[\s\S]*w\.setIgnoreMouseEvents\(false\)/.test(main),
+  'Windows must keep the shaped window mouse-enabled');
+assert(/setHitRegions:/.test(preload) && /window\.pet\.setHitRegions\(regions\)/.test(renderer),
+  'visible renderer rectangles must cross the preload boundary');
+assert(/new MutationObserver\(schedulePetHitRegions\)/.test(renderer),
+  'popup/skin changes must refresh the native shape');
 assert(/\.pet-anchor/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'pet.css'), 'utf8')),
   'renderer must apply the visual pet offset separately from popup layout');
 

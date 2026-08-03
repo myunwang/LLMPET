@@ -2502,6 +2502,32 @@ function reportPetVisualBounds() {
   try { window.pet.petVisualBounds({ x: r.left, y: r.top, width: r.width, height: r.height }); } catch {}
 }
 
+let hitRegionFrame = 0;
+function reportPetHitRegions() {
+  hitRegionFrame = 0;
+  const regions = [];
+  for (const el of stage.children) {
+    const style = getComputedStyle(el);
+    if (el.classList.contains('hidden') || style.display === 'none' || style.visibility === 'hidden') continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) continue;
+    regions.push({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }
+  try { window.pet.setHitRegions(regions); } catch {}
+}
+
+function schedulePetHitRegions() {
+  if (hitRegionFrame) return;
+  hitRegionFrame = requestAnimationFrame(reportPetHitRegions);
+}
+
+new MutationObserver(schedulePetHitRegions).observe(stage, {
+  attributes: true,
+  childList: true,
+  subtree: true,
+  attributeFilter: ['class', 'style'],
+});
+
 // ====================================================================
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
@@ -2871,6 +2897,9 @@ setInterval(() => {
 // 常驻轮询只留一个低频兜底,不必每 500ms 强制一次 getBoundingClientRect 回流。
 window.addEventListener('resize', () => requestAnimationFrame(() => {
   reportPetVisualBounds();
+  reportPetHitRegions();
   alignMemePlayer();
 }));
 setInterval(reportPetVisualBounds, 3000);
+setInterval(reportPetHitRegions, 3000);
+schedulePetHitRegions();

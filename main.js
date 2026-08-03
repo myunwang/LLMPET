@@ -36,7 +36,12 @@ const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
-const { beginDrag, nextDragBounds, resizePetLayout } = require('./backend/window-drag');
+const {
+  beginDrag,
+  nextDragBounds,
+  normalizeHitRegions,
+  resizePetLayout,
+} = require('./backend/window-drag');
 const {
   ensureLoginStartup,
   recordIntentionalQuit,
@@ -1094,6 +1099,14 @@ function registerIpc() {
     const st = stateOfSender(e.sender);
     const w = st && st.win && !st.win.isDestroyed() ? st.win : null;
     if (!w) return;
+    // Windows Terminal does not reliably forward mousemove back through an
+    // ignored transparent Electron window. Native setShape regions below make
+    // only painted pet/UI areas hittable, so the whole window must stay enabled.
+    if (process.platform === 'win32') {
+      st.mouseIgnoring = !!ignore;
+      try { w.setIgnoreMouseEvents(false); } catch {}
+      return;
+    }
     st.mouseIgnoring = !!ignore; // 记录 renderer 期望的穿透状态(巡视结束后恢复用)
     // 巡视拖拽期间主宠强制穿透：renderer 只能更新“结束后想要的状态”，
     // 不能把最高层章鱼重新变成可点击并挡住目标。Codex 分身不受巡视约束。
@@ -1102,6 +1115,26 @@ function registerIpc() {
   });
 
   // 渲染端上报「用户正在交互」(领地模式据此避战/撤退,别的场景以后也能用)
+  // On Windows use the compositor's native window region for both drawing and
+  // hit testing. Pixels outside these visible renderer rectangles fall through
+  // directly to Terminal/other apps without relying on forwarded mousemove.
+  ipcMain.on('pet-hit-regions', (e, regions) => {
+    if (process.platform !== 'win32') return;
+    const st = stateOfSender(e.sender);
+    const w = st && st.win && !st.win.isDestroyed() ? st.win : null;
+    if (!w) return;
+    const bounds = w.getBounds();
+    const shape = normalizeHitRegions(regions, { width: bounds.width, height: bounds.height });
+    if (!shape.length) return;
+    const shapeKey = shape.map((rect) => `${rect.x},${rect.y},${rect.width},${rect.height}`).join(';');
+    if (shapeKey === st.hitShapeKey) return;
+    try {
+      w.setIgnoreMouseEvents(false);
+      w.setShape(shape);
+      st.hitShapeKey = shapeKey;
+    } catch {}
+  });
+
   ipcMain.on('ui-busy', (e, on) => {
     const st = stateOfSender(e.sender);
     if (st) st.uiBusy = !!on;

@@ -144,6 +144,7 @@ function createStubWorld() {
     endWinDrag: () => calls.push(['endWinDrag']),
     setPetSize: (...a) => calls.push(['setPetSize', a]),
     setIgnoreMouse: (...a) => calls.push(['setIgnoreMouse', a]),
+    setHitRegions: (...a) => calls.push(['setHitRegions', a]),
     setSkin: (...a) => calls.push(['setSkin', a]),
     toggleMute: () => calls.push(['toggleMute']),
     openPanel: () => calls.push(['openPanel']),
@@ -182,6 +183,15 @@ function createStubWorld() {
     setInterval,
     clearInterval,
     requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    getComputedStyle: (el) => ({
+      display: el && el.classList && el.classList.contains('hidden') ? 'none' : 'block',
+      visibility: 'visible',
+      opacity: '1',
+    }),
+    MutationObserver: class MutationObserver {
+      observe() {}
+      disconnect() {}
+    },
     console,
     Math,
     JSON,

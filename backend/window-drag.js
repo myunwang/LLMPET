@@ -37,6 +37,30 @@ function nextDragBounds(drag, cursorPoint) {
   return { x, y, width: drag.width, height: drag.height };
 }
 
+// BrowserWindow.setShape() uses window-local DIP rectangles on Windows. Keep
+// every visible renderer rectangle inside the window and add enough breathing
+// room for CSS transforms/drop shadows so animated pets do not clip or lose
+// their native mouse hit target at the edge of a frame.
+function normalizeHitRegions(regions, windowSize, padding = 16) {
+  if (!Array.isArray(regions) || !windowSize) return [];
+  const maxWidth = Math.max(0, Math.round(Number(windowSize.width) || 0));
+  const maxHeight = Math.max(0, Math.round(Number(windowSize.height) || 0));
+  if (!maxWidth || !maxHeight) return [];
+  const pad = Math.max(0, Math.min(32, Math.round(Number(padding) || 0)));
+  const normalized = [];
+  for (const rect of regions.slice(0, 64)) {
+    if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) continue;
+    if (!(rect.width > 0) || !(rect.height > 0)) continue;
+    const left = Math.max(0, Math.floor(rect.x - pad));
+    const top = Math.max(0, Math.floor(rect.y - pad));
+    const right = Math.min(maxWidth, Math.ceil(rect.x + rect.width + pad));
+    const bottom = Math.min(maxHeight, Math.ceil(rect.y + rect.height + pad));
+    if (right <= left || bottom <= top) continue;
+    normalized.push({ x: left, y: top, width: right - left, height: bottom - top });
+  }
+  return normalized;
+}
+
 // Popups temporarily grow the transparent BrowserWindow around the pet. The
 // outer window must remain inside the display work area, while a renderer-side
 // content offset keeps the visible pet anchored at the same screen-space
@@ -99,4 +123,10 @@ function resizePetBounds(windowBounds, intendedSize, workArea) {
   return resizePetLayout(windowBounds, intendedSize, workArea).bounds;
 }
 
-module.exports = { beginDrag, nextDragBounds, resizePetLayout, resizePetBounds };
+module.exports = {
+  beginDrag,
+  nextDragBounds,
+  normalizeHitRegions,
+  resizePetLayout,
+  resizePetBounds,
+};

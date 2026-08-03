@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('pet', {
   primaryAction: () => ipcRenderer.send('primary-action'),
   // 透明空白处点击穿透：渲染端命中测试后切换（true=穿透，鼠标事件仍转发回来）
   setIgnoreMouse: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore),
+  setHitRegions: (regions) => ipcRenderer.send('pet-hit-regions', regions),
   // 选项面板需要更高窗口
   setPetTall: (tall) => ipcRenderer.send('pet-tall', tall),
   // 记事本行动中心需要一大块区域
