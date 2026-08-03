@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   activateWindowsTerminalTab,
+  activateWindowsTerminalTabElevated,
   focusSessionTarget,
   normalizeWindowHandle,
   normalizeRuntimeId,
@@ -125,6 +126,25 @@ async function main() {
   });
   assert.deepStrictEqual(result, { ok: false, route: 'failed', reason: 'tab-closed' });
 
+  let elevatedTarget = null;
+  result = await focusSessionTarget(SESSION, {
+    platform: 'win32',
+    exactFocus: async () => ({ ok: false, reason: 'elevation-required' }),
+    elevatedFocus: async (target) => {
+      elevatedTarget = target;
+      return { ok: true };
+    },
+  });
+  assert.strictEqual(elevatedTarget, SESSION);
+  assert.deepStrictEqual(result, { ok: true, route: 'windows-terminal-tab-elevated' });
+
+  result = await focusSessionTarget(SESSION, {
+    platform: 'win32',
+    exactFocus: async () => ({ ok: false, reason: 'elevation-required' }),
+    elevatedFocus: async () => ({ ok: false, reason: 'elevation-denied' }),
+  });
+  assert.deepStrictEqual(result, { ok: false, route: 'failed', reason: 'elevation-denied' });
+
   result = await focusSessionTarget(SESSION, {
     platform: 'darwin',
     legacyFocus: async () => true,
@@ -143,6 +163,20 @@ async function main() {
   assert(focusArgs.includes('-WindowHandle') && focusArgs.includes('123456'));
   assert(focusArgs.includes('-RuntimeId') && focusArgs.includes('42,-7,9001'));
   assert(!focusArgs.includes('-PidList') && !focusArgs.includes('-Marker'));
+
+  let elevatedArgs = null;
+  result = await activateWindowsTerminalTabElevated(SESSION, {
+    execFile: (_bin, args, _options, callback) => {
+      elevatedArgs = args;
+      callback(null, '{"ok":true,"reason":"focused-elevated"}\n', '');
+    },
+  });
+  assert.deepStrictEqual(result, { ok: true });
+  assert(elevatedArgs.includes('-Command'));
+  const launcher = elevatedArgs[elevatedArgs.indexOf('-Command') + 1];
+  assert(launcher.includes('Start-Process') && launcher.includes('-Verb RunAs'));
+  assert(!/wt\.exe|new-tab|resume/.test(launcher),
+    'elevated focus may only run the fixed UI Automation helper');
 
   let captureOptions = null;
   const captured = captureWindowsTerminalTabRoute({
@@ -199,6 +233,8 @@ async function main() {
     'capture must not depend on a hook console or mutate the tab title');
   assert(focusSource.includes('SelectionItemPattern'));
   assert(focusSource.includes('Test-RuntimeIdEqual'));
+  assert(focusSource.includes('GetProcessIntegrityRid'));
+  assert(focusSource.includes('elevation-required'));
   assert(!focusSource.includes('AttachConsole') && !focusSource.includes('SetConsoleTitle'),
     'click-time focus must not attach to or rename a console');
 

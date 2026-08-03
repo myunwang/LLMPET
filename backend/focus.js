@@ -151,6 +151,62 @@ function activateWindowsTerminalTab(session, options = {}) {
   });
 }
 
+function psSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+// UI Automation cannot cross from a medium-integrity desktop pet into an
+// elevated Windows Terminal. Retry only that explicitly diagnosed case with a
+// one-shot RunAs helper. The elevated process receives a fixed script path and
+// already-normalized numeric route; it cannot launch a shell/tab or run an
+// arbitrary user command.
+function activateWindowsTerminalTabElevated(session, options = {}) {
+  const windowHandle = normalizeWindowHandle(session && session.wtHwnd);
+  const runtimeId = normalizeRuntimeId(session && session.wtTabRuntimeId);
+  if (!windowHandle || !runtimeId) return Promise.resolve({ ok: false, reason: 'route-missing' });
+  const helperPath = options.helperPath || WINDOWS_TERMINAL_HELPER;
+  const execFileFn = options.execFile || execFile;
+  const innerCommand = [
+    '&', psSingleQuote(helperPath),
+    '-WindowHandle', psSingleQuote(windowHandle),
+    '-RuntimeId', psSingleQuote(runtimeId.join(',')),
+  ].join(' ');
+  const encodedCommand = Buffer.from(innerCommand, 'utf16le').toString('base64');
+  const launcher = [
+    "$ErrorActionPreference = 'Stop'",
+    'try {',
+    "  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand'," + psSingleQuote(encodedCommand) + ')',
+    "  if ($process.ExitCode -eq 0) { Write-Output '{\"ok\":true,\"reason\":\"focused-elevated\"}'; exit 0 }",
+    "  Write-Output '{\"ok\":false,\"reason\":\"elevated-helper-failed\"}'; exit 1",
+    '} catch {',
+    "  Write-Output '{\"ok\":false,\"reason\":\"elevation-denied\"}'; exit 2",
+    '}',
+  ].join('\n');
+
+  return new Promise((resolve) => {
+    execFileFn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-Command', launcher,
+    ], { timeout: 30000, windowsHide: true }, (error, stdout) => {
+      const lines = String(stdout || '').trim().split(/\r?\n/).filter(Boolean);
+      let parsed = null;
+      try { parsed = JSON.parse(lines[lines.length - 1] || ''); } catch {}
+      if (parsed && parsed.ok === true) {
+        resolve({ ok: true });
+        return;
+      }
+      resolve({
+        ok: false,
+        reason: parsed && typeof parsed.reason === 'string'
+          ? parsed.reason
+          : error && error.killed ? 'helper-timeout' : 'elevation-denied',
+      });
+    });
+  });
+}
+
 // Returns true if it actually focused a window for this session.
 async function focusSession(session) {
   if (!session) return false;
@@ -215,7 +271,16 @@ async function focusSessionTarget(session, options = {}) {
     log('focus', `focused Windows Terminal tab for session ${String(session.id).slice(-6)}`);
     return { ok: true, route: 'windows-terminal-tab' };
   }
-  const reason = exact && exact.reason || 'tab-unavailable';
+  let reason = exact && exact.reason || 'tab-unavailable';
+  if (reason === 'elevation-required') {
+    const elevatedFocus = options.elevatedFocus || activateWindowsTerminalTabElevated;
+    const elevated = await elevatedFocus(target);
+    if (elevated && elevated.ok) {
+      log('focus', `focused elevated Windows Terminal tab for session ${String(session.id).slice(-6)}`);
+      return { ok: true, route: 'windows-terminal-tab-elevated' };
+    }
+    reason = elevated && elevated.reason || 'elevation-denied';
+  }
   log('focus', `exact tab focus failed for session ${String(session.id).slice(-6)}: ${reason}`);
   return { ok: false, route: 'failed', reason };
 }
@@ -224,6 +289,7 @@ module.exports = {
   focusSession,
   focusSessionTarget,
   activateWindowsTerminalTab,
+  activateWindowsTerminalTabElevated,
   WT_SESSION_RE,
   normalizeWindowHandle,
   normalizeRuntimeId,

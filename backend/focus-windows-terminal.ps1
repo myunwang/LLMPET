@@ -50,7 +50,62 @@ namespace LlmpetFocus {
     public static extern bool IsIconic(IntPtr handle);
 
     [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+
+    [DllImport("user32.dll")]
     public static extern void SwitchToThisWindow(IntPtr handle, bool altTab);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentProcessId();
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int informationClass, IntPtr information, int length, out int needed);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+
+    public static uint CurrentProcessId() {
+      return GetCurrentProcessId();
+    }
+
+    public static int GetProcessIntegrityRid(uint processId) {
+      const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+      const uint TOKEN_QUERY = 0x0008;
+      const int TOKEN_INTEGRITY_LEVEL = 25;
+      IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+      IntPtr token = IntPtr.Zero;
+      IntPtr buffer = IntPtr.Zero;
+      if (process == IntPtr.Zero || !OpenProcessToken(process, TOKEN_QUERY, out token)) {
+        if (process != IntPtr.Zero) CloseHandle(process);
+        return -1;
+      }
+      try {
+        int needed;
+        GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, IntPtr.Zero, 0, out needed);
+        if (needed <= 0) return -1;
+        buffer = Marshal.AllocHGlobal(needed);
+        if (!GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, buffer, needed, out needed)) return -1;
+        IntPtr sid = Marshal.ReadIntPtr(buffer);
+        byte count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+        return count > 0 ? Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1))) : -1;
+      } finally {
+        if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+        CloseHandle(token);
+        CloseHandle(process);
+      }
+    }
   }
 }
 '@
@@ -71,12 +126,24 @@ if (-not [LlmpetFocus.NativeMethods]::IsWindow($windowHandleValue)) {
 }
 
 try {
-  $windowElement = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandleValue)
-  $terminalProcess = Get-Process -Id $windowElement.Current.ProcessId -ErrorAction SilentlyContinue
+  [uint32]$targetProcessId = 0
+  [LlmpetFocus.NativeMethods]::GetWindowThreadProcessId($windowHandleValue, [ref]$targetProcessId) | Out-Null
+  $terminalProcess = Get-Process -Id $targetProcessId -ErrorAction SilentlyContinue
   if (-not $terminalProcess -or $terminalProcess.ProcessName -ne 'WindowsTerminal') {
     Write-LlmpetResult -Ok $false -Reason 'window-mismatch'
     exit 1
   }
+
+  $currentIntegrity = [LlmpetFocus.NativeMethods]::GetProcessIntegrityRid(
+    [LlmpetFocus.NativeMethods]::CurrentProcessId()
+  )
+  $targetIntegrity = [LlmpetFocus.NativeMethods]::GetProcessIntegrityRid($targetProcessId)
+  if ($currentIntegrity -gt 0 -and $targetIntegrity -gt $currentIntegrity) {
+    Write-LlmpetResult -Ok $false -Reason 'elevation-required'
+    exit 3
+  }
+
+  $windowElement = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandleValue)
 
   $condition = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
