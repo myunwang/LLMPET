@@ -691,6 +691,9 @@ function bootBackend() {
     pricingSync = createPricingSync({
       onUpdate: () => {
         if (metering) { try { metering.reloadPricing(); } catch {} }
+        // Codex reprices from its own per-model token ledger — without this the
+        // Codex half of the panel would keep the boot-time (built-in) rates.
+        if (codexMetering) { try { codexMetering.reloadPricing(); } catch {} }
         if (metering) sendPanel('panel:price', metering.priceInfo());
         scheduleEmit();
       },

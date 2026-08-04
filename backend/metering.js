@@ -4,6 +4,12 @@
 //
 // Claude Code writes a transcript JSONL per session under
 //   ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+// plus nested subagent transcripts under
+//   ~/.claude/projects/<encoded-cwd>/<session-id>/subagents/**.jsonl
+// (Task-tool and workflow runs). Both are billed to the same account, so the
+// walk is recursive — a flat one-level readdir silently dropped every subagent
+// turn, which on this machine was up to 30% of a heavy day.
+//
 // Each assistant turn line carries message.usage (input / output / cache tokens)
 // and message.model. Claude writes the SAME message id several times while the
 // response streams; later rows contain the completed output token count. We keep
@@ -11,7 +17,8 @@
 // delta, so neither the first partial row nor a resumed/copied transcript can
 // under-count or double-count usage. Aggregates persist to ~/.octopus/usage.json
 // so history (the 90-day calendar) survives restarts; the first run backfills
-// from the existing transcripts (last 95 days).
+// from the existing transcripts (last 95 days), and a schema bump archives the
+// old aggregates instead of dropping them (see usage-archive.js).
 //
 // Same idea as the ccusage tool: read only token counts + model + timestamps
 // from the transcripts (never message content), then price them.
@@ -21,6 +28,7 @@ const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
 const { log } = require('./log');
+const archiveUtil = require('./usage-archive');
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const STATE_DIR = path.join(os.homedir(), '.octopus');
@@ -33,7 +41,8 @@ const WINDOW_MS = 5 * 60 * 60 * 1000;     // Claude's 5h rate window (approx)
 const DAILY_KEEP_DAYS = 95;
 const RECENT_KEEP_MS = WINDOW_MS + 30 * 60 * 1000;
 const BACKFILL_MS = DAILY_KEEP_DAYS * DAY_MS;
-const STATE_SCHEMA = 2;
+const STATE_SCHEMA = 3;
+const MAX_TRANSCRIPT_DEPTH = 6; // projects/<proj>/<session>/subagents/workflows/<wf>/
 
 // USD per 1,000,000 tokens. Family-level ESTIMATES — only a last-resort fallback
 // now that we price by exact model id (pricing._models, synced from LiteLLM).
@@ -161,7 +170,8 @@ function emptyUsage() {
   return { input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 };
 }
 
-function usageSnapshot(usage) {
+// One API call's usage. `usage.iterations[]` is handled by the caller.
+function usageRow(usage) {
   const nested = usage && usage.cache_creation && typeof usage.cache_creation === 'object'
     ? usage.cache_creation : {};
   const totalCreate = num(usage && usage.cache_creation_input_tokens);
@@ -177,6 +187,24 @@ function usageSnapshot(usage) {
     cacheWrite1h: oneHour,
     cacheRead: num(usage && usage.cache_read_input_tokens),
   };
+}
+
+// A turn that needed several API calls carries every one of them in
+// `usage.iterations[]`, while the TOP-LEVEL fields describe only the LAST
+// iteration. Billing is per API call, so sum the iterations whenever they are
+// present and fall back to the top level for older transcripts that lack them.
+function usageSnapshot(usage) {
+  const iterations = usage && Array.isArray(usage.iterations) ? usage.iterations : null;
+  if (!iterations || !iterations.length) return usageRow(usage);
+  const out = emptyUsage();
+  for (const iteration of iterations) {
+    const row = usageRow(iteration);
+    for (const key of Object.keys(out)) out[key] += row[key];
+  }
+  // A malformed/empty iterations array must never bill less than the row we can
+  // already see at the top level.
+  const top = usageRow(usage);
+  return usageTokens(out) >= usageTokens(top) ? out : top;
 }
 
 function mergeUsage(previous, incoming) {
@@ -232,7 +260,8 @@ function createMetering(options = {}) {
     hourlyByDay: {},      // 'YYYY-MM-DD' -> [24] cost
     hourlyTokensByDay: {},// 'YYYY-MM-DD' -> [24] real token usage
     recent: [],           // [{ ts, cost, tokens }] within RECENT_KEEP_MS, for window5h
-    lifetime: emptyDay(), // never pruned; locally observed Claude total
+    carried: emptyDay(),  // days pruned out of the window; lifetime = carried + daily
+    archive: null,        // frozen aggregates from a previous schema (usage-archive.js)
     diagnostics: {
       lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
       migratedFrom: null, estimatedModels: {},
@@ -247,8 +276,17 @@ function createMetering(options = {}) {
       const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       if (raw && typeof raw === 'object') {
         if (raw.schemaVersion !== STATE_SCHEMA) {
+          // Freeze the old aggregates before rebuilding. The transcripts behind
+          // them are routinely deleted by Claude Code's own cleanup, so throwing
+          // the aggregates away — what every earlier version did — permanently
+          // erased the part of the calendar the rebuild can no longer reach.
           state.diagnostics.migratedFrom = Number(raw.schemaVersion) || 1;
-          log('meter', `usage schema ${state.diagnostics.migratedFrom} → ${STATE_SCHEMA}; rebuilding from transcripts`);
+          state.archive = archiveUtil.mergeArchives(
+            raw.archive || null,
+            archiveUtil.buildArchive(raw),
+          );
+          const kept = state.archive ? Object.keys(state.archive.daily).length : 0;
+          log('meter', `usage schema ${state.diagnostics.migratedFrom} → ${STATE_SCHEMA}; rebuilding from transcripts (archived ${kept} day(s) of history)`);
           return;
         }
         state.cursors = raw.cursors && typeof raw.cursors === 'object' ? raw.cursors : {};
@@ -258,16 +296,18 @@ function createMetering(options = {}) {
         state.hourlyByDay = raw.hourlyByDay && typeof raw.hourlyByDay === 'object' ? raw.hourlyByDay : {};
         state.hourlyTokensByDay = raw.hourlyTokensByDay && typeof raw.hourlyTokensByDay === 'object' ? raw.hourlyTokensByDay : {};
         state.recent = Array.isArray(raw.recent) ? raw.recent : [];
-        // v2 files created before lifetime existed are migrated from their
-        // retained daily ledger exactly once. New usage then advances this
-        // monotonic counter even after old calendar days are pruned.
-        if (raw.lifetime && typeof raw.lifetime === 'object') {
-          state.lifetime = { ...emptyDay(), ...raw.lifetime };
-        } else {
-          state.lifetime = Object.values(state.daily).reduce((sum, day) => {
-            for (const key of Object.keys(emptyDay())) sum[key] += num(day && day[key]);
-            return sum;
-          }, emptyDay());
+        state.archive = raw.archive || null;
+        // lifetime is derived (carried + retained days), so a file written
+        // before `carried` existed seeds it from whatever its own lifetime
+        // counter knew beyond its retained days.
+        if (raw.carried && typeof raw.carried === 'object') {
+          state.carried = { ...emptyDay(), ...raw.carried };
+        } else if (raw.lifetime && typeof raw.lifetime === 'object') {
+          const retained = archiveUtil.sumRows(Object.values(state.daily));
+          state.carried = emptyDay();
+          for (const key of Object.keys(state.carried)) {
+            state.carried[key] = Math.max(0, num(raw.lifetime[key]) - num(retained[key]));
+          }
         }
         state.diagnostics = raw.diagnostics && typeof raw.diagnostics === 'object'
           ? { ...state.diagnostics, ...raw.diagnostics } : state.diagnostics;
@@ -299,7 +339,14 @@ function createMetering(options = {}) {
 
   function pruneDaily() {
     const cutoff = dayKey(Date.now() - BACKFILL_MS);
-    for (const k of Object.keys(state.daily)) if (k < cutoff) delete state.daily[k];
+    for (const k of Object.keys(state.daily)) {
+      if (k >= cutoff) continue;
+      // A day leaving the calendar window moves into the carry, so the lifetime
+      // total keeps it. Dropping it outright is what made lifetime a separate
+      // accumulator that could drift from the daily ledger.
+      archiveUtil.addRow(state.carried, state.daily[k]);
+      delete state.daily[k];
+    }
     for (const k of Object.keys(state.byModelByDay)) if (k < cutoff) delete state.byModelByDay[k];
     for (const k of Object.keys(state.hourlyByDay)) if (k < cutoff) delete state.hourlyByDay[k];
     for (const k of Object.keys(state.hourlyTokensByDay)) if (k < cutoff) delete state.hourlyTokensByDay[k];
@@ -307,11 +354,12 @@ function createMetering(options = {}) {
     for (const [key, rec] of Object.entries(state.records)) {
       if (!rec || rec.day < cutoff) delete state.records[key];
     }
+    state.archive = archiveUtil.pruneArchive(state.archive, state.daily, cutoff);
   }
 
   // Apply a positive usage delta. Message count increments only for the first
   // snapshot; later streaming rows correct token/cost without inventing turns.
-  function recordDelta(tsMs, model, usage, isNew, countLifetime = true) {
+  function recordDelta(tsMs, model, usage, isNew) {
     const input = num(usage.input);
     const output = num(usage.output);
     const cacheWrite5m = num(usage.cacheWrite5m);
@@ -331,15 +379,6 @@ function createMetering(options = {}) {
     d.cacheWrite5m = num(d.cacheWrite5m) + cacheWrite5m;
     d.cacheWrite1h = num(d.cacheWrite1h) + cacheWrite1h;
     d.cacheRead += cacheRead;
-
-    if (countLifetime) {
-      const lifetime = state.lifetime || (state.lifetime = emptyDay());
-      lifetime.cost += cost; lifetime.tokens += tokens; lifetime.msgs += isNew ? 1 : 0;
-      lifetime.input += input; lifetime.output += output; lifetime.cacheCreate += cacheCreate;
-      lifetime.cacheWrite5m = num(lifetime.cacheWrite5m) + cacheWrite5m;
-      lifetime.cacheWrite1h = num(lifetime.cacheWrite1h) + cacheWrite1h;
-      lifetime.cacheRead += cacheRead;
-    }
 
     const fam = (state.byModelByDay[k] = state.byModelByDay[k] || {});
     const mk = model || 'unknown';
@@ -389,7 +428,11 @@ function createMetering(options = {}) {
 
   function pruneRecent() {
     const cutoff = Date.now() - RECENT_KEEP_MS;
-    if (state.recent.length && state.recent[0].ts < cutoff) {
+    // `recent` is appended in transcript-scan order, not time order, so the head
+    // is not necessarily the oldest entry — gating the filter on recent[0] left
+    // expired events inflating the 5h window.
+    if (!state.recent.length) return;
+    if (state.recent.some((r) => r.ts < cutoff)) {
       state.recent = state.recent.filter((r) => r.ts >= cutoff);
     }
   }
@@ -438,16 +481,16 @@ function createMetering(options = {}) {
     state.cursors[file] = newOffset;
   }
 
-  async function listTranscripts() {
-    const out = [];
-    let dirs;
-    try { dirs = await fsp.readdir(projectsDir, { withFileTypes: true }); } catch { return out; }
-    for (const d of dirs) {
-      if (!d.isDirectory()) continue;
-      const sub = path.join(projectsDir, d.name);
-      let files;
-      try { files = await fsp.readdir(sub); } catch { continue; }
-      for (const f of files) if (f.endsWith('.jsonl')) out.push(path.join(sub, f));
+  // Recursive: subagent + workflow transcripts live in nested directories
+  // (<session-id>/subagents/**), and they bill to the same account.
+  async function listTranscripts(dir = projectsDir, out = [], depth = 0) {
+    if (depth > MAX_TRANSCRIPT_DEPTH) return out;
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await listTranscripts(full, out, depth + 1);
+      else if (entry.isFile() && entry.name.endsWith('.jsonl')) out.push(full);
     }
     return out;
   }
@@ -477,6 +520,10 @@ function createMetering(options = {}) {
 
   function getStats() {
     const todayK = dayKey(Date.now());
+    // Archived days (frozen by an earlier schema bump) are merged back in for
+    // the calendar and the lifetime total. Today always comes from the live
+    // ledger — the archive can only ever describe days that already closed.
+    const daily = archiveUtil.mergedDaily(state.daily, state.archive);
     const today = { ...emptyDay(), ...(state.daily[todayK] || {}) };
     const byModel = state.byModelByDay[todayK] ? { ...state.byModelByDay[todayK] } : {};
     const hourly = (state.hourlyByDay[todayK] || new Array(24).fill(0)).slice();
@@ -499,19 +546,19 @@ function createMetering(options = {}) {
     };
 
     // Daily map trimmed to the calendar fields the panel reads.
-    const daily = {};
-    for (const [k, v] of Object.entries(state.daily)) {
-      daily[k] = { cost: v.cost, tokens: v.tokens, msgs: v.msgs };
+    const calendar = {};
+    for (const [k, v] of Object.entries(daily)) {
+      calendar[k] = { cost: num(v.cost), tokens: num(v.tokens), msgs: num(v.msgs) };
     }
 
     return {
       today,
-      lifetime: { ...emptyDay(), ...(state.lifetime || {}) },
+      lifetime: { ...emptyDay(), ...archiveUtil.mergedLifetime(state.carried, state.archive, daily) },
       window5h,
       byModel,
       hourly,
       hourlyTok,
-      daily,
+      daily: calendar,
       diagnostics: diagnostics(),
     };
   }
@@ -535,9 +582,10 @@ function createMetering(options = {}) {
       if (c && c.pricing && typeof c.pricing === 'object' && Object.keys(c.pricing).length) {
         live = true; ts = Number(c.ts) || 0; source = 'litellm';
         // Prefer the exact per-model count (what actually drives billing now).
-        count = (c.models && typeof c.models === 'object' && Object.keys(c.models).length)
-          ? Object.keys(c.models).length
-          : Object.keys(c.pricing).length;
+        // Both halves count: the Codex/OpenAI table prices the panel too.
+        const claudeModels = c.models && typeof c.models === 'object' ? Object.keys(c.models).length : 0;
+        const openaiModels = c.openaiModels && typeof c.openaiModels === 'object' ? Object.keys(c.openaiModels).length : 0;
+        count = (claudeModels + openaiModels) || Object.keys(c.pricing).length;
       }
     } catch {}
     try { fs.accessSync(pricingPaths.pricingOverridePath); live = true; source = 'override'; } catch {}
@@ -551,6 +599,16 @@ function createMetering(options = {}) {
   // stored under a wrong price (e.g. fable-5 previously billed at sonnet). Async.
   async function rebuild() {
     load(); // pull existing so a partial failure still leaves the old data
+    // A manual rebuild is also a point of no return for days whose transcripts
+    // are gone, so archive first — same protection as a schema bump.
+    state.archive = archiveUtil.mergeArchives(state.archive, archiveUtil.buildArchive({
+      schemaVersion: STATE_SCHEMA,
+      daily: state.daily,
+      byModelByDay: state.byModelByDay,
+      hourlyByDay: state.hourlyByDay,
+      hourlyTokensByDay: state.hourlyTokensByDay,
+      lifetime: archiveUtil.mergedLifetime(state.carried, null, state.daily),
+    }));
     state.cursors = {};
     state.records = {};
     state.daily = {};
@@ -558,7 +616,7 @@ function createMetering(options = {}) {
     state.hourlyByDay = {};
     state.hourlyTokensByDay = {};
     state.recent = [];
-    state.lifetime = emptyDay();
+    state.carried = emptyDay();
     state.diagnostics = {
       lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
       migratedFrom: null, estimatedModels: {},
@@ -582,9 +640,9 @@ function createMetering(options = {}) {
     resetAggregates();
     const rows = Object.values(state.records).sort((a, b) => a.ts - b.ts);
     for (const rec of rows) {
-      // Repricing rebuilds the retained calendar/cost views. Lifetime token
-      // progression has already counted these records and must not advance.
-      recordDelta(rec.ts, rec.model, rec.usage, true, false);
+      // Only the retained window is replayed; `carried` covers the days whose
+      // records are already gone and is deliberately left untouched.
+      recordDelta(rec.ts, rec.model, rec.usage, true);
       const norm = normModelName(rec.model);
       if (!norm || !(pricing._models && pricing._models[norm])) {
         const estimates = state.diagnostics.estimatedModels;

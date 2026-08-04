@@ -253,6 +253,116 @@ function buildContinueChoice(entry) {
   };
 }
 
+// ── usage: one number for the whole machine ─────────────────────────────────
+// The panel's headline used to be Claude-only while Codex tokens sat in their
+// own block with no price, so "今日花费" silently excluded a third of the spend
+// on this machine. Both ledgers are folded into one view here; the per-provider
+// rows stay available so the panel can still show the split.
+//
+// `provider` mirrors the pet the stats are for: a Codex-only pet must not be
+// shown Claude's money (opts.usageProvider was computed but never honoured).
+function emptyProviderDay() {
+  return {
+    cost: 0, tokens: 0, messages: 0,
+    input: 0, output: 0, cacheCreate: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0,
+    cachedInput: 0, reasoningOutput: 0,
+  };
+}
+
+function providerDay(row) {
+  const r = row || {};
+  const n = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
+  return {
+    ...emptyProviderDay(),
+    cost: n(r.cost),
+    tokens: n(r.tokens),
+    messages: r.messages != null ? n(r.messages) : n(r.msgs),
+    input: n(r.input),
+    output: n(r.output),
+    cacheCreate: n(r.cacheCreate),
+    cacheWrite5m: n(r.cacheWrite5m),
+    cacheWrite1h: n(r.cacheWrite1h),
+    cacheRead: n(r.cacheRead),
+    cachedInput: n(r.cachedInput),
+    reasoningOutput: n(r.reasoningOutput),
+  };
+}
+
+function addDay(a, b) {
+  const out = emptyProviderDay();
+  for (const key of Object.keys(out)) out[key] = a[key] + b[key];
+  return out;
+}
+
+function addHours(a, b) {
+  const left = Array.isArray(a) && a.length === 24 ? a : new Array(24).fill(0);
+  const right = Array.isArray(b) && b.length === 24 ? b : new Array(24).fill(0);
+  return left.map((v, i) => (Number(v) || 0) + (Number(right[i]) || 0));
+}
+
+function addCalendars(a, b) {
+  const out = {};
+  for (const [day, row] of Object.entries(a || {})) {
+    out[day] = { cost: Number(row.cost) || 0, tokens: Number(row.tokens) || 0, msgs: Number(row.msgs) || 0 };
+  }
+  for (const [day, row] of Object.entries(b || {})) {
+    const prev = out[day] || { cost: 0, tokens: 0, msgs: 0 };
+    out[day] = {
+      cost: prev.cost + (Number(row.cost) || 0),
+      tokens: prev.tokens + (Number(row.tokens) || 0),
+      msgs: prev.msgs + (Number(row.msgs) || 0),
+    };
+  }
+  return out;
+}
+
+function addWindows(a, b) {
+  const left = a || {}; const right = b || {};
+  const starts = [left.startTs, right.startTs].filter((t) => Number(t) > 0);
+  const oldest = starts.length ? Math.min(...starts) : 0;
+  return {
+    cost: (Number(left.cost) || 0) + (Number(right.cost) || 0),
+    tokens: (Number(left.tokens) || 0) + (Number(right.tokens) || 0),
+    startTs: oldest,
+    // The two providers meter separate rate windows; the earliest live event is
+    // the honest "this window resets at" for a combined view.
+    resetTs: oldest ? Math.max(Number(left.resetTs) || 0, Number(right.resetTs) || 0) : 0,
+  };
+}
+
+// Tag each model row with the agent that ran it, so the 按模型 list can badge
+// gpt-5.6-sol vs claude-opus-5 instead of presenting one flat namespace.
+function tagModels(byModel, agent) {
+  const out = {};
+  for (const [model, row] of Object.entries(byModel || {})) {
+    out[model] = { ...providerDay(row), msgs: row.msgs || row.messages || 0, agent };
+  }
+  return out;
+}
+
+function combineUsage(claudeStats, codexStats, provider) {
+  const useClaude = provider !== 'codex';
+  const useCodex = provider !== 'claude';
+  const claude = useClaude && claudeStats ? claudeStats : null;
+  const codex = useCodex && codexStats ? codexStats : null;
+
+  const claudeToday = providerDay(claude && claude.today);
+  const codexToday = providerDay(codex && codex.today);
+  const claudeWindow = (claude && claude.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
+  const codexWindow = (codex && codex.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
+  return {
+    today: addDay(claudeToday, codexToday),
+    todayByProvider: { claude: claudeToday, codex: codexToday },
+    window5h: addWindows(claudeWindow, codexWindow),
+    window5hByProvider: { claude: claudeWindow, codex: codexWindow },
+    byModel: { ...tagModels(claude && claude.byModel, 'claude'), ...tagModels(codex && codex.byModel, 'codex') },
+    hourly: addHours(claude && claude.hourly, codex && codex.hourly),
+    hourlyTok: addHours(claude && claude.hourlyTok, codex && codex.hourlyTok),
+    daily: addCalendars(claude && claude.daily, codex && codex.daily),
+    lifetime: addDay(providerDay(claude && claude.lifetime), providerDay(codex && codex.lifetime)),
+  };
+}
+
 // ── pet:stats ───────────────────────────────────────────────────────────────
 // `metering` (optional) = { today, window5h, byModel, hourly, daily } from
 // backend/metering.js. When absent, pricing fields fall back to zeros.
@@ -359,20 +469,9 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     }
   }
 
-  const m = metering || {};
-  const today = m.today || { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, tokens: 0, cost: 0, messages: 0 };
-  // panel.js reads today.messages — metering names it `msgs`.
-  const todayOut = {
-    input: today.input || 0,
-    output: today.output || 0,
-    cacheCreate: today.cacheCreate || 0,
-    cacheWrite5m: today.cacheWrite5m || 0,
-    cacheWrite1h: today.cacheWrite1h || 0,
-    cacheRead: today.cacheRead || 0,
-    tokens: today.tokens || 0,
-    cost: today.cost || 0,
-    messages: today.messages != null ? today.messages : (today.msgs || 0),
-  };
+  const provider = (opts && opts.usageProvider) || 'claude';
+  const usage = combineUsage(metering, opts && opts.codexUsage, provider);
+  const todayOut = usage.today;
 
   // Header wants a short project label, not the full cwd path.
   let activeOut = snapshot.active;
@@ -382,8 +481,10 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 
   return {
     today: todayOut,
-    window5h: m.window5h || { tokens: 0, cost: 0, startTs: 0, resetTs: 0 },
-    byModel: m.byModel || {},
+    todayByProvider: usage.todayByProvider,
+    window5hByProvider: usage.window5hByProvider,
+    window5h: usage.window5h,
+    byModel: usage.byModel,
     lastOps: Array.isArray(opts && opts.lastOps) ? opts.lastOps : [],
     active: activeOut,
     sessions,
@@ -397,10 +498,11 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     errorCount,
     todos: [],
     todosProject: '',
-    hourly: m.hourly || new Array(24).fill(0),
-    hourlyTok: m.hourlyTok || new Array(24).fill(0),
-    daily: m.daily || {},
-    diagnostics: m.diagnostics || null,
+    hourly: usage.hourly,
+    hourlyTok: usage.hourlyTok,
+    daily: usage.daily,
+    diagnostics: (metering && metering.diagnostics) || null,
+    codexDiagnostics: (opts && opts.codexUsage && opts.codexUsage.diagnostics) || null,
     lastActivityTs: snapshot.lastActivityTs || 0,
     idleMs: snapshot.idleMs,
     bg: { running: 0, zombie: 0, total: 0, items: [] },
@@ -515,6 +617,7 @@ function countRecentOps(session) {
 
 module.exports = {
   buildPetStats,
+  combineUsage,
   activityToEvents,
   agentOf,
   buildPermChoice,

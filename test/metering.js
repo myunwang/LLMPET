@@ -57,5 +57,70 @@ assert.strictEqual(
 );
 
 meter.stop();
-fs.rmSync(root, { recursive: true, force: true });
-console.log('metering streaming/TTL checks passed');
+
+// ── multi-iteration turns ────────────────────────────────────────────────────
+// A turn that needed several API calls lists every one in usage.iterations[],
+// while the top-level fields describe only the LAST one. Billing is per API
+// call, so the top level alone under-counts the turn.
+{
+  const iterMeter = createMetering({ projectsDir, stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-iter-')) });
+  const usage = {
+    input_tokens: 2, output_tokens: 641, cache_creation_input_tokens: 0, cache_read_input_tokens: 51245,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    iterations: [
+      {
+        input_tokens: 2, output_tokens: 834, cache_creation_input_tokens: 1486, cache_read_input_tokens: 52561,
+        cache_creation: { ephemeral_5m_input_tokens: 1486, ephemeral_1h_input_tokens: 0 },
+      },
+      {
+        input_tokens: 2, output_tokens: 641, cache_creation_input_tokens: 0, cache_read_input_tokens: 51245,
+        cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+      },
+    ],
+  };
+  assert.strictEqual(iterMeter._ingest('m|r', Date.now(), 'claude-opus-4-1', usage), true);
+  const s = iterMeter.getStats();
+  assert.strictEqual(s.today.output, 834 + 641, 'every iteration must be billed, not just the last');
+  assert.strictEqual(s.today.cacheRead, 52561 + 51245);
+  assert.strictEqual(s.today.cacheWrite5m, 1486);
+  assert.strictEqual(s.today.msgs, 1, 'iterations are one turn, not several');
+  iterMeter.stop();
+
+  // A transcript row without iterations[] must still bill from the top level.
+  const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-plain-'));
+  const plain = createMetering({ projectsDir, stateDir: plainDir });
+  assert.strictEqual(plain._ingest('m|r', Date.now(), 'claude-opus-4-1', {
+    input_tokens: 7, output_tokens: 9, cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
+  }), true);
+  assert.strictEqual(plain.getStats().today.output, 9);
+  plain.stop();
+}
+
+// ── nested subagent transcripts ──────────────────────────────────────────────
+// Task-tool and workflow runs live under <session-id>/subagents/** and bill to
+// the same account; a flat one-level scan silently dropped all of them.
+{
+  const nestedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-nested-'));
+  const projects = path.join(nestedRoot, 'projects');
+  const deep = path.join(projects, '-Users-me-proj', 'session-1', 'subagents', 'workflows', 'wf_1');
+  fs.mkdirSync(deep, { recursive: true });
+  const line = (id, out) => JSON.stringify({
+    type: 'assistant',
+    timestamp: new Date().toISOString(),
+    requestId: id,
+    message: { id, model: 'claude-opus-4-1', usage: { input_tokens: 1, output_tokens: out, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+  }) + '\n';
+  fs.writeFileSync(path.join(projects, '-Users-me-proj', 'top.jsonl'), line('top', 100));
+  fs.writeFileSync(path.join(deep, 'agent-x.jsonl'), line('sub', 250));
+
+  const nested = createMetering({ projectsDir: projects, stateDir: path.join(nestedRoot, 'state') });
+  nested.scan().then(() => {
+    const s = nested.getStats();
+    assert.strictEqual(s.today.output, 350, 'subagent transcripts must be billed too');
+    assert.strictEqual(s.today.msgs, 2);
+    nested.stop();
+    fs.rmSync(nestedRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+    console.log('metering streaming/TTL/iteration/subagent checks passed');
+  });
+}

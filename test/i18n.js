@@ -45,11 +45,13 @@ for (const key of zhKeys) {
 //   ask.back/submit/needsInput — already English in the original zh UI
 //   bub.waitYou   — pure template, both slots are filled from other keys
 //   panel.less/more, *.interrupted — the same kanji is correct in ja and zh
+//   panel.providerSplit — two product names and two numbers, nothing to translate
 const SHARED_VERBATIM = new Set([
   'lang.zh', 'lang.en', 'lang.ja',
   'ask.back', 'ask.submit', 'ask.needsInput',
   'bub.waitYou',
   'panel.less', 'panel.more', 'sess.interrupted', 'state.interrupted',
+  'panel.providerSplit',
 ]);
 for (const lang of ['en', 'ja']) {
   const echoed = zhKeys.filter((k) => !SHARED_VERBATIM.has(k) && i18n.DICT[lang][k] === i18n.DICT.zh[k]);

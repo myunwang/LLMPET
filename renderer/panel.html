@@ -20,14 +20,16 @@
 
       <section class="grid">
         <div class="stat">
-          <div class="stat-label" data-i18n="panel.todayCost">Claude 今日 API 等价估算</div>
+          <div class="stat-label" data-i18n="panel.todayCost">今日 API 等价估算（全部）</div>
           <div class="stat-value" id="today-cost">$0.000</div>
           <div class="stat-foot" id="today-tokens">0 tokens</div>
+          <div class="stat-split" id="today-split"></div>
         </div>
         <div class="stat">
-          <div class="stat-label" data-i18n="panel.last5h">Claude 本地滚动 5 小时</div>
+          <div class="stat-label" data-i18n="panel.last5h">本地滚动 5 小时（全部）</div>
           <div class="stat-value" id="win-cost">$0.000</div>
           <div class="stat-foot" id="win-reset" data-i18n="panel.windowIdle">窗口空闲</div>
+          <div class="stat-split" id="win-split"></div>
         </div>
       </section>
 
@@ -43,12 +45,12 @@
 
       <section id="codex-usage" class="grid hidden">
         <div class="stat compact">
-          <div class="stat-label" data-i18n="panel.codexToday">Codex 今日 token</div>
+          <div class="stat-label" data-i18n="panel.codexToday">Codex 今日用量</div>
           <div class="stat-value" id="codex-today">0</div>
           <div class="stat-foot" id="codex-today-detail"></div>
         </div>
         <div class="stat compact">
-          <div class="stat-label" data-i18n="panel.codexLifetime">Codex 本机累计 token</div>
+          <div class="stat-label" data-i18n="panel.codexLifetime">Codex 本机累计</div>
           <div class="stat-value" id="codex-lifetime">0</div>
           <div class="stat-foot" id="codex-lifetime-detail"></div>
         </div>

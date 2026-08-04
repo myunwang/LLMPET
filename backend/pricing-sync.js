@@ -2,10 +2,12 @@
 
 // Pricing sync — public-data only, no credentials/API calls.
 //
-// Pulls Anthropic model prices from the community-maintained LiteLLM JSON
-// (a static GitHub-hosted file) and caches them to ~/.octopus/pricing-cache.json.
-// metering.loadPricing() merges them BENEATH the user's manual override at
-// ~/.octopus/pricing.json, so a hand-tuned price still wins.
+// Pulls Anthropic *and* OpenAI model prices from the community-maintained
+// LiteLLM JSON (a static GitHub-hosted file) and caches them to
+// ~/.octopus/pricing-cache.json. metering.loadPricing() merges them BENEATH the
+// user's manual override at ~/.octopus/pricing.json, so a hand-tuned price still
+// wins. The OpenAI half is what lets Codex rollouts be priced at all — before it
+// the panel counted Codex tokens and billed them at $0.
 //
 // Safety:
 //   - Fetches one public JSON file. No auth, no account, no API quota.
@@ -18,6 +20,7 @@ const path = require('path');
 const os = require('os');
 const { log } = require('./log');
 const { normModelName } = require('./metering');
+const { normCodexModelName } = require('./codex-pricing');
 
 const CACHE = path.join(os.homedir(), '.octopus', 'pricing-cache.json');
 const URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
@@ -126,6 +129,41 @@ function extractModels(table) {
   return out;
 }
 
+// Exact per-model-id OpenAI prices, keyed the way Codex rollouts name models
+// (gpt-5.6-sol, gpt-5.5, gpt-5.2-codex). OpenAI bills three rates: fresh input,
+// cached input, and output — cached input is a DISCOUNT on a subset of input,
+// never an extra charge, so codex-pricing subtracts it before applying `input`.
+// Only openai-direct rows are taken (azure/openrouter/copilot variants skipped);
+// rows with no usable price (the chatgpt/* plan aliases) are dropped.
+function extractOpenAIModels(table) {
+  const out = {};
+  if (!table || typeof table !== 'object') return out;
+  const r = (v) => (Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null);
+  for (const [name, m] of Object.entries(table)) {
+    if (!m || typeof m !== 'object') continue;
+    if (m.litellm_provider !== 'openai') continue;
+    const id = normCodexModelName(name);
+    if (!id) continue;
+    const input = toMTok(m.input_cost_per_token);
+    const output = toMTok(m.output_cost_per_token);
+    if (input == null && output == null) continue;
+    // OpenAI's standard cached-input discount is 10% of the fresh input rate.
+    const cachedInput = toMTok(m.cache_read_input_token_cost);
+    const row = {
+      input: r(input),
+      cachedInput: r(cachedInput != null ? cachedInput : input == null ? null : input * 0.1),
+      output: r(output),
+      contextWindow: Number.isFinite(m.max_input_tokens)
+        ? Math.floor(m.max_input_tokens)
+        : Number.isFinite(m.max_tokens) ? Math.floor(m.max_tokens) : null,
+    };
+    // A dated row (gpt-5.5-2026-04-23) folds onto the bare id. Keep whichever
+    // arrives last, matching how extractFamilies treats newer dated variants.
+    out[id] = row;
+  }
+  return out;
+}
+
 function createPricingSync(options = {}) {
   const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : () => {};
   let timer = null;
@@ -144,13 +182,16 @@ function createPricingSync(options = {}) {
       const table = await fetchJson(URL);
       const pricing = extractFamilies(table);
       const models = extractModels(table);
+      const openaiModels = extractOpenAIModels(table);
       if (!Object.keys(pricing).length) throw new Error('no claude families extracted');
       try {
         fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-        fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), source: 'litellm', url: URL, pricing, models }, null, 2));
+        fs.writeFileSync(CACHE, JSON.stringify({
+          ts: Date.now(), source: 'litellm', url: URL, pricing, models, openaiModels,
+        }, null, 2));
       } catch (e) { log('pricing', 'cache write failed:', e.message); }
       const fams = Object.keys(pricing).join('/');
-      log('pricing', `synced from LiteLLM (${fams}; ${Object.keys(models).length} models)`);
+      log('pricing', `synced from LiteLLM (${fams}; ${Object.keys(models).length} claude + ${Object.keys(openaiModels).length} openai models)`);
       try { onUpdate(); } catch {}
     } catch (e) {
       log('pricing', 'sync skipped:', e.message);
@@ -173,4 +214,10 @@ function createPricingSync(options = {}) {
   return { start, stop, getCached, refresh };
 }
 
-module.exports = { createPricingSync, CACHE_PATH: CACHE, _extractFamilies: extractFamilies, _extractModels: extractModels };
+module.exports = {
+  createPricingSync,
+  CACHE_PATH: CACHE,
+  _extractFamilies: extractFamilies,
+  _extractModels: extractModels,
+  _extractOpenAIModels: extractOpenAIModels,
+};

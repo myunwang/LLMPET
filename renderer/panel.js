@@ -36,15 +36,17 @@ function render(s) {
   if (s.active && s.active.project) {
     $('active-sub').textContent = `${s.active.project} · ${shortModel(s.active.model)}`;
   }
-  // 大数
+  // 大数：Claude + Codex 合计，下方给出两家的拆分（只有一家有量时不显示拆分）
   $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
   $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + t('panel.rounds');
+  renderSplit('today-split', s.todayByProvider);
   $('win-cost').textContent = '$' + (s.window5h.cost || 0).toFixed(3);
   if (s.window5h.tokens > 0 && s.window5h.resetTs) {
     $('win-reset').textContent = fmt(s.window5h.tokens) + ' tok · ' + timeStr(s.window5h.resetTs) + t('panel.reset');
   } else {
     $('win-reset').textContent = t('panel.windowIdle');
   }
+  renderSplit('win-split', s.window5hByProvider);
 
   // 预算条
   if (config.budget5h > 0) {
@@ -76,15 +78,17 @@ function render(s) {
     $('codex-wrap').classList.add('hidden');
   }
 
-  // token 明细
-  $('t-in').textContent = fmt(s.today.input);
-  $('t-out').textContent = fmt(s.today.output);
-  $('t-cw5').textContent = fmt(s.today.cacheWrite5m);
-  $('t-cw1').textContent = fmt(s.today.cacheWrite1h);
-  $('t-cr').textContent = fmt(s.today.cacheRead);
-  $('t-msg').textContent = s.today.messages;
+  // token 明细：这一块的行是 Claude 的缓存 TTL 语义（5m/1h 写入），Codex 没有
+  // 对应字段，所以取 Claude 那一侧而不是合计——否则标题和数字对不上。
+  const claudeToday = (s.todayByProvider && s.todayByProvider.claude) || s.today;
+  $('t-in').textContent = fmt(claudeToday.input);
+  $('t-out').textContent = fmt(claudeToday.output);
+  $('t-cw5').textContent = fmt(claudeToday.cacheWrite5m);
+  $('t-cw1').textContent = fmt(claudeToday.cacheWrite1h);
+  $('t-cr').textContent = fmt(claudeToday.cacheRead);
+  $('t-msg').textContent = claudeToday.messages;
 
-  renderCodexUsage(s.codexUsage);
+  renderCodexUsage(s.codexUsage, s.codexDiagnostics);
   renderDiagnostics(s.diagnostics);
 
   // 按模型（有总有分：每模型 cost + 占比条 + in/out/cache 四元组明细，末行合计）
@@ -122,6 +126,17 @@ function render(s) {
   fitPanelHeight();
 }
 
+// 合计大数下方的两家拆分。只有一家有量时留空——单 agent 的机器不该看到
+// 「Codex $0.000」这种噪音。
+function renderSplit(id, byProvider) {
+  const el = $(id);
+  if (!el) return;
+  const claude = (byProvider && byProvider.claude && byProvider.claude.cost) || 0;
+  const codex = (byProvider && byProvider.codex && byProvider.codex.cost) || 0;
+  if (claude <= 0 || codex <= 0) { el.textContent = ''; return; }
+  el.textContent = t('panel.providerSplit', { claude: claude.toFixed(2), codex: codex.toFixed(2) });
+}
+
 // 面板按内容高度自适应：量出内容底边（footer 底）到卡片顶的距离，通知主进程调窗口高，
 // 避免固定高窗口在内容变短时露出大片空白。requestAnimationFrame 确保布局已完成。
 let fitRaf = 0;
@@ -151,15 +166,25 @@ function renderByModel(byModel) {
   let html = '';
   for (const [model, v] of entries) {
     const pct = Math.round(((v.cost || 0) / base) * 100);
-    const hasDetail = (v.input || v.output || v.cacheCreate || v.cacheRead);
-    const detail = hasDetail
-      ? `<div class="m-detail">${escapeHtml(t('panel.modelDetail', {
+    // 两家的 token 分类不同：Claude 是 5m/1h 缓存写 + 缓存读，Codex 是缓存输入 +
+    // 推理输出，各用各的明细模板，不硬塞进同一行。
+    const hasDetail = (v.input || v.output || v.cacheCreate || v.cacheRead || v.cachedInput);
+    const body = v.agent === 'codex'
+      ? t('panel.codexBreakdown', {
+        in: fmt(v.input), out: fmt(v.output),
+        cached: fmt(v.cachedInput), reasoning: fmt(v.reasoningOutput),
+      })
+      : t('panel.modelDetail', {
         in: fmt(v.input), out: fmt(v.output),
         cw5: fmt(v.cacheWrite5m), cw1: fmt(v.cacheWrite1h), cr: fmt(v.cacheRead),
-      }))}${v.msgs ? escapeHtml(t('panel.modelRounds', { n: v.msgs })) : ''}</div>`
+      });
+    const detail = hasDetail
+      ? `<div class="m-detail">${escapeHtml(body)}${v.msgs ? escapeHtml(t('panel.modelRounds', { n: v.msgs })) : ''}</div>`
       : '';
+    // Codex 与 Claude 现在同列，加来源小图标区分（与会话列表同款）
+    const icon = AGENT_ICON[v.agent] || AGENT_ICON.claude;
     html += `<div class="m-item">`
-      + `<div class="m-head"><span class="mc">${escapeHtml(shortModel(model))}</span>`
+      + `<div class="m-head"><span class="m-agent">${icon}</span><span class="mc">${escapeHtml(shortModel(model))}</span>`
       + `<span class="m-bar"><i style="width:${pct}%"></i></span>`
       + `<b class="m-cost">$${(v.cost || 0).toFixed(3)}</b>`
       + `<span class="m-tok">${fmt(v.tokens)} · ${pct}%</span></div>`
@@ -187,7 +212,7 @@ const STATE_META = {
   greet: { key: 'state.greet', cls: 'st-greet' },
   talking: { key: 'state.talking', cls: 'st-talking' },
 };
-function renderCodexUsage(usage) {
+function renderCodexUsage(usage, diag) {
   const wrap = $('codex-usage');
   if (!wrap) return;
   const today = usage && usage.today;
@@ -197,16 +222,20 @@ function renderCodexUsage(usage) {
     return;
   }
   wrap.classList.remove('hidden');
-  $('codex-today').textContent = fmt(today.tokens);
-  $('codex-lifetime').textContent = fmt(lifetime.tokens);
-  $('codex-today-detail').textContent = t('panel.codexBreakdown', {
+  // Codex 现在也有价了：大数给钱，token 退到脚注（与 Claude 两个大数对齐）。
+  $('codex-today').textContent = '$' + (today.cost || 0).toFixed(3);
+  $('codex-lifetime').textContent = '$' + (lifetime.cost || 0).toFixed(2);
+  $('codex-today-detail').textContent = fmt(today.tokens) + ' tok · ' + t('panel.codexBreakdown', {
     in: fmt(today.input), out: fmt(today.output),
     cached: fmt(today.cachedInput), reasoning: fmt(today.reasoningOutput),
   });
-  $('codex-lifetime-detail').textContent = t('panel.codexLocalHistory', {
-    sessions: usage.diagnostics && usage.diagnostics.sessions || 0,
-    events: usage.diagnostics && usage.diagnostics.events || 0,
-  });
+  const info = diag || (usage && usage.diagnostics) || {};
+  const bits = [fmt(lifetime.tokens) + ' tok', t('panel.codexLocalHistory', {
+    sessions: info.sessions || 0,
+    events: info.events || 0,
+  })];
+  if (info.estimatedModelCount) bits.push(t('panel.codexEstimated', { n: info.estimatedModelCount }));
+  $('codex-lifetime-detail').textContent = bits.join(' · ');
 }
 
 function renderDiagnostics(diag) {

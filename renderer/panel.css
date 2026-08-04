@@ -52,6 +52,9 @@ html, body {
 .stat-label { font-size: 11px; color: #c79b86; }
 .stat-value { font-size: 23px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; color: #ffcdb0; }
 .stat-foot { font-size: 10.5px; color: #a9826f; margin-top: 3px; }
+/* Claude/Codex 拆分行：比脚注再弱一档，合计仍是视觉主角。两家都有量时才有内容 */
+.stat-split { font-size: 10px; color: #8d6a58; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat-split:empty { display: none; }
 .stat.compact { padding: 9px 12px; }
 .stat.compact .stat-value { font-size: 18px; }
 .grid.hidden { display: none; }
@@ -83,6 +86,10 @@ html, body {
 .m-item.m-total { background: rgba(217,119,87,0.16); }
 .m-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; min-width: 0; }
 .m-head .mc { color: #e9c9b8; font-size: 12px; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Claude 与 Codex 的模型同列，靠来源小图标区分（与会话列表同款） */
+.m-agent { width: 12px; height: 12px; flex-shrink: 0; display: inline-flex; }
+.m-agent svg { width: 100%; height: 100%; }
+.m-total .m-head .mc { margin-left: 19px; }
 .m-bar { flex: 1 1 12px; height: 5px; min-width: 0; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
 .m-bar i { display: block; height: 100%; background: #d97757; border-radius: 3px; }
 .m-cost { color: #ffd8bf; font-variant-numeric: tabular-nums; flex-shrink: 0; }
