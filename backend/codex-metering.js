@@ -30,6 +30,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_KEEP_DAYS = 95;
 const WINDOW_MS = 5 * 60 * 60 * 1000;                 // matches the Claude ledger
 const RECENT_KEEP_MS = WINDOW_MS + 30 * 60 * 1000;
+const MAX_PENDING_EVENTS = 4000;      // cap on events parked awaiting a model
+const STALE_FLUSH_MS = 60 * 60 * 1000; // a rollout idle this long won't name a model
 
 function num(v) {
   const n = Number(v);
@@ -262,7 +264,14 @@ function createCodexMetering(options = {}) {
       return;
     }
     if (object.type === 'turn_context') {
-      if (typeof payload.model === 'string' && payload.model) fileState.model = payload.model;
+      if (typeof payload.model === 'string' && payload.model) {
+        const firstModel = !fileState.model;
+        fileState.model = payload.model;
+        // A resumed rollout replays its history first: token_count can appear
+        // hundreds of lines before the turn_context that names the model. Those
+        // events were parked, not billed to "unknown" — attribute them now.
+        if (firstModel) flushPending(fileState, payload.model);
+      }
       return;
     }
     if (object.type !== 'event_msg' || payload.type !== 'token_count') return;
@@ -275,8 +284,27 @@ function createCodexMetering(options = {}) {
     if (previous && cumulative.tokens < num(previous.tokens)) state.diagnostics.resets++;
     state.sessions[sessionKey] = { usage: cumulative, updatedAt: Date.parse(object.timestamp) || Date.now() };
     const ts = Date.parse(object.timestamp) || Date.now();
+    if (!fileState.model) {
+      // Park it until this file names a model. Bounded so a rollout that never
+      // carries a turn_context cannot grow the buffer without limit.
+      const pending = fileState.pending || (fileState.pending = []);
+      if (pending.length < MAX_PENDING_EVENTS) { pending.push({ ts, usage: current }); return; }
+      flushPending(fileState, null); // give up on this file: bill as unknown
+    }
     record(ts, fileState.model, current);
     state.diagnostics.events++;
+  }
+
+  // Bill everything parked for this file at `model` (null → 'unknown').
+  function flushPending(fileState, model) {
+    const pending = fileState.pending;
+    if (!pending || !pending.length) return;
+    fileState.pending = null;
+    for (const item of pending) {
+      record(item.ts, model, item.usage);
+      state.diagnostics.events++;
+    }
+    if (model) state.diagnostics.deferredAttributions = num(state.diagnostics.deferredAttributions) + pending.length;
   }
 
   async function scanFile(file) {
@@ -289,7 +317,12 @@ function createCodexMetering(options = {}) {
       state.diagnostics.truncated = (state.diagnostics.truncated || 0) + 1;
       return;
     }
-    if (fileState.offset === stat.size) return;
+    if (fileState.offset === stat.size) {
+      // Nothing new, and this rollout has gone quiet — no turn_context is
+      // coming, so stop holding its parked events hostage.
+      if (fileState.pending && Date.now() - stat.mtimeMs > STALE_FLUSH_MS) flushPending(fileState, null);
+      return;
+    }
     const stream = fs.createReadStream(file, { start: fileState.offset, encoding: 'utf8' });
     let carry = fileState.carry || '';
     for await (const chunk of stream) {

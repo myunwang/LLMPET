@@ -128,5 +128,87 @@ assert.strictEqual(normCodexModelName(''), '');
 
   meter.stop();
   fs.rmSync(root, { recursive: true, force: true });
+
+  // ── resumed rollouts: token_count before turn_context ──────────────────────
+  // A resumed session replays its history first, so token_count can appear
+  // hundreds of lines before the turn_context that names the model. Billing
+  // those to "unknown" mislabelled 68M real gpt-5.6-sol tokens on this machine.
+  {
+    const rroot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-codex-resume-'));
+    const dir = path.join(rroot, 'sessions', '2026', '08', '04');
+    fs.mkdirSync(dir, { recursive: true });
+    const at = new Date().toISOString();
+    const tokenLine = (n) => JSON.stringify({
+      type: 'event_msg',
+      timestamp: at,
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: n, cached_input_tokens: 0, output_tokens: 0, total_tokens: n },
+          last_token_usage: { input_tokens: n, cached_input_tokens: 0, output_tokens: 0, total_tokens: n },
+        },
+      },
+    });
+    fs.writeFileSync(path.join(dir, 'rollout-2026-08-04T00-00-00-resumed.jsonl'), [
+      JSON.stringify({ type: 'session_meta', timestamp: at, payload: { id: 'r1', cwd: '/tmp' } }),
+      tokenLine(1000),  // replayed history — model not named yet
+      tokenLine(2000),
+      JSON.stringify({ type: 'turn_context', timestamp: at, payload: { model: 'gpt-5.6-sol' } }),
+      tokenLine(3000),
+    ].join('\n') + '\n');
+
+    const resumed = createCodexMetering({
+      sessionsDir: path.join(rroot, 'sessions'),
+      stateDir: path.join(rroot, 'state'),
+      pricingCachePath: '/nope',
+      pricingOverridePath: '/nope',
+    });
+    await resumed.scan();
+    const s = resumed.getStats();
+    assert.strictEqual(s.byModel.unknown, undefined, 'pre-turn_context events must not land in "unknown"');
+    assert.strictEqual(s.byModel['gpt-5.6-sol'].tokens, 6000, 'they belong to the model the file eventually names');
+    assert.strictEqual(s.byModel['gpt-5.6-sol'].msgs, 3);
+    assert.strictEqual(s.today.tokens, 6000, 'and the day total is unchanged');
+    resumed.stop();
+    fs.rmSync(rroot, { recursive: true, force: true });
+  }
+
+  // A rollout that never names a model, and has gone quiet, still gets billed —
+  // parked events must not disappear.
+  {
+    const oroot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-codex-orphan-'));
+    const dir = path.join(oroot, 'sessions', '2026', '08', '04');
+    fs.mkdirSync(dir, { recursive: true });
+    // mtime is stale (the rollout has gone quiet) but the event itself is from
+    // today, so it lands in the day bucket getStats() reports.
+    const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const file = path.join(dir, 'rollout-2026-08-04T00-00-00-orphan.jsonl');
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'event_msg',
+      timestamp: new Date().toISOString(),
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: 500, output_tokens: 0, total_tokens: 500 },
+          last_token_usage: { input_tokens: 500, output_tokens: 0, total_tokens: 500 },
+        },
+      },
+    }) + '\n');
+    fs.utimesSync(file, old, old);
+
+    const orphan = createCodexMetering({
+      sessionsDir: path.join(oroot, 'sessions'),
+      stateDir: path.join(oroot, 'state'),
+      pricingCachePath: '/nope',
+      pricingOverridePath: '/nope',
+    });
+    await orphan.scan();  // first pass parks the event (no model yet)
+    await orphan.scan();  // second pass sees EOF + stale mtime → bills it
+    const s = orphan.getStats();
+    assert.strictEqual(s.byModel.unknown.tokens, 500, 'an idle model-less rollout is still billed, as unknown');
+    orphan.stop();
+    fs.rmSync(oroot, { recursive: true, force: true });
+  }
+
   console.log('codex pricing checks passed');
 })();
