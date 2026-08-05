@@ -345,9 +345,19 @@ function renderSessList(sessions) {
         : escapeHtml(t(m.key));
       const icon = AGENT_ICON[s.agent] || AGENT_ICON.claude;
       const who = s.agent === 'codex' ? 'Codex' : 'Claude';
-      return `<div class="row sess"><span class="badge ${m.cls}">${escapeHtml(t(m.key))}</span><span class="sess-agent" title="${who}">${icon}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
+      // 会话 id 芯片：短前缀够认人，点一下复制完整 id（跨 session 协作时贴给
+      // 另一个 agent 去 resume）。title 挂完整 id，不用复制也能看全。
+      const id = s.sessionId ? `<button class="sess-id" data-id="${escapeHtml(s.sessionId)}" title="${escapeHtml(s.sessionId)}&#10;${escapeHtml(t('panel.copyId'))}">${escapeHtml(shortId(s.sessionId))}</button>` : '';
+      return `<div class="row sess"><span class="badge ${m.cls}">${escapeHtml(t(m.key))}</span><span class="sess-agent" title="${who}">${icon}</span><span class="sess-proj">${escapeHtml(s.project)}</span>${id}<span class="sess-op">${detail}</span></div>`;
     })
     .join('');
+}
+
+// 会话 id 前 8 位——UUID 的前段在本机范围内已经足够唯一，完整 id 在 title 和
+// 剪贴板里。面板很窄，塞 36 个字符会把项目名和状态挤没。
+function shortId(id) {
+  const s = String(id || '');
+  return s.length > 8 ? s.slice(0, 8) : s;
 }
 
 const TODO_ICON = { completed: '✅', in_progress: '▶️', pending: '⬜️' };
@@ -517,6 +527,21 @@ $('cal').addEventListener('mouseover', (e) => {
   if (cell) $('cal-readout').innerHTML = t('panel.calReadout', { k: cell.dataset.k, c: cell.dataset.c, t: cell.dataset.t, m: cell.dataset.m });
 });
 $('cal').addEventListener('mouseleave', () => { $('cal-readout').innerHTML = calSummary; });
+
+// 点会话 id 芯片 → 复制完整 id。委托在列表上，因为行是每次 render 重建的。
+$('sess-list').addEventListener('click', async (e) => {
+  const chip = e.target.closest && e.target.closest('.sess-id');
+  if (!chip || !window.pet.copySessionId) return;
+  const ok = await window.pet.copySessionId(chip.dataset.id);
+  if (!ok) return;
+  chip.textContent = t('panel.copied');
+  chip.classList.add('copied');
+  // 定时复原，不依赖下一次 render——面板空闲时 stats 可能好一会儿才推一次
+  setTimeout(() => {
+    chip.textContent = shortId(chip.dataset.id);
+    chip.classList.remove('copied');
+  }, 1200);
+});
 
 // 初始化
 (async () => {

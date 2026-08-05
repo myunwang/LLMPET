@@ -880,6 +880,14 @@ function registerIpc() {
   ipcMain.on('focus-session', (_e, sessionId) => {
     focusSession(core.getSession(sessionId));
   });
+  // 面板复制会话 id（跨 session 协作：把 id 贴给另一个 agent 去 resume）。
+  // 只认自己列出过的会话 id，渲染进程无法借这个通道往剪贴板塞任意内容。
+  ipcMain.handle('copy-session-id', (_e, sessionId) => {
+    const id = String(sessionId || '');
+    if (!id || !core.getSession(id)) return false;
+    clipboard.writeText(id);
+    return true;
+  });
   ipcMain.handle('meme-catalog', () => publicCatalog(i18n.getLang()));
   ipcMain.handle('travel-get', () => (
     travelManager ? travelManager.publicState(i18n.getLang()) : null

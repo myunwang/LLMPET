@@ -162,6 +162,16 @@ html, body {
 .sess-agent { width: 13px; height: 13px; flex-shrink: 0; display: inline-flex; }
 .sess-agent svg { width: 100%; height: 100%; }
 .sess-proj { color: #ffd8bf; font-size: 12px; flex-shrink: 0; }
+/* 会话 id 芯片：等宽短前缀，点一下复制完整 id（跨 session 协作） */
+.sess-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; color: #b98a72; flex-shrink: 0;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(217,119,87,0.22);
+  border-radius: 5px; padding: 1px 5px; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sess-id:hover { background: rgba(217,119,87,0.22); color: #ffd8bf; }
+.sess-id.copied { background: rgba(120,190,120,0.24); color: #cdf0cd; border-color: rgba(120,190,120,0.4); }
 .sess-op { color: #a9826f; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
 .badge { font-size: 10px; padding: 2px 7px; border-radius: 7px; color: #fff; flex-shrink: 0; }
 .st-working { background: #2f9e52; }

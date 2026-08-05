@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('pet', {
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
+  // 面板会话行点 id 芯片 → 复制完整 session id，方便贴给另一个 agent 去 resume
+  copySessionId: (sessionId) => ipcRenderer.invoke('copy-session-id', sessionId),
   getMemeCatalog: () => ipcRenderer.invoke('meme-catalog'),
   triggerMeme: (sessionId, memeId) => ipcRenderer.invoke('meme-trigger', sessionId, memeId),
   getTravel: () => ipcRenderer.invoke('travel-get'),

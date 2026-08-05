@@ -43,7 +43,13 @@ const stats = {
   ...usage,
   messages: 0,
   active: { project: 'LLMPET', model: 'claude-opus-5' },
-  sessions: [], todos: [], todosProject: '', lastOps: [],
+  sessions: [
+    { project: 'LLMPET', agent: 'claude', state: 'working', op: '编辑文件', sessionId: '374a5c05-c2f4-45ed-ac56-cec5f412b39d', badge: null },
+    { project: 'whale', agent: 'codex', state: 'thinking', sessionId: '019fc6b1-fd00-7a21-9c33-2b7e51aa1f04', badge: null },
+    // a session the backend could not identify must still render, without a chip
+    { project: 'ghost', agent: 'claude', state: 'idle', sessionId: null, badge: null },
+  ],
+  todos: [], todosProject: '', lastOps: [],
   bg: { items: [] },
   codexUsage: codex,
   codexDiagnostics: codex.diagnostics,
@@ -97,6 +103,18 @@ assert.ok(byModel.includes('缓存输入'), 'Codex rows use the Codex breakdown 
 assert.ok(byModel.includes('1h写'), 'Claude rows keep the cache-TTL template');
 assert.strictEqual((byModel.match(/m-agent/g) || []).length, 3, 'every model row carries an agent badge');
 assert.strictEqual((byModel.match(/fill="#3b82f6"/g) || []).length, 2, 'both Codex rows badge as Codex');
+
+// ── each session row carries a copyable session id ───────────────────────────
+{
+  const list = html('sess-list');
+  assert.ok(list.includes('data-id="374a5c05-c2f4-45ed-ac56-cec5f412b39d"'), 'the full id is kept for copying');
+  assert.ok(list.includes('>374a5c05<'), 'the chip shows a short prefix, not the full 36 chars');
+  assert.ok(list.includes('data-id="019fc6b1-fd00-7a21-9c33-2b7e51aa1f04"'), 'Codex sessions get an id too');
+  assert.ok(list.includes('>019fc6b1<'));
+  assert.ok(list.includes('点击复制完整会话 id'), 'the tooltip explains the click');
+  assert.strictEqual((list.match(/class="sess-id"/g) || []).length, 2, 'a session with no id renders no chip');
+  assert.ok(list.includes('ghost'), '…but the row itself still renders');
+}
 
 // ── a single-agent pet never shows the other agent's money ───────────────────
 {
