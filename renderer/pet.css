@@ -714,6 +714,11 @@ body.skin-cat .sessions { width: 120px; }
   height: 310px;
   max-height: 310px;
 }
+.sesslist.takeover-mode {
+  box-sizing: border-box;
+  height: min(320px, calc(100vh - 224px));
+  max-height: min(320px, calc(100vh - 224px));
+}
 .sl-top { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
 .sl-title { font-size: 12px; font-weight: 700; color: #fff; }
 .sl-sub { font-size: 10.5px; color: #9a9aa0; margin-left: 2px; flex: 1; }
@@ -908,8 +913,17 @@ body.skin-cat .sessions { width: 120px; }
 .sl-takeover-view {
   min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column;
   gap: 10px; padding: 0 4px 4px;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .sl-takeover-view.hidden { display: none; }
+.sl-takeover-view > * { flex: 0 0 auto; }
+.sl-takeover-view::-webkit-scrollbar { width: 7px; }
+.sl-takeover-view::-webkit-scrollbar-track,
+.sl-takeover-view::-webkit-scrollbar-corner { background: transparent; }
+.sl-takeover-view::-webkit-scrollbar-thumb {
+  background: rgba(154, 154, 160, 0.5); border-radius: 999px;
+}
 .sl-takeover-session {
   padding: 9px 11px; border-radius: 10px;
   background: rgba(72, 112, 201, 0.14); color: #dce8ff;

@@ -38,15 +38,22 @@ assert(/const POPUP_W = 520;/.test(js), 'popup window should provide more horizo
 assert(/const ASK_VIEWPORT_MAX_H = 520;/.test(js), 'ask measurement must use the same vertical cap');
 assert(/const SESSION_PANEL_H = 310;/.test(js),
   'ordinary and streaming session panels must share one fixed three-row height');
-assert(/fixedSessionPage[\s\S]*POPUP_BOTTOM \+ SESSION_PANEL_H[\s\S]*popupHeight: SESSION_PANEL_H/.test(js)
-  && /fixedSessionPage[\s\S]{0,500}SESSION_PANEL_H \+ 24/.test(js),
+assert(/const TAKEOVER_PANEL_H = 320;/.test(js),
+  'takeover pages must have a stable viewport independent of the resting window height');
+assert(/const panelHeight = fixedTakeoverPage \? TAKEOVER_PANEL_H : SESSION_PANEL_H;/.test(js)
+  && /fixedSessionPage \|\| fixedTakeoverPage[\s\S]{0,800}POPUP_BOTTOM \+ panelHeight \+ 24[\s\S]{0,200}popupHeight: panelHeight/.test(js),
   'session pages must resize once to the measured three-row baseline instead of measuring each row');
 assert(/\.sesslist\.session-list-mode\s*\{[^}]*height\s*:\s*310px\s*;[^}]*max-height\s*:\s*310px\s*;/s.test(css),
   'the visible session shell must be exactly three rows tall');
+assert(/fixedTakeoverPage[\s\S]*TAKEOVER_PANEL_H[\s\S]*popupHeight: panelHeight/.test(js),
+  'takeover pages must resize directly instead of measuring against the compact resting frame');
+assert(/\.sesslist\.takeover-mode\s*\{[^}]*height\s*:\s*min\(320px, calc\(100vh - 224px\)\)[^}]*max-height\s*:\s*min\(320px, calc\(100vh - 224px\)\)/s.test(css),
+  'takeover shell must fill its stable viewport while respecting small screens');
 assert(/\.sl-scroll::\-webkit-scrollbar-track[\s\S]*background\s*:\s*transparent/s.test(css)
   && /\.sl-scroll::\-webkit-scrollbar-corner[\s\S]*background\s*:\s*transparent/s.test(css),
   'the compact session scrollbar must not expose a light native track or corner');
 assert(/function showSessionPage[\s\S]*session-list-mode/.test(js)
+  && /function openTakeoverPage[\s\S]*add\('takeover-mode'\)/.test(js)
   && /function openMemePage[\s\S]*remove\('session-list-mode'\)/.test(js)
   && /function openTravelPage[\s\S]*remove\('session-list-mode'\)/.test(js),
   'only the ordinary/loot session page should use the compact fixed shell');
@@ -62,6 +69,9 @@ assert(/\.sl-foot\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),
   'session footer must remain fixed while rows scroll');
 assert(/\.sl-meme-grid\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
   'meme choices must share the same bounded scrolling contract');
+assert(/\.sl-takeover-view\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css)
+  && /\.sl-takeover-view\s*>\s*\*\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),
+  'takeover content must scroll internally instead of being clipped by the transparent window');
 assert(/\.sl-travel-view\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
   'travel page must own bounded vertical scrolling');
 assert(/\.sl-travel-view\s*>\s*\*\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),

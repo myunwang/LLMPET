@@ -366,6 +366,10 @@ const ASK_VIEWPORT_MAX_H = 520;
 // 右侧基线分支在 3 条会话时的实测内容高度为 310px，对应 520 × 534
 // 的 BrowserWindow。固定使用这份三行高度；更多会话只在 sl-scroll 内滚动。
 const SESSION_PANEL_H = 310;
+// 接管页不能用当前 340px 小窗里的 CSS max-height 反推自身高度；否则顶部
+// 打开时会陷入“窗口不长高 -> 页面只剩半截”的测量死循环。给它一份稳定
+// 的完整面板高度，小屏幕由页面内部滚动兜底。
+const TAKEOVER_PANEL_H = 320;
 const MEME_WINDOW_W = 760;
 const MEME_WINDOW_H = 340;
 const MEME_MEDIA_W = 260;
@@ -531,13 +535,16 @@ function fitPopup(el) {
   requestAnimationFrame(() => {
     const fixedSessionPage = el === sesslist
       && slSessionView && !slSessionView.classList.contains('hidden');
-    if (fixedSessionPage) {
+    const fixedTakeoverPage = el === sesslist
+      && slTakeoverView && !slTakeoverView.classList.contains('hidden');
+    if (fixedSessionPage || fixedTakeoverPage) {
       if (seq !== fitPopupSeq) return;
       // 固定页无需先扩宽再测量；一次完成宽高与上下翻转，避免中间帧错位。
+      const panelHeight = fixedTakeoverPage ? TAKEOVER_PANEL_H : SESSION_PANEL_H;
       setRequestedPetSize(
         POPUP_W,
-        Math.max(340, POPUP_BOTTOM + SESSION_PANEL_H + 24),
-        { popup: true, popupHeight: SESSION_PANEL_H },
+        Math.max(340, POPUP_BOTTOM + panelHeight + 24),
+        { popup: true, popupHeight: panelHeight },
       );
       return;
     }
@@ -1591,6 +1598,7 @@ function openTakeoverPage(session) {
   travelTarget = null;
   takeoverTarget = session;
   sesslist.classList.remove('session-list-mode');
+  sesslist.classList.add('takeover-mode');
   slSessionView.classList.add('hidden');
   slMemeView.classList.add('hidden');
   slTravelView.classList.add('hidden');
@@ -1657,6 +1665,7 @@ async function openMemePage(session) {
   memeTarget = session;
   takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
+  sesslist.classList.remove('takeover-mode');
   slSessionView.classList.add('hidden');
   slTakeoverView.classList.add('hidden');
   slMemeView.classList.remove('hidden');
@@ -2375,6 +2384,7 @@ async function openTravelPage(session) {
   travelTarget = session || null;
   takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
+  sesslist.classList.remove('takeover-mode');
   travelMissionDirty = false;
   travelTemplateId = null;
   slSessionView.classList.add('hidden');
@@ -2423,6 +2433,7 @@ function showSessionPage() {
   memeTarget = null;
   takeoverTarget = null;
   travelTarget = null;
+  sesslist.classList.remove('takeover-mode');
   sesslist.classList.add('session-list-mode');
   slMemeView.classList.add('hidden');
   slTakeoverView.classList.add('hidden');
