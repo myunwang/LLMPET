@@ -42,11 +42,11 @@ assert.strictEqual(normCodexModelName(''), '');
   assert.strictEqual(models['gpt-5.6-sol'].output, 30);
   assert.strictEqual(models['gpt-5.6-sol'].contextWindow, 400000);
 
-  // A row with no cached price falls back to OpenAI's standard 10% discount.
+  // Pro models have no cached-input discount, even when the source omits it.
   const implied = _extractOpenAIModels({
     'gpt-5-pro': { litellm_provider: 'openai', input_cost_per_token: 0.000015, output_cost_per_token: 0.00012 },
   });
-  assert.strictEqual(implied['gpt-5-pro'].cachedInput, 1.5);
+  assert.strictEqual(implied['gpt-5-pro'].cachedInput, 15);
 }
 
 // ── the cost formula ─────────────────────────────────────────────────────────
@@ -64,6 +64,14 @@ assert.strictEqual(normCodexModelName(''), '');
   // inflate every reasoning-heavy turn.
   const noReasoning = codexUsageCost({ input: 100_000, cachedInput: 80_000, output: 10_000 }, price);
   assert.strictEqual(cost, noReasoning, 'reasoning output must never be billed on top of output');
+
+  const pro = priceForCodex(pricing, 'gpt-5.5-pro');
+  assert.strictEqual(pro.exact, true, 'a shipped Pro model must resolve exactly offline');
+  assert.strictEqual(pro.price.cachedInput, 30, 'Pro cached input has no discount');
+  const proCost = codexUsageCost({ input: 100_000, cachedInput: 80_000, output: 10_000 }, pro.price);
+  const proExpected = (100_000 * 30 + 10_000 * 180) / 1e6;
+  assert.ok(Math.abs(proCost - proExpected) < 1e-12,
+    `Pro cached input must stay at the full input rate (${proCost} vs ${proExpected})`);
 
   // Internal thread profiles have no public price → tier fallback, flagged.
   const review = priceForCodex(pricing, 'codex-auto-review');

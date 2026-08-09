@@ -5,7 +5,7 @@
 // Codex rollouts report `last_token_usage` as { input_tokens, cached_input_tokens,
 // output_tokens, reasoning_output_tokens }. OpenAI bills three rates:
 //   fresh input  = input_tokens - cached_input_tokens   (cached is a SUBSET)
-//   cached input = cached_input_tokens                  (~10% of the input rate)
+//   cached input = cached_input_tokens                  (model-specific rate)
 //   output       = output_tokens                        (reasoning is a SUBSET)
 // Adding cached input or reasoning output on top would double-bill them, which is
 // why both are tracked separately but never summed into the charged base.
@@ -24,7 +24,7 @@ const PRICING_CACHE_PATH = path.join(STATE_DIR, 'pricing-cache.json');
 // USD per 1,000,000 tokens. Keyword tiers are the last-resort fallback for a
 // model id the sync has never seen; exact ids come from LiteLLM at runtime.
 const DEFAULT_CODEX_PRICING = {
-  pro:     { input: 30,   cachedInput: 3,     output: 180 },
+  pro:     { input: 30,   cachedInput: 30,    output: 180 },
   codex:   { input: 1.75, cachedInput: 0.175, output: 14 },
   mini:    { input: 0.75, cachedInput: 0.075, output: 4.5 },
   nano:    { input: 0.2,  cachedInput: 0.02,  output: 1.2 },
@@ -39,8 +39,9 @@ const BUILTIN_CODEX_MODELS = {
   'gpt-5.6-terra': { input: 2,    cachedInput: 0.2,   output: 12 },
   'gpt-5.6-luna':  { input: 0.2,  cachedInput: 0.02,  output: 1.2 },
   'gpt-5.5':       { input: 5,    cachedInput: 0.5,   output: 30 },
-  'gpt-5.5-pro':   { input: 30,   cachedInput: 3,     output: 180 },
+  'gpt-5.5-pro':   { input: 30,   cachedInput: 30,    output: 180 },
   'gpt-5.4':       { input: 2.5,  cachedInput: 0.25,  output: 15 },
+  'gpt-5.4-pro':   { input: 30,   cachedInput: 30,    output: 180 },
   'gpt-5.3-codex': { input: 1.75, cachedInput: 0.175, output: 14 },
   'gpt-5.2-codex': { input: 1.75, cachedInput: 0.175, output: 14 },
   'gpt-5.1-codex': { input: 1.25, cachedInput: 0.125, output: 10 },

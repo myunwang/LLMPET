@@ -147,11 +147,14 @@ function extractOpenAIModels(table) {
     const input = toMTok(m.input_cost_per_token);
     const output = toMTok(m.output_cost_per_token);
     if (input == null && output == null) continue;
-    // OpenAI's standard cached-input discount is 10% of the fresh input rate.
+    // Standard models use OpenAI's 10% cached-input rate when LiteLLM omits it.
+    // Pro models explicitly have no cached-input discount, so charging them at
+    // 10% would materially understate the dashboard total.
     const cachedInput = toMTok(m.cache_read_input_token_cost);
+    const fallbackCachedInput = input == null ? null : input * (/-pro$/.test(id) ? 1 : 0.1);
     const row = {
       input: r(input),
-      cachedInput: r(cachedInput != null ? cachedInput : input == null ? null : input * 0.1),
+      cachedInput: r(cachedInput != null ? cachedInput : fallbackCachedInput),
       output: r(output),
       contextWindow: Number.isFinite(m.max_input_tokens)
         ? Math.floor(m.max_input_tokens)
