@@ -12,7 +12,7 @@ const {
   visualShiftMatches, visualShiftOffset, interpolateFrame, chatGPTShape, chatGPTVisualBounds,
   chatGPTDragCandidates, parseDragHelperResult, parseProbeHelperResult,
   parseIsolatedDragHelperResult, parseWarpHelperLine, warpHoldNeedsRecovery,
-  standX, DEFAULT_RIVALS,
+  standX, lootStandX, lootApproachX, createLootCaptureFlow, DEFAULT_RIVALS,
 } = require('../backend/territory');
 
 let failures = 0;
@@ -87,14 +87,20 @@ check('chatGPTShape:两种桌宠轮廓都认,Activity 条和主窗都拒', () =>
   assert.strictEqual(chatGPTShape(345, 54), null);
   assert.strictEqual(chatGPTShape(768, 912), null);
 });
-check('Codex 机器人视觉本体:居中,无 placement 翻转', () => {
+check('Codex 机器人视觉本体:固定居中，左右推送方向不能改写 81px 透明边距', () => {
   const wa = { x: 0, y: 25, width: 1512, height: 920 };
-  const rival = { name: 'ChatGPT', pid: 70292, x: 1265, y: 259, w: 243, h: 253 };
-  const v = chatGPTVisualBounds(rival, wa);
-  assert.strictEqual(Math.round(v.x), 1265 + 81);
-  assert.strictEqual(Math.round(v.y), 259 + 80);
-  assert.strictEqual(Math.round(v.w), 80);
-  assert.strictEqual(Math.round(v.h), 100);
+  const leftRival = { name: 'ChatGPT', pid: 70292, x: 366, y: 478, w: 243, h: 253 };
+  const left = chatGPTVisualBounds(leftRival, wa);
+  assert.deepStrictEqual(
+    { x: Math.round(left.x), y: Math.round(left.y), w: Math.round(left.w), h: Math.round(left.h) },
+    { x: 366 + 81, y: 558, w: 80, h: 100 });
+  const rightRival = { ...leftRival, x: 1265 };
+  const right = chatGPTVisualBounds(rightRival, wa);
+  assert.deepStrictEqual(
+    { x: Math.round(right.x), y: Math.round(right.y), w: Math.round(right.w), h: Math.round(right.h) },
+    { x: 1265 + 81, y: 558, w: 80, h: 100 });
+  assert.strictEqual(Math.round(chatGPTVisualBounds(rightRival, wa, -1).x), 1265 + 81);
+  assert.strictEqual(Math.round(chatGPTVisualBounds(leftRival, wa, 1).x), 366 + 81);
 });
 check('Codex 机器人拖拽候选以窗口中心起手,learned 优先', () => {
   const wa = { x: 0, y: 25, width: 1512, height: 920 };
@@ -268,6 +274,14 @@ check('Electron 指针窗口已移除，原生覆盖层保持全透明且鼠标�
   assert(swift.includes('CGDisplayHideCursor(cursorDisplay)'));
   assert(swift.includes('CGDisplayShowCursor(cursorDisplay)'));
   assert(swift.includes('matchingHitWindow(at: start, pid: targetPid'));
+  assert(swift.includes('if windowCommand == "--close-window"'));
+  assert(swift.includes('matchingAXPetElement(pid: pid, expected: expected)'));
+  assert(swift.includes('AXUIElementPerformAction(closeButton, kAXPressAction'));
+  assert(swift.includes('findClosePetMenuItem(pid: pid)'));
+  assert(swift.includes('["Close pet", "关闭宠物", "關閉寵物", "ペットを閉じる"]'));
+  assert(swift.includes('openContextMenuWithRestoredCursor(at: point)'));
+  assert(swift.includes('closed|context-menu'));
+  assert(!swift.includes('NSRunningApplication(processIdentifier: pid_t(pid))?.terminate'));
 });
 check('ChatGPT 独占 HID 租约只有完整还原鼠标后才接受成功', () => {
   const good = 'original|100|200\nhit|target=1\nprogress|1\ncursor|100|200|100|200\nisolation|afterCapture=1|associate=0\nrestore|warp=0|associate=0|show=0\nbutton|left=0\noverlay|native=1|opaque=0|alpha=0|shadow=0|ignoresMouse=1|sharing=1|cornerAlpha=0|serverBounds=1|serverSharing=1\ntransport|isolated-hid=1|warp=0\nok|hide=0|associate=0|afterCapture=1|restored=1\n';
@@ -307,6 +321,96 @@ check('回归：Swift helper 必须动态补偿逻辑 x，且稳定后才握手'
 console.log('[T4] standX：站到推挤反方向一侧，贴身但不遮住拖拽热点');
 check('向右推 → 站左侧并保持 30px 重叠', () => assert.strictEqual(standX(500, 200, 1, 320), 500 - 320 + 30));
 check('向左推 → 站右侧并保持 30px 重叠', () => assert.strictEqual(standX(500, 200, -1, 320), 500 + 200 - 30));
+check('掠夺站位补偿透明素材边距，让两只桌宠明确分开', () => {
+  assert.strictEqual(lootStandX(600, 200, 1, 120), 408);
+  assert.strictEqual(lootStandX(600, 200, -1, 120), 872);
+  // Codex 在左、LLMPET 已经只差 26px：不能为了凑 72px 反而向右退。
+  assert.strictEqual(lootApproachX(328, 80, -1, 434, 120), 434);
+  // Codex 在右同理：已经在左边贴近时不能反向向左退。
+  assert.strictEqual(lootApproachX(1059, 80, 1, 922, 120), 922);
+  // 距离较远时仍然会主动向目标靠近到 preferred 位置。
+  assert.strictEqual(lootApproachX(328, 80, -1, 620, 120), 480);
+  assert.strictEqual(lootApproachX(1059, 80, 1, 700, 120), 867);
+  // 真正重叠时允许最小幅度后退，留下 12px 可见边缘。
+  assert.strictEqual(lootApproachX(328, 80, -1, 410, 120), 420);
+  assert.strictEqual(lootApproachX(1059, 80, 1, 940, 120), 927);
+  const source = require('fs').readFileSync(require.resolve('../backend/territory'), 'utf8');
+  const patrol = source.slice(source.indexOf('async function runEpisode'), source.indexOf('async function runLootEpisode'));
+  const loot = source.slice(source.indexOf('async function runLootEpisode'), source.indexOf('function runLoot('));
+  assert(/let sx = standX\(/.test(patrol), '普通巡视必须继续使用贴身推挤站位');
+  assert(/let sx = lootApproachX\(/.test(loot), '掠夺必须使用只接近、不反向后退的站位');
+  assert(/beforeDrag:[\s\S]*?stopForReady\(\)[\s\S]*?phase: 'ready'[\s\S]*?remainingAnimationMs\(\)[\s\S]*?phase: 'kick'[\s\S]*?await wait\(420\)/.test(loot),
+    '踢击必须由真实 ready 停止流式掠夺，只等当前入场帧后对齐出脚');
+  assert(/onMoveStart:[\s\S]*?phase: 'push'/.test(loot),
+    'push 状态只能在目标真实开始移动时发布');
+});
+
+check('native ready 过早时仍至少按秒取满 3 条，不一闪而过', async () => {
+  const events = [];
+  const sessions = Array.from({ length: 8 }, (_, index) => ({
+    sessionId: `fast-${index}`,
+    project: `fast ${index}`,
+  }));
+  const flow = createLootCaptureFlow(sessions, {
+    wait: async () => {},
+    emit: (event) => events.push(event),
+    now: () => 1000,
+  });
+  const captured = await flow.stopForReady();
+  assert.strictEqual(captured.length, 3);
+  assert.strictEqual(events[0].phase, 'captureStart');
+  assert.strictEqual(events[0].intervalMs, 1000);
+  assert.deepStrictEqual(
+    events.filter((event) => event.phase === 'sessionCaptured').map((event) => event.session.sessionId),
+    ['fast-0', 'fast-1', 'fast-2']);
+});
+
+check('native ready 较慢时每秒继续取下一条，收到信号后立即停止', async () => {
+  const events = [];
+  const gates = [];
+  const sessions = Array.from({ length: 8 }, (_, index) => ({
+    sessionId: `slow-${index}`,
+    project: `slow ${index}`,
+  }));
+  const flow = createLootCaptureFlow(sessions, {
+    wait: (ms) => new Promise((resolve) => gates.push({ ms, resolve })),
+    emit: (event) => events.push(event),
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  assert.strictEqual(gates[0].ms, 420);
+  gates.shift().resolve();
+  await flush();
+  assert.strictEqual(events.filter((event) => event.phase === 'sessionCaptured').length, 1);
+  for (let expected = 2; expected <= 5; expected++) {
+    assert.strictEqual(gates[0].ms, 1000);
+    gates.shift().resolve();
+    await flush();
+    assert.strictEqual(events.filter((event) => event.phase === 'sessionCaptured').length, expected);
+  }
+  const captured = await flow.stopForReady();
+  assert.strictEqual(captured.length, 5);
+  const eventCountAtReady = events.length;
+  gates.shift().resolve();
+  await flow.done;
+  assert.strictEqual(events.length, eventCountAtReady,
+    'ready 后已排队的下一个秒拍不得再发布 Session');
+});
+
+check('重复 Session 不能被伪造成多条掠夺动画', async () => {
+  const events = [];
+  const flow = createLootCaptureFlow([
+    { sessionId: 'same', project: 'first' },
+    { sessionId: 'same', project: 'duplicate' },
+    { sessionId: 'second', project: 'second' },
+  ], {
+    wait: async () => {},
+    emit: (event) => events.push(event),
+  });
+  const captured = await flow.stopForReady();
+  assert.deepStrictEqual(captured.map((session) => session.sessionId), ['same', 'second']);
+  assert.strictEqual(events.filter((event) => event.phase === 'sessionCaptured').length, 2);
+});
 
 console.log('[T4b] parsePresence：猫爪在上的进程存在性解析');
 check('正常行 + 去重 + 排除自己', () => {
@@ -732,6 +836,200 @@ check('shouldAbort(弹层打开)→ 广播 abort 复位表情并回家', async (
   await t.tick();
   assert.deepStrictEqual(phases, ['ontop', 'spotted', 'abort']);
   assert.deepStrictEqual(lastTween, [0, 0], '撤退后应回到出发位');
+});
+
+console.log('[T7] 掠夺编排：只认 Codex 桌宠窗，会话先入面板，再推墙并精确关窗');
+check('会话由后端逐条演出，ready 后只关闭匹配桌宠窗', async () => {
+  const events = [];
+  let visible = true;
+  let closeCalls = 0;
+  let pushArgs = null;
+  const tweenCalls = [];
+  const sessions = [
+    { sessionId: 'c3', project: 'three', agent: 'codex' },
+    { sessionId: 'c2', project: 'two', agent: 'codex' },
+    { sessionId: 'c1', project: 'one', agent: 'codex' },
+  ];
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    emit: (ev) => events.push(ev),
+    sleep: async () => {},
+    tweenPetTo: async (...args) => { tweenCalls.push(args); },
+    physicalPush: async (...args) => {
+      pushArgs = args;
+      await pushArgs[4].beforeDrag();
+      pushArgs[4].onMoveStart();
+      await pushArgs[4].onLanded(args[0]);
+      return 'victory';
+    },
+    closeRival: async (rival) => {
+      closeCalls++;
+      assert.strictEqual(rival.pid, 42);
+      assert.strictEqual(rival.w, 243);
+      assert.strictEqual(rival.h, 253);
+      visible = false;
+      return { ok: true };
+    },
+    runOsa: fakeOsa({
+      presence: () => '',
+      windows: () => visible ? 'ChatGPT|42|900|300|243|253\n' : '',
+      move: () => { throw new Error('Codex 桌宠不应走 AXPosition'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  const result = await t.runLoot(sessions);
+  assert.strictEqual(result, 'closed');
+  assert.strictEqual(closeCalls, 1, '只对精确匹配的桌宠窗执行一次关闭');
+  assert.deepStrictEqual(events.map((event) => event.phase),
+    ['searching', 'approach', 'taunt', 'captureStart',
+      'sessionCaptured', 'sessionCaptured', 'sessionCaptured',
+      'ready', 'kick', 'push', 'targetClosed', 'closed']);
+  assert.strictEqual(events.find((event) => event.phase === 'kick').direction, 1,
+    'LLMPET 在左侧时应向右踢');
+  assert.strictEqual(events.find((event) => event.phase === 'closed').direction, 1,
+    '踢完看战果的表情必须继续朝目标飞走的方向');
+  assert.strictEqual(pushArgs[4].followPet, false,
+    '掠夺应只移动对方，LLMPET 不跟随飞向墙边');
+  assert.strictEqual(pushArgs[4].motion, 'kick');
+  assert.strictEqual(typeof pushArgs[4].beforeDrag, 'function',
+    '踢击演出必须由物理拖拽在慢准备完成后触发');
+  assert.strictEqual(typeof pushArgs[4].onMoveStart, 'function',
+    '目标真实移动首帧必须有独立回调');
+  assert.strictEqual(typeof pushArgs[4].onLanded, 'function',
+    '目标落墙后应在同一条动作链内立即右键关闭');
+  assert.deepStrictEqual(
+    events.filter((event) => event.phase === 'sessionCaptured').map((event) => event.session),
+    sessions);
+  assert.strictEqual(events.find((event) => event.phase === 'captureStart').intervalMs, 1000,
+    '流式掠夺的唯一节拍源必须是后端每秒一条');
+  assert.strictEqual(tweenCalls.length, 1,
+    '真正出脚后只能保留接近站位，不得在 finally 又移动回掠夺前位置');
+  assert.strictEqual(t.busy, false);
+});
+
+check('踢击真实拖动期间 LLMPET 保持原位，不消费巡视的逐帧跟随回调', async () => {
+  let visible = true;
+  let rivalX = 900;
+  let petFrameCalls = 0;
+  const dragDurations = [];
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    emit: () => {},
+    sleep: async () => {},
+    setPetFrame: () => { petFrameCalls++; },
+    isolatedDragRival: async (_rival, targetX, _rx, _ry, duration, onProgress) => {
+      dragDurations.push(duration);
+      rivalX = targetX;
+      if (onProgress) onProgress(0.5);
+      return { ok: true };
+    },
+    closeRival: async (landedRival) => {
+      assert.strictEqual(landedRival.x, rivalX,
+        '拖拽 helper 返回后应立即按预计落墙坐标右键关闭');
+      visible = false;
+      return { ok: true };
+    },
+    runOsa: fakeOsa({
+      presence: () => '',
+      windows: () => visible ? `ChatGPT|42|${rivalX}|300|243|253\n` : '',
+      move: () => { throw new Error('Codex 桌宠不应走 AXPosition'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  assert.strictEqual(await t.runLoot([]), 'closed');
+  assert.strictEqual(petFrameCalls, 0, '一脚踢飞期间不得同步移动 LLMPET');
+  assert(dragDurations.includes(420), `踢击长拖应使用快速 420ms 轨迹，实际 ${dragDurations}`);
+});
+
+check('左踢必须复扫到真实屏幕边缘后才关闭，部分位移会继续补拖', async () => {
+  let visible = true;
+  let rivalX = 228;
+  let longDrags = 0;
+  const closedAt = [];
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    getPetBounds: () => ({ x: 560, y: 420, width: 120, height: 120 }),
+    emit: () => {},
+    sleep: async () => {},
+    isolatedDragRival: async (_rival, targetX, _rx, _ry, duration) => {
+      if (duration === 180) rivalX -= 22; // 校准只证明拖点有效
+      else {
+        longDrags++;
+        rivalX = longDrags === 1 ? 100 : targetX; // 首脚没到墙，第二脚补齐
+      }
+      return { ok: true };
+    },
+    closeRival: async (landedRival) => {
+      closedAt.push(landedRival.x);
+      assert(visualAtEdgeInDirection(
+        { x: landedRival.x + 81, y: landedRival.y, w: 80, h: 100 }, WA, -1),
+      '关闭动作只能发生在左侧可见本体已经贴边之后');
+      visible = false;
+      return { ok: true };
+    },
+    runOsa: fakeOsa({
+      presence: () => '',
+      windows: () => visible ? `ChatGPT|42|${rivalX}|300|243|253\n` : '',
+      move: () => { throw new Error('Codex 桌宠不应走 AXPosition'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  assert.strictEqual(await t.runLoot([]), 'closed');
+  assert.strictEqual(longDrags, 2, '第一次未到边缘时必须沿同一有效拖点继续补齐');
+  assert.deepStrictEqual(closedAt, [-81], '透明窗口必须越界 81px 后才允许关闭');
+});
+
+check('Codex 透明窗口被 macOS 钳在 x=0 时，用原生 AX 精确补到 x=-81', async () => {
+  let visible = true;
+  let rivalX = 228;
+  let snapTarget = null;
+  const closedAt = [];
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    getPetBounds: () => ({ x: 560, y: 420, width: 120, height: 120 }),
+    emit: () => {},
+    sleep: async () => {},
+    isolatedDragRival: async (_rival, _targetX, _rx, _ry, duration) => {
+      rivalX = duration === 180 ? rivalX - 22 : 0;
+      return { ok: true };
+    },
+    snapRivalWindow: async (_rival, targetX, targetY) => {
+      snapTarget = targetX;
+      const before = rivalX;
+      rivalX = targetX;
+      return { ok: true, bx: before, by: targetY, ax: rivalX, ay: targetY };
+    },
+    closeRival: async (landedRival) => {
+      closedAt.push(landedRival.x);
+      visible = false;
+      return { ok: true };
+    },
+    runOsa: fakeOsa({
+      presence: () => '',
+      windows: () => visible ? `ChatGPT|42|${rivalX}|300|243|253\n` : '',
+      move: () => { throw new Error('Codex 桌宠不应走 System Events AXPosition'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  assert.strictEqual(await t.runLoot([]), 'closed');
+  assert.strictEqual(snapTarget, -81, '左边缘目标必须扣除机器人本体的 81px 透明边距');
+  assert.deepStrictEqual(closedAt, [-81], '原生读回精确贴边后才关闭');
+});
+
+check('没有 Codex 桌宠时不伪造掠夺成功，也不触发关闭', async () => {
+  let closeCalls = 0;
+  const phases = [];
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    emit: (ev) => phases.push(ev.phase),
+    sleep: async () => {},
+    closeRival: async () => { closeCalls++; return { ok: true }; },
+    runOsa: fakeOsa({ presence: () => '', windows: () => '', move: () => '' }),
+  });
+  const t = createTerritory(hooks);
+  assert.strictEqual(await t.runLoot([]), 'not-found');
+  assert.deepStrictEqual(phases, ['searching', 'notFound']);
+  assert.strictEqual(closeCalls, 0);
 });
 
 Promise.all(pending).then(() => {

@@ -98,11 +98,14 @@ function frontendConfig(agent = 'all') {
     territory: c.territory,
     // 巡视（领地模式）只由主宠负责，Codex 分身菜单里不显示
     territorySupported: process.platform === 'darwin' && agent !== 'codex',
+    lootSupported: process.platform === 'darwin' && agent !== 'codex',
     agent,
     petMode: c.petMode,
     lang: c.lang,
     pinnedSessions: c.pinnedSessions,
     archivedSessions: c.archivedSessions,
+    lootCapturedSessions: (c.lootCapturedSessions || [])
+      .filter((session) => session.expiresAt > Date.now()),
   };
 }
 
@@ -333,12 +336,39 @@ function getTerritoryPetBounds() {
 
 function tweenTerritoryPetTo(x, y, ms) {
   // territory 的 x/y 表示「可见身体」左上角；真正移动的是透明窗口。
-  const rect = primaryVisualRect();
-  return tweenPetTo(
-    x - (rect ? rect.x : 0),
-    y - (rect ? rect.y : 0),
-    ms,
-  );
+  // 掠夺接近会同时冒气泡、打开会话面板，透明窗口尺寸与可见身体在窗口内
+  // 的 rect.x/rect.y 会在补间途中改变。旧实现只在起点换算一次偏移，导致
+  // 窗口本身向左走、猫主体却被扩展后的布局锚到右边。每一帧都按最新
+  // visualRect 反算窗口原点，才能让用户看到的身体沿同一条轨迹移动。
+  return new Promise((resolve) => {
+    if (!petWin || petWin.isDestroyed()) return resolve();
+    const from = getTerritoryPetBounds();
+    const dur = Math.max(80, ms || 800);
+    const t0 = Date.now();
+    petGuided = true;
+    petGuideRefs++;
+    const step = setInterval(() => {
+      if (!petWin || petWin.isDestroyed()) return finish();
+      const t = Math.min(1, (Date.now() - t0) / dur);
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const visibleX = Math.round(from.x + (x - from.x) * e);
+      const visibleY = Math.round(from.y + (y - from.y) * e);
+      const rect = primaryVisualRect();
+      const b = petWin.getBounds();
+      petWin.setBounds({
+        x: visibleX - (rect ? rect.x : 0),
+        y: visibleY - (rect ? rect.y : 0),
+        width: b.width,
+        height: b.height,
+      });
+      if (t >= 1) finish();
+    }, 16);
+    function finish() {
+      clearInterval(step);
+      setTimeout(() => { if (--petGuideRefs <= 0) { petGuideRefs = 0; petGuided = false; } }, 300);
+      resolve();
+    }
+  });
 }
 
 function bootTerritory() {
@@ -353,6 +383,9 @@ function bootTerritory() {
     canScan: () => !!(petWin && !petWin.isDestroyed() && petWin.isVisible() && !anyUiBusy()),
     // 用户来正事了(面板/菜单开着/有待授权)→ 立刻停手回家
     shouldAbort: () => !(petWin && !petWin.isDestroyed() && petWin.isVisible()) || anyUiBusy()
+      || !!(permissions && permissions.getPending().length > 0),
+    // 掠夺自己会打开会话面板，不能把演出产生的 uiBusy 反过来当成用户打断。
+    shouldAbortLoot: () => !(petWin && !petWin.isDestroyed() && petWin.isVisible())
       || !!(permissions && permissions.getPending().length > 0),
     getPetBounds: getTerritoryPetBounds,
     tweenPetTo: tweenTerritoryPetTo,
@@ -404,7 +437,14 @@ function bootTerritory() {
       width: Math.max(1, Math.round(rect.w || 1)),
       height: Math.max(1, Math.round(rect.h || 1)),
     }).workArea,
-    emit: (ev) => sendPet('pet:event', ev),
+    emit: (ev) => {
+      // 只在某条真实 Session 的入场事件发生时持久化它。未找到桌宠、
+      // native 预检失败或还没轮到的历史会话，都不能被伪装成已掠夺。
+      if (ev && ev.kind === 'loot' && ev.phase === 'sessionCaptured' && ev.session) {
+        captureCodexSessions([ev.session]);
+      }
+      sendPet('pet:event', ev);
+    },
   });
   territory.start();
 }
@@ -478,6 +518,70 @@ function runTerritoryNow() {
       log('territory', `manual patrol result=${result} trustedBefore=${trustedBefore} trustedAfter=${trustedAfter}`);
     })
     .catch((e) => log('territory', 'manual scan failed:', e.message));
+}
+
+function recentCodexSessions(limit = 3) {
+  if (!core) return [];
+  const stats = buildStats('all');
+  return (stats.sessions || [])
+    .filter((session) => session && session.agent === 'codex'
+      && !session.headless && session.sessionRole !== 'travel')
+    .sort((a, b) => {
+      const updated = (b.updatedAt || 0) - (a.updatedAt || 0);
+      return updated || (a.idleMs || 0) - (b.idleMs || 0);
+    })
+    .slice(0, Math.max(0, limit))
+    .map((session) => ({ ...session }));
+}
+
+function captureCodexSessions(sessions) {
+  const captured = (Array.isArray(sessions) ? sessions : []).slice(0, 12);
+  const ids = captured
+    .map((session) => String(session && session.sessionId || ''))
+    .filter(Boolean);
+  if (!ids.length) return;
+  const current = config.get();
+  const now = Date.now();
+  const expiresAt = now + 30 * 60 * 1000;
+  const snapshots = captured.map((session) => ({
+    sessionId: String(session.sessionId || ''),
+    project: session.project || '',
+    cwd: session.cwd || '',
+    agent: 'codex',
+    state: session.state || 'idle',
+    badge: session.badge || '',
+    op: session.op || '',
+    reason: session.reason || '',
+    contextPercent: session.contextPercent,
+    idleMs: session.idleMs,
+    updatedAt: session.updatedAt,
+    capturedAt: now,
+    expiresAt,
+  }));
+  config.save({
+    // 不永久篡改用户的手动置顶；使用单独的结构化快照在普通列表顶部保留 30 分钟。
+    lootCapturedSessions: [
+      ...snapshots,
+      ...(current.lootCapturedSessions || [])
+        .filter((session) => session.expiresAt > now && !ids.includes(String(session.sessionId))),
+    ],
+    archivedSessions: (current.archivedSessions || []).filter((id) => !ids.includes(String(id))),
+  });
+  broadcastConfig();
+}
+
+function runLootNow() {
+  if (process.platform !== 'darwin' || !territory) return;
+  ensureTerritoryPermission();
+  // watcher 的常驻列表只保留活跃会话；掠夺要在 native ready 之前每秒
+  // 拿一条真实历史，因此点击时只读补齐最近 12 条作为有界队列。
+  if (codexWatch && typeof codexWatch.seedRecent === 'function') codexWatch.seedRecent(12);
+  const sessions = recentCodexSessions(12);
+  // 传递的是真实 Codex 会话，不复制假条目；真正捕获到目标桌宠后，
+  // capture 事件才会解除归档并置顶，渲染端逐条“吸入”。
+  territory.runLoot(sessions)
+    .then((result) => log('loot', `manual loot result=${result} sessions=${sessions.length}`))
+    .catch((e) => log('loot', 'manual loot failed:', e.message));
 }
 
 function applyTerritory(on) {
@@ -814,6 +918,14 @@ function registerIpc() {
     const b = win.getBounds();
     return [b.x, b.y];
   });
+  ipcMain.handle('get-window-metrics', (e) => {
+    const win = senderPetWin(e);
+    if (!win) return null;
+    const windowBounds = win.getBounds();
+    let workArea = null;
+    try { workArea = screen.getDisplayMatching(windowBounds).workArea; } catch {}
+    return { window: windowBounds, workArea };
+  });
 
   ipcMain.on('set-win-pos', (e, x, y) => {
     const win = senderPetWin(e);
@@ -847,6 +959,7 @@ function registerIpc() {
     broadcastConfig();
   });
   ipcMain.on('territory-run-now', runTerritoryNow);
+  ipcMain.on('loot-codex-pet', runLootNow);
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
   ipcMain.on('quit-app', () => app.quit());

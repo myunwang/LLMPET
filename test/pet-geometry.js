@@ -103,6 +103,30 @@ assert.strictEqual(
   'a popup opened at the bottom edge must stay above the pet',
 );
 
+assert.strictEqual(
+  geometry.choosePopupLayout({
+    workArea,
+    windowRect: { x: 700, y: 24, width: 520, height: 624 },
+    petRect: { x: 200, y: 309, width: 120, height: 120 },
+    current: { vertical: 'above', horizontal: 'center' },
+    popupHeight: 310,
+  }).vertical,
+  'below',
+  'one pixel less than the fixed panel height must flip the panel below',
+);
+
+assert.strictEqual(
+  geometry.choosePopupLayout({
+    workArea,
+    windowRect: { x: 700, y: 24, width: 520, height: 624 },
+    petRect: { x: 200, y: 310, width: 120, height: 120 },
+    current: { vertical: 'below', horizontal: 'center' },
+    popupHeight: 310,
+  }).vertical,
+  'above',
+  'at exactly one panel height from the top, the panel must return above',
+);
+
 function assertMenuInside(label, options) {
   const result = geometry.radialLayout(options);
   assert.strictEqual(result.points.length, options.count, `${label}: every item must receive a position`);

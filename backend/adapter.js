@@ -426,6 +426,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
       state,
       reason,
       idleMs: e.idleMs,
+      updatedAt: e.updatedAt || 0,
       // op 只在「正在干活」且最近事件确实是工具事件时有效：idle 会话不带旧 op；
       // thinking（刚提交 prompt）也不再显示上一轮遗留的「运行命令」等陈旧标签。
       op: (state === 'working' || state === 'juggling' || state === 'sweeping')

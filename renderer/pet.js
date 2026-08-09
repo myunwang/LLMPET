@@ -48,6 +48,7 @@ const CAT_STATES = {
   roam: 'cat-roam.gif',           // 撒腿跑着玩：闲逛
   working: 'cat-working.gif',     // 戴耳机猛拍「上号」按钮：干活
   thinking: 'cat-thinking.gif',   // 对着笔记本挠头：思考
+  lookout: 'cat-thinking-2.gif',  // 趴着望向浮云：掠夺后朝远处看战果
   talking: 'cat-talking.gif',     // 对着笔记本疯狂输出喵喵喵：回应中
   juggling: 'cat-juggling.gif',   // 趴键盘上还同时刷手机：并行子任务
   sweeping: 'cat-sweeping.gif',   // 喷消毒水打扫：压缩/清理
@@ -95,6 +96,9 @@ let poolIdx = 0;
 let poolRot = null;
 let memeWorkReaction = null;
 let memeWorkReactionTimer = null;
+let lootActionVisual = null;
+let lootActionDirection = 0;
+let lootActionTimer = null;
 function finishMemeWorkReaction(refresh = false) {
   memeWorkReaction = null;
   clearTimeout(memeWorkReactionTimer);
@@ -117,11 +121,13 @@ function activeMemeWorkVisual(s) {
 function updateCat(s) {
   if (!catImg) return;
   const workVisual = activeMemeWorkVisual(s);
-  const pool = workVisual ? null : CAT_POOLS[s];
-  const f = workVisual
+  const pool = (workVisual || lootActionVisual) ? null : CAT_POOLS[s];
+  const f = lootActionVisual
+    ? (CAT_STATES[lootActionVisual] || CAT_STATES.attention)
+    : workVisual
     ? (CAT_STATES[workVisual] || CAT_STATES.working)
     : (pool ? pool[poolIdx % pool.length] : (CAT_STATES[s] || CAT_STATES.idle));
-  if (!catImg.getAttribute('src').endsWith(f)) catImg.src = '../assets/cat/' + f;
+  if (!catAssetMatches(f)) catImg.src = '../assets/cat/' + f;
   if (pool) {
     if (!poolRot) {
       poolRot = setInterval(() => {
@@ -136,6 +142,61 @@ function updateCat(s) {
     poolRot = null;
     poolIdx++; // 下次进入轮换态直接是下一张
   }
+}
+function catAssetMatches(filename) {
+  if (!catImg) return false;
+  try {
+    return new URL(catImg.src, window.location.href).pathname.endsWith('/' + filename);
+  } catch {
+    return String(catImg.getAttribute('src') || '').split(/[?#]/, 1)[0].endsWith(filename);
+  }
+}
+function lootVisualNeedsMirror(visualState, direction) {
+  const targetDirection = Number(direction) === 1 ? 1 : -1;
+  // 这里的“方向”是猫主体位于画布哪一侧，而不是素材里的显示器朝哪边。
+  // attention 原图的猫在左、显示器在右；若把显示器方向当成猫的方向，
+  // 向左掠夺时就会错误镜像成“显示器靠 Codex、猫退到很远的右侧”。
+  // 三张掠夺动作的猫主体原生都在左侧，向右动作时才统一镜像。
+  const nativeDirection = -1;
+  return targetDirection !== nativeDirection;
+}
+function setLootActionVisual(visualState, direction) {
+  lootActionVisual = visualState;
+  lootActionDirection = Number(direction) === 1 ? 1 : -1;
+  cat.classList.toggle('loot-action-mirrored',
+    lootVisualNeedsMirror(visualState, lootActionDirection));
+  if (skin === 'cat') updateCat(state);
+}
+function startLootCaptureVisual(direction) {
+  clearTimeout(lootActionTimer);
+  lootActionTimer = null;
+  setLootActionVisual('attention', direction);
+}
+function startLootKick(direction) {
+  clearTimeout(lootActionTimer);
+  lootActionTimer = null;
+  setLootActionVisual('roam', direction);
+  // 同一张 GIF 连续触发时浏览器默认会沿用上次播放进度。加一次仅用于本轮
+  // 演出的查询串，确保蓄力从第一帧开始，后端按真实 helper 时序同步出脚。
+  if (skin === 'cat' && catImg) {
+    catImg.src = '../assets/cat/' + CAT_STATES.roam + '?loot-kick=' + Date.now();
+  }
+}
+function startLootLookout(direction, durationMs = 6000) {
+  clearTimeout(lootActionTimer);
+  setLootActionVisual('lookout', direction);
+  lootActionTimer = setTimeout(() => {
+    lootActionTimer = null;
+    stopLootActionVisual();
+  }, durationMs);
+}
+function stopLootActionVisual() {
+  clearTimeout(lootActionTimer);
+  lootActionTimer = null;
+  lootActionVisual = null;
+  lootActionDirection = 0;
+  cat.classList.remove('loot-action-mirrored');
+  if (skin === 'cat') updateCat(state);
 }
 function clearMemeWorkReaction(refresh = true) {
   const wasActive = !!memeWorkReaction;
@@ -219,6 +280,8 @@ const slSub = document.getElementById('sl-sub');
 const slTitle = document.getElementById('sl-title');
 const slBack = document.getElementById('sl-back');
 const slSessionView = document.getElementById('sl-session-view');
+const slLoot = document.getElementById('sl-loot');
+const slLootText = document.getElementById('sl-loot-text');
 const slMemeView = document.getElementById('sl-meme-view');
 const slMemeSession = document.getElementById('sl-meme-session');
 const slMemeGrid = document.getElementById('sl-meme-grid');
@@ -291,6 +354,11 @@ const POPUP_W = 520;
 const TRAVEL_POPUP_W = 760;
 const POPUP_BOTTOM = 200;
 const ASK_VIEWPORT_MAX_H = 520;
+// 普通会话页永远只占三条 Session 的固定高度；更多内容只在列表内部滚动。
+// 掠夺按秒流入时也复用同一个值，BrowserWindow 从打开到结束不再改变尺寸。
+// 右侧基线分支在 3 条会话时的实测内容高度为 310px，对应 520 × 534
+// 的 BrowserWindow。固定使用这份三行高度；更多会话只在 sl-scroll 内滚动。
+const SESSION_PANEL_H = 310;
 const MEME_WINDOW_W = 760;
 const MEME_WINDOW_H = 340;
 const MEME_MEDIA_W = 260;
@@ -413,13 +481,13 @@ function restingEdgeLayout() {
   });
 }
 
-function popupEdgeLayout(height) {
+function popupEdgeLayout(height, popupHeight) {
   const snapshot = petGeometrySnapshot();
   if (!snapshot || !window.PetGeometry) return edgeLayout;
   return window.PetGeometry.choosePopupLayout({
     ...snapshot,
     current: edgeLayout,
-    popupHeight: Math.max(80, (Number(height) || 340) - POPUP_BOTTOM),
+    popupHeight: Math.max(80, Number(popupHeight) || (Number(height) || 340) - POPUP_BOTTOM),
     inferVerticalFrameClamp: snapshot.windowRect.height <= RESTING_FRAME_MAX_H,
     inferHorizontalFrameClamp: snapshot.windowRect.width <= RESTING_FRAME_MAX_W,
   });
@@ -432,7 +500,9 @@ function setRequestedPetSize(w, h, options = {}) {
     width = Math.max(width, MEME_WINDOW_W);
     height = Math.max(height, MEME_WINDOW_H);
   }
-  const nextLayout = options.popup ? popupEdgeLayout(height) : restingEdgeLayout();
+  const nextLayout = options.popup
+    ? popupEdgeLayout(height, options.popupHeight)
+    : restingEdgeLayout();
   const anchor = anchoredLayoutPayload(nextLayout);
   try { window.pet.setPetSize(width, height, anchor); } catch {}
 }
@@ -440,6 +510,18 @@ function fitPopup(el) {
   if (!el) return;
   const seq = ++fitPopupSeq;
   requestAnimationFrame(() => {
+    const fixedSessionPage = el === sesslist
+      && slSessionView && !slSessionView.classList.contains('hidden');
+    if (fixedSessionPage) {
+      if (seq !== fitPopupSeq) return;
+      // 固定页无需先扩宽再测量；一次完成宽高与上下翻转，避免中间帧错位。
+      setRequestedPetSize(
+        POPUP_W,
+        Math.max(340, POPUP_BOTTOM + SESSION_PANEL_H + 24),
+        { popup: true, popupHeight: SESSION_PANEL_H },
+      );
+      return;
+    }
     const measure = () => {
       if (seq !== fitPopupSeq) return;
       const popupW = el === sesslist && slTravelView && !slTravelView.classList.contains('hidden')
@@ -453,7 +535,7 @@ function fitPopup(el) {
       el.style.maxHeight = prev;
       const viewportH = el === askEl ? Math.min(contentH, ASK_VIEWPORT_MAX_H) : contentH;
       const winH = Math.max(340, POPUP_BOTTOM + viewportH + 24);
-      setRequestedPetSize(popupW, winH, { popup: true });
+      setRequestedPetSize(popupW, winH, { popup: true, popupHeight: viewportH });
     };
 
     const targetW = el === sesslist && slTravelView && !slTravelView.classList.contains('hidden')
@@ -1008,6 +1090,23 @@ let selectedPostcardStop = 0;
 let renderedPostcardKey = '';
 let travelTemplateId = null;
 let travelMissionDirty = false;
+let lootCapture = null;
+let lootCaptureTimers = [];
+let lootPerformanceActive = false;
+let lootPerformanceTimer = null;
+let lootTargetClosed = false;
+let lootKeptSessions = [];
+let lootKeptExpiryTimer = null;
+
+function beginLootPerformance() {
+  clearTimeout(lootPerformanceTimer);
+  lootPerformanceActive = true;
+}
+
+function endLootPerformance(delay = 0) {
+  clearTimeout(lootPerformanceTimer);
+  lootPerformanceTimer = setTimeout(() => { lootPerformanceActive = false; }, delay);
+}
 // Claude 橙色 burst（小图标）
 const CLAUDE_ICON =
   '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
@@ -1040,6 +1139,43 @@ const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2
 function ctxClass(p) { return p >= 90 ? 'high' : p >= 75 ? 'mid' : ''; }
 
 const sessionKey = (s) => String((s && (s.sessionId || s.id)) || '');
+function activeLootKeptSessions() {
+  const now = Date.now();
+  return lootKeptSessions.filter((session) => session && session.expiresAt > now);
+}
+function mergedOrdinarySessions() {
+  const byId = new Map();
+  for (const session of (curSessions || [])) {
+    const key = sessionKey(session);
+    if (key) byId.set(key, session);
+  }
+  for (const kept of activeLootKeptSessions()) {
+    const key = sessionKey(kept);
+    if (!key) continue;
+    // 当前 watcher 数据优先；快照只负责在 watcher 暂时回收历史项时兜底，
+    // 并用 lootCapturedUntil 标记这 30 分钟的普通列表保留期。
+    byId.set(key, {
+      ...kept,
+      ...(byId.get(key) || {}),
+      lootCapturedUntil: kept.expiresAt,
+    });
+  }
+  return [...byId.values()];
+}
+function scheduleLootKeptExpiry() {
+  clearTimeout(lootKeptExpiryTimer);
+  const active = activeLootKeptSessions();
+  const next = active.reduce((min, session) => Math.min(min, session.expiresAt), Infinity);
+  if (!Number.isFinite(next)) return;
+  lootKeptExpiryTimer = setTimeout(() => {
+    lootKeptSessions = activeLootKeptSessions();
+    if (sessListOpen && !lootCapture && !memeTarget) {
+      renderSessList();
+      fitPopup(sesslist);
+    }
+    scheduleLootKeptExpiry();
+  }, Math.max(50, next - Date.now() + 20));
+}
 const isBaseVisibleSession = (s) => !!s && !s.headless && s.state !== 'sleeping';
 const isArchivedSession = (s) => archivedSessionIds.includes(sessionKey(s));
 // 头顶状态点永远不展示已归档项；HUD 可通过「归档」开关单独查看。
@@ -1052,12 +1188,13 @@ function sessionDotClass(s) {
 }
 
 function visibleSessions() {
-  return (curSessions || [])
+  return mergedOrdinarySessions()
     // Dedicated travel sessions live in their own mailbox. They remain in the
     // stats/permission model (so a letter cannot flash away), but do not count
     // as ordinary project tasks.
     .filter((s) => !!s && s.sessionRole !== 'travel')
-    .filter((s) => !s.headless && (s.state !== 'sleeping' || (showArchived && isArchivedSession(s))))
+    .filter((s) => !s.headless && (s.lootCapturedUntil > Date.now()
+      || s.state !== 'sleeping' || (showArchived && isArchivedSession(s))))
     .filter((s) => showArchived ? isArchivedSession(s) : !isArchivedSession(s))
     .filter((s) => {
       if (sessionFilter === 'attention') return ['waiting', 'needsinput', 'error'].includes(s.state);
@@ -1071,6 +1208,9 @@ function visibleSessions() {
         .some((v) => String(v || '').toLocaleLowerCase().includes(q));
     })
     .sort((a, b) => {
+      const lootA = a.lootCapturedUntil > Date.now() ? 0 : 1;
+      const lootB = b.lootCapturedUntil > Date.now() ? 0 : 1;
+      if (lootA !== lootB) return lootA - lootB;
       const pinA = pinnedSessionIds.includes(sessionKey(a)) ? 0 : 1;
       const pinB = pinnedSessionIds.includes(sessionKey(b)) ? 0 : 1;
       if (pinA !== pinB) return pinA - pinB;
@@ -1081,8 +1221,96 @@ function visibleSessions() {
     });
 }
 
+function sessionsForList() {
+  if (!lootCapture) return visibleSessions();
+  return lootCapture.sessions;
+}
+
+function clearLootTimers() {
+  for (const timer of lootCaptureTimers) clearTimeout(timer);
+  lootCaptureTimers = [];
+}
+
+function setLootBanner(key, vars) {
+  if (!slLoot || !slLootText) return;
+  slLoot.classList.remove('hidden');
+  slLootText.textContent = t(key, vars);
+}
+
+function startLootCapture(available = 0) {
+  clearLootTimers();
+  lootCapture = {
+    sessions: [],
+    available: Math.max(0, Number(available) || 0),
+    enteringSessionId: '',
+    ready: false,
+  };
+  sessionSearch = '';
+  sessionFilter = 'all';
+  showArchived = false;
+  if (slSearch) slSearch.value = '';
+  slFilters.querySelectorAll('button[data-filter]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.filter === 'all');
+  });
+  openSessList();
+  slTitle.textContent = t('loot.panelTitle');
+  setLootBanner(lootCapture.available ? 'loot.capturing' : 'loot.noSessions', { n: lootCapture.available });
+  renderSessList();
+}
+
+function appendLootSession(session) {
+  if (!lootCapture || !session) return;
+  const key = sessionKey(session);
+  if (!key || lootCapture.sessions.some((item) => sessionKey(item) === key)) return;
+  lootCapture.sessions.push(session);
+  lootCapture.enteringSessionId = key;
+  setLootBanner('loot.progress', { done: lootCapture.sessions.length });
+  renderSessList();
+  // 掠夺开始时已经一次性固定了会话框高度；这里只滚动内容，绝不能再次
+  // resize BrowserWindow，否则可见桌宠会被每条 session 带着漂移。
+  requestAnimationFrame(() => {
+    if (lootCapture && slRows) slRows.scrollTop = slRows.scrollHeight;
+  });
+  SOUND.done();
+  // 只记录这次显式入场。掠夺期间普通 stats/config 刷新不再重建列表，
+  // 所以同一条动画不会被快照轮询反复从第一帧重启。
+  lootCaptureTimers.push(setTimeout(() => {
+    if (lootCapture && lootCapture.enteringSessionId === key) {
+      lootCapture.enteringSessionId = '';
+    }
+  }, 620));
+}
+
+function markLootCaptureWaiting() {
+  if (!lootCapture || lootCapture.ready) return;
+  setLootBanner(lootCapture.sessions.length ? 'loot.preparing' : 'loot.noSessions', {
+    done: lootCapture.sessions.length,
+  });
+}
+
+function revealLootReady(count) {
+  if (!lootCapture) return;
+  lootCapture.ready = true;
+  setLootBanner('loot.ready', { done: Number(count) || lootCapture.sessions.length });
+}
+
+function finishLootCapture(success) {
+  if (!lootCapture) return;
+  clearLootTimers();
+  lootCapture.enteringSessionId = '';
+  setLootBanner(success ? 'loot.captured' : 'loot.kept', { n: lootCapture.sessions.length });
+  renderSessList();
+  lootCaptureTimers.push(setTimeout(() => {
+    lootCapture = null;
+    if (slLoot) slLoot.classList.add('hidden');
+    slTitle.textContent = t('sess.title');
+    renderSessList();
+    fitPopup(sesslist);
+  }, success ? 1400 : 2200));
+}
+
 function renderSessList() {
-  const list = visibleSessions();
+  const list = sessionsForList();
   if (slTravelInbox) {
     const waitingLetters = (curSessions || []).filter((session) => (
       session &&
@@ -1095,18 +1323,21 @@ function renderSessList() {
       : t('travel.inboxEntry');
     slTravelInbox.classList.toggle('has-letter', waitingLetters > 0);
   }
-  slSub.textContent = list.length ? t('sess.count', { n: list.length }) : '';
+  slSub.textContent = lootCapture
+    ? t('loot.countStreaming', { done: lootCapture.sessions.length })
+    : (list.length ? t('sess.count', { n: list.length }) : '');
   slRows.innerHTML = '';
   if (!list.length) {
     const e = document.createElement('div');
     e.className = 'sl-empty';
-    e.textContent = t('sess.empty');
+    e.textContent = lootCapture ? t('loot.waiting') : t('sess.empty');
     slRows.appendChild(e);
     return;
   }
-  for (const s of list) {
+  for (const [index, s] of list.entries()) {
     const row = document.createElement('div');
     row.className = 'sl-row';
+    if (lootCapture && sessionKey(s) === lootCapture.enteringSessionId) row.classList.add('loot-enter');
     const attn = s.state === 'waiting' || s.state === 'needsinput';
     // meta：等待类显示「等你…」；忙碌显示当前操作；其余只显示状态（不要把陈旧 op 显示成"处理中"）
     let meta;
@@ -1201,6 +1432,7 @@ function setMemeStatus(text, kind = '') {
 
 async function openMemePage(session) {
   memeTarget = session;
+  sesslist.classList.remove('session-list-mode');
   slSessionView.classList.add('hidden');
   slMemeView.classList.remove('hidden');
   slBack.classList.remove('hidden');
@@ -1868,6 +2100,7 @@ function renderTravelPage() {
 
 async function openTravelPage(session) {
   travelTarget = session || null;
+  sesslist.classList.remove('session-list-mode');
   travelMissionDirty = false;
   travelTemplateId = null;
   slSessionView.classList.add('hidden');
@@ -1914,6 +2147,7 @@ function openTravelInbox() {
 function showSessionPage() {
   memeTarget = null;
   travelTarget = null;
+  sesslist.classList.add('session-list-mode');
   slMemeView.classList.add('hidden');
   slTravelView.classList.add('hidden');
   slSessionView.classList.remove('hidden');
@@ -2351,6 +2585,12 @@ window.pet.onEvent((ev) => {
   if (memeLayoutActive && ['user-turn', 'operation', 'say', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)) {
     return;
   }
+  // 掠夺是一段不可被普通会话事件插播的完整演出；否则正在运行的 Codex
+  // operation 会把“拿来吧你”和掠夺进度气泡瞬间盖掉。
+  if (lootPerformanceActive
+      && ['user-turn', 'operation', 'say', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)) {
+    return;
+  }
   switch (ev.kind) {
     case 'operation': {
       // 高优先级稳态（等授权/等回复/出错/清理）不被工具事件降级成 working——
@@ -2498,6 +2738,101 @@ window.pet.onEvent((ev) => {
           break;
       }
       break;
+    case 'loot':
+      switch (ev.phase) {
+        case 'searching':
+          beginLootPerformance();
+          lootTargetClosed = false;
+          showBubble(t('loot.searching'), 2600);
+          break;
+        case 'approach':
+          transient('excited', 12000, t('loot.approach'), 3000);
+          SOUND.greet();
+          break;
+        case 'taunt':
+          transient('excited', 12000, t('loot.taunt'), 2200);
+          break;
+        case 'captureStart':
+          startLootCaptureVisual(ev.direction);
+          startLootCapture(ev.available);
+          break;
+        case 'sessionCaptured':
+          appendLootSession(ev.session);
+          break;
+        case 'captureWaiting':
+          markLootCaptureWaiting();
+          break;
+        case 'ready':
+          revealLootReady(ev.count);
+          break;
+        case 'kick':
+          startLootKick(ev.direction);
+          setLootBanner('loot.kicking');
+          showBubble(t('loot.kicking'), 2400);
+          break;
+        case 'push':
+          setLootBanner('loot.pushing');
+          showBubble(t('loot.pushing'), 3000);
+          break;
+        case 'targetClosed':
+          // 精确关闭动作已经成功：立即结束踢击 GIF，先切到眺望战果。
+          // 最终 closed 仍等复扫确认，不在这里提前庆祝成功。
+          lootTargetClosed = true;
+          startLootLookout(ev.direction, 3600);
+          setLootBanner('loot.targetClosed');
+          break;
+        case 'closed':
+          if (!lootTargetClosed) startLootLookout(ev.direction, 3600);
+          finishLootCapture(true);
+          transient('happy', 2400, t('loot.closed'), 2800);
+          confetti();
+          SOUND.bigDone();
+          endLootPerformance(1600);
+          break;
+        case 'notFound':
+          stopLootActionVisual();
+          showBubble(t('loot.notFound'), 3600);
+          SOUND.error();
+          endLootPerformance(3600);
+          break;
+        case 'pushFailed':
+          stopLootActionVisual();
+          finishLootCapture(false);
+          transient('sad', 3200, t('loot.pushFailed'), 3600);
+          SOUND.error();
+          endLootPerformance(3600);
+          break;
+        case 'closeFailed':
+          stopLootActionVisual();
+          finishLootCapture(false);
+          transient('puzzled', 3600, t('loot.closeFailed'), 4200);
+          SOUND.error();
+          endLootPerformance(4200);
+          break;
+        case 'failed':
+          stopLootActionVisual();
+          finishLootCapture(false);
+          transient('sad', 3000, t('loot.failed'), 3400);
+          SOUND.error();
+          endLootPerformance(3400);
+          break;
+        case 'busy':
+          showBubble(t('loot.busy'), 2800);
+          endLootPerformance(2800);
+          break;
+        case 'blocked':
+          showBubble(t('loot.blocked'), 3200);
+          endLootPerformance(3200);
+          break;
+        case 'abort':
+          stopLootActionVisual();
+          finishLootCapture(false);
+          clearTransient();
+          endLootPerformance();
+          if (lastStats) applyStats(lastStats);
+          break;
+      }
+      break;
   }
 });
 
@@ -2542,7 +2877,9 @@ function applyStats(s) {
   updateNotepad(s); // 记事本：行动清单 + 待办
   if (sessListOpen) {
     if (!slTravelView.classList.contains('hidden')) renderTravelPage();
-    else { renderSessList(); fitPopup(sesslist); }
+    // 掠夺面板由 captureStart/sessionCaptured/ready 显式驱动。普通快照每次
+    // 刷新都 innerHTML 重建列表，会让当前 Session 的入场 CSS 动画反复重播。
+    else if (!lootCapture) { renderSessList(); fitPopup(sesslist); }
   } // HUD 开着时随快照刷新并重定高
 
   // 选项面板：按快照重建队列（多任务都在、标明项目；防漏事件/启动时已在等待）
@@ -2613,11 +2950,14 @@ window.pet.onConfig((cfg) => {
   if (!cfg) return;
   muted = !!cfg.muted;
   territorySupported = !!cfg.territorySupported;
+  lootSupported = !!cfg.lootSupported;
   if (cfg.lang) applyLang(cfg.lang);
   if (cfg.skin) applySkin(cfg.skin);
   pinnedSessionIds = Array.isArray(cfg.pinnedSessions) ? cfg.pinnedSessions.slice() : [];
   archivedSessionIds = Array.isArray(cfg.archivedSessions) ? cfg.archivedSessions.slice() : [];
-  if (sessListOpen && !memeTarget) renderSessList();
+  lootKeptSessions = Array.isArray(cfg.lootCapturedSessions) ? cfg.lootCapturedSessions.slice() : [];
+  scheduleLootKeptExpiry();
+  if (sessListOpen && !memeTarget && !lootCapture) renderSessList();
 });
 
 // Static markup carries its Chinese text inline (so the window is never blank
@@ -2861,6 +3201,9 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
 
 // ---------- 泡泡菜单 ----------
 let territorySupported = false; // 由 pet:config 下发(仅 macOS true)
+let lootSupported = false;
+let radialOpenSeq = 0;
+let lastRadialMetrics = null;
 // labelKey (not label): buildRadial resolves it at render time, so the menu
 // follows a language switch without rebuilding this table.
 const MENU = [
@@ -2869,6 +3212,7 @@ const MENU = [
   { ic: 'hand',   labelKey: 'menu.pending', badge: true, act: () => window.pet.openPanel() },
   { ic: 'zombie', labelKey: 'menu.background', badgeBg: true, act: () => window.pet.openPanel() },
   { ic: 'doc',    labelKey: 'menu.log', act: () => window.pet.openLog() },
+  { ic: 'grab',   labelKey: 'menu.loot', when: () => lootSupported, act: () => window.pet.lootCodexPet() },
   { ic: 'search', labelKey: 'menu.patrol', when: () => territorySupported, act: () => window.pet.territoryRunNow() },
   { ic: 'bell',   labelKey: 'menu.mute', act: () => window.pet.toggleMute() },
   // 双宠模式下「退出」只收起自己这只（独立事件，另一只照常干活）；
@@ -2885,7 +3229,38 @@ function toggleSkin() {
   window.pet.setSkin(next);
 }
 
-function buildRadial() {
+function usableRadialMetrics(metrics) {
+  if (!metrics || !metrics.window || !metrics.workArea) return null;
+  const wr = metrics.window;
+  const wa = metrics.workArea;
+  if (![wr.x, wr.y, wr.width, wr.height, wa.x, wa.y, wa.width, wa.height].every(Number.isFinite)) return null;
+  if (wr.width <= 0 || wr.height <= 0 || wa.width <= 0 || wa.height <= 0) return null;
+  return metrics;
+}
+
+function radialFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function settledRadialMetrics() {
+  if (!window.pet || typeof window.pet.getWindowMetrics !== 'function') return null;
+  let metrics = null;
+  try { metrics = usableRadialMetrics(await window.pet.getWindowMetrics()); } catch { return null; }
+  // setPetSize/resetPetSize 在主进程同步落 bounds，但 renderer 的 resize 与
+  // flex 重排会晚一拍。等到 DOM viewport 也追上主进程尺寸后再取 pet rect。
+  for (let i = 0; metrics && i < 6; i++) {
+    const wr = metrics.window;
+    const settled = Math.abs((window.innerWidth || 0) - wr.width) <= 1
+      && Math.abs((window.innerHeight || 0) - wr.height) <= 1;
+    if (settled) break;
+    await radialFrame();
+    try { metrics = usableRadialMetrics(await window.pet.getWindowMetrics()) || metrics; } catch {}
+  }
+  await radialFrame();
+  return metrics;
+}
+
+function buildRadial(metrics = lastRadialMetrics) {
   radial.innerHTML = '';
   const el = curSkinEl();
   const sr = stage.getBoundingClientRect();
@@ -2894,11 +3269,14 @@ function buildRadial() {
   const cy = r.top - sr.top + r.height / 2;
   const items = MENU.filter((it) => !it.when || it.when()); // 平台不支持的项(如非 mac 的巡视)不渲染
   const n = items.length;
-  const viewportW = Math.max(1, window.innerWidth || 320);
-  const viewportH = Math.max(1, window.innerHeight || 340);
-  const wa = browserWorkArea();
-  const winX = Number.isFinite(window.screenX) ? window.screenX : wa.x;
-  const winY = Number.isFinite(window.screenY) ? window.screenY : wa.y;
+  const exact = usableRadialMetrics(metrics);
+  if (exact) lastRadialMetrics = exact;
+  const frame = exact && exact.window;
+  const viewportW = Math.max(1, frame ? frame.width : (window.innerWidth || 320));
+  const viewportH = Math.max(1, frame ? frame.height : (window.innerHeight || 340));
+  const wa = exact ? exact.workArea : browserWorkArea();
+  const winX = frame ? frame.x : (Number.isFinite(window.screenX) ? window.screenX : wa.x);
+  const winY = frame ? frame.y : (Number.isFinite(window.screenY) ? window.screenY : wa.y);
   const pad = 5;
   // Intersect the BrowserWindow viewport with the actually visible work area.
   // This protects old saved positions that may still have part of the
@@ -2920,6 +3298,11 @@ function buildRadial() {
   const layout = window.PetGeometry
     ? window.PetGeometry.radialLayout({ count: n, center: { x: cx, y: cy }, safeRect, preferred })
     : { direction: 'above', points: [] };
+  rlog(
+    'radial',
+    `layout=${layout.direction} frame=${winX},${winY} ${viewportW}x${viewportH} ` +
+      `safe=${safeRect.x},${safeRect.y} ${safeRect.width}x${safeRect.height}`,
+  );
   items.forEach((it, i) => {
     const point = layout.points[i] || { x: cx, y: cy };
     const x = point.x;
@@ -2965,23 +3348,33 @@ function updateRadialBadge() {
   });
 }
 
-function openRadial() {
+async function openRadial() {
+  const seq = ++radialOpenSeq;
   if (todoPopOpen) closeTodoPop();
   if (sessListOpen) closeSessList();
-  settleEdgeLayout();
-  buildRadial();
-  radial.classList.remove('hidden');
   radialOpen = true;
   try { window.pet.uiBusy(true); } catch {}
   bubble.classList.add('hidden');
+  // closeSessList/closeTodoPop 会异步把 BrowserWindow 从弹层尺寸缩回基础
+  // 尺寸。必须等窗口和 DOM 都归位后再布局，否则菜单会按旧大窗坐标生成，
+  // 随后的缩窗会把按钮直接裁出可见区域。
+  let metrics = await settledRadialMetrics();
+  if (seq !== radialOpenSeq || !radialOpen) return;
+  settleEdgeLayout();
+  metrics = await settledRadialMetrics() || metrics;
+  if (seq !== radialOpenSeq || !radialOpen) return;
+  buildRadial(metrics);
+  radial.classList.remove('hidden');
 }
 function closeRadial() {
+  radialOpenSeq++;
   radial.classList.add('hidden');
   radialOpen = false;
   try { window.pet.uiBusy(!!(todoPopOpen || sessListOpen || askActive || isInteracting())); } catch {}
 }
 function toggleRadial() {
-  radialOpen ? closeRadial() : openRadial();
+  if (radialOpen) closeRadial();
+  else openRadial().catch(() => closeRadial());
 }
 // 点遮罩空白处关闭
 radial.addEventListener('click', () => closeRadial());
@@ -3006,6 +3399,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   if (cfg) {
     muted = !!cfg.muted;
     territorySupported = !!cfg.territorySupported;
+    lootSupported = !!cfg.lootSupported;
     window.OctoI18n.setLang(cfg.lang || 'zh');
     applySkin(cfg.skin || 'mascot');
   }

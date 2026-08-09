@@ -70,9 +70,10 @@ const CHATGPT_MASCOT = {
 };
 
 // 新版 ChatGPT 把桌宠换成了 Codex 机器人("Codex Pet Mascot Effect" 窗口,
-// 243x253),进程名仍是 ChatGPT。与老狗桌宠不同,机器人本体基本居中、没有
-// 四象限 placement。本体范围来自实机截图的像素分割(约 80x100,左右边距
-// ~81/82,上下 ~80/73)。两套轮廓并存:老版本装的还是 356x320 狗桌宠。
+// 243x253),进程名仍是 ChatGPT。2026-08-04 的真实左踢日志显示 AX frame
+// 已到 x=0，而同一拍截图里机器人可见像素仍从 x≈81 开始；因此机器人本体
+// 固定居中于透明窗口，不随左右 placement 翻转。要让本体贴左边，窗口目标
+// 必须是 x=-81，而不是 x=0。两套轮廓并存:老版本仍是 356x320 狗桌宠。
 const CODEX_VIEWPORT = { w: 243, h: 253 };
 const CODEX_MASCOT = { left: 81, top: 80, width: 80, height: 100 };
 
@@ -95,7 +96,8 @@ function chatGPTPlacement(rival, wa, dir = 0) {
 
 function chatGPTVisualBounds(rival, wa, dir = 0, learned = null) {
   if (chatGPTShape(rival.w, rival.h) === 'codex') {
-    // Codex 机器人居中且无 placement 翻转,learned anchor 与几何无关。
+    // Codex 的拖拽锚点和可见机器人都在固定的中央区域；learned anchor、
+    // 屏幕半区和本轮推送方向都不能改变视觉几何。
     const sx = rival.w / CODEX_VIEWPORT.w;
     const sy = rival.h / CODEX_VIEWPORT.h;
     return {
@@ -542,6 +544,137 @@ function standX(rivalX, rivalW, dir, petW) {
   return dir === 1 ? rivalX - petW + PUSH_OVERLAP : rivalX + rivalW - PUSH_OVERLAP;
 }
 
+// 掠夺站位拿到的是两个透明窗口/估算轮廓，不是两张素材真正的不透明边缘。
+// 实测踢击 GIF 朝目标一侧约有 38px 透明留白；Codex 机器人轮廓也会随版本
+// 有少量漂移。48px 在真实桌面仍显得贴在一起，因此再增加一段明确可见的
+// 安全距离；这里的 72px 是透明窗口的几何补偿，不等于肉眼看到的 72px。
+const LOOT_KICK_GAP = 72;
+const LOOT_MIN_GAP = 12;
+const LOOT_CAPTURE_START_MS = 420;
+const LOOT_CAPTURE_INTERVAL_MS = 1000;
+const LOOT_CAPTURE_ANIMATION_MS = 560;
+const LOOT_CAPTURE_MIN = 3;
+const LOOT_CAPTURE_MAX = 12;
+function lootStandX(rivalX, rivalW, dir, petW) {
+  return dir === 1
+    ? rivalX - petW - LOOT_KICK_GAP
+    : rivalX + rivalW + LOOT_KICK_GAP;
+}
+
+// 掠夺接近只能朝 Codex 走，不能为了凑固定演出间距先反向后退。
+// - 离得远：走到 preferred(72px 几何补偿)；
+// - 已在正确一侧且不重叠：保持当前 x，只做纵向对齐；
+// - 已经重叠：只退到 12px 最小可见间距。
+// 这条约束必须同时覆盖左右方向。实机曾出现 Codex 在左、猫 x=434，
+// 已距可见右缘 26px，却被旧算法强制移动到 x=480 的反向动作。
+function lootApproachX(rivalX, rivalW, dir, petX, petW) {
+  const preferred = lootStandX(rivalX, rivalW, dir, petW);
+  const minimum = dir === 1
+    ? rivalX - petW - LOOT_MIN_GAP
+    : rivalX + rivalW + LOOT_MIN_GAP;
+  if (dir === 1) {
+    return petX <= minimum ? Math.max(petX, preferred) : minimum;
+  }
+  return petX >= minimum ? Math.min(petX, preferred) : minimum;
+}
+
+function uniqueLootSessions(sessions, limit = LOOT_CAPTURE_MAX) {
+  const out = [];
+  const seen = new Set();
+  for (const session of (Array.isArray(sessions) ? sessions : [])) {
+    if (!session || typeof session !== 'object') continue;
+    const id = String(session.sessionId || session.id || '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ ...session, sessionId: id });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// 原生拖拽预检可能耗时 2~10 秒，固定三条动画永远无法与它对齐。
+// 这里由后端作为唯一节拍源：每秒发布一条真实且不重复的 session，同时
+// 等待真实 preflight ready。ready 早于动画时至少播满 3 条；ready 较慢时
+// 继续取下一条。队列用尽后发布 waiting 心跳，绝不伪造或重复会话。
+function createLootCaptureFlow(sessions, options = {}) {
+  const queue = uniqueLootSessions(sessions, options.max || LOOT_CAPTURE_MAX);
+  const wait = options.wait || sleep;
+  const emit = typeof options.emit === 'function' ? options.emit : () => {};
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const minimum = Math.min(LOOT_CAPTURE_MIN, queue.length);
+  const common = { direction: options.direction, rival: options.rival };
+  const captured = [];
+  let stopped = false;
+  let startedResolved = false;
+  let minimumResolved = false;
+  let lastCapturedAt = 0;
+  let flowError = null;
+  let resolveStarted;
+  let resolveMinimum;
+  const started = new Promise((resolve) => { resolveStarted = resolve; });
+  const minimumReached = new Promise((resolve) => { resolveMinimum = resolve; });
+  const markStarted = () => {
+    if (!startedResolved) { startedResolved = true; resolveStarted(); }
+  };
+  const markMinimum = () => {
+    if (!minimumResolved) { minimumResolved = true; resolveMinimum(); }
+  };
+
+  const done = (async () => {
+    await wait(LOOT_CAPTURE_START_MS);
+    if (stopped) { markStarted(); markMinimum(); return; }
+    emit({
+      kind: 'loot', phase: 'captureStart', available: queue.length,
+      intervalMs: LOOT_CAPTURE_INTERVAL_MS, ...common, ts: now(),
+    });
+    markStarted();
+    if (!minimum) markMinimum();
+
+    let index = 0;
+    while (!stopped) {
+      if (index < queue.length) {
+        const session = queue[index++];
+        captured.push(session);
+        lastCapturedAt = now();
+        emit({
+          kind: 'loot', phase: 'sessionCaptured', session,
+          count: captured.length, available: queue.length,
+          ...common, ts: lastCapturedAt,
+        });
+        if (captured.length >= minimum) markMinimum();
+      } else {
+        emit({
+          kind: 'loot', phase: 'captureWaiting', count: captured.length,
+          available: queue.length, ...common, ts: now(),
+        });
+      }
+      if (!stopped) await wait(LOOT_CAPTURE_INTERVAL_MS);
+    }
+  })().catch((error) => {
+    flowError = error;
+    markStarted();
+    markMinimum();
+  });
+
+  return {
+    async stopForReady() {
+      await started;
+      await minimumReached;
+      stopped = true;
+      if (flowError) throw flowError;
+      return captured.slice();
+    },
+    stop() { stopped = true; },
+    remainingAnimationMs() {
+      if (!lastCapturedAt) return queue.length ? LOOT_CAPTURE_ANIMATION_MS : 80;
+      return Math.max(0, LOOT_CAPTURE_ANIMATION_MS - Math.max(0, now() - lastCapturedAt));
+    },
+    get captured() { return captured.slice(); },
+    get stopped() { return stopped; },
+    done,
+  };
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // hooks(由 main.js 提供):
@@ -567,6 +700,9 @@ function createTerritory(hooks) {
   const probe = hooks.probeDragPoint || probeDragPoint;
   const clearVisual = hooks.clearRivalVisual || clearRivalVisual;
   const warpVisual = hooks.warpRivalVisual || warpRivalVisual;
+  const snapRival = hooks.snapRivalWindow || snapRivalWindow;
+  const closeRival = hooks.closeRival || closeRivalWindow;
+  const pushHostRival = hooks.physicalPush || physicalPush;
   let timer = null;
   let episode = false;
   let lastPermNag = 0;
@@ -581,6 +717,7 @@ function createTerritory(hooks) {
   let lastOwnDragAt = 0;
   let manualDragAuthorized = false; // 点击“巡视”本身不能被 HID idle 闸门当成用户干扰
   let manualRunPromise = null; // 菜单点击/授权回调/开关首巡重叠时只允许一个手动巡视
+  let lootRunPromise = null; // “掠夺”自成一场，不能和巡视或另一次掠夺重叠
   let episodeInterrupted = false; // helper 检测到物理按键后，整场立即让用户优先
 
   function dragPointKey(rival) {
@@ -981,6 +1118,39 @@ function createTerritory(hooks) {
     return dragHelperPromise;
   }
 
+  async function closeRivalWindow(rival) {
+    const helper = await ensureDragHelper();
+    if (!helper.ok) return helper;
+    return new Promise((resolve) => {
+      execFile(helper.bin, [
+        '--close-window', rival.pid, rival.x, rival.y, rival.w, rival.h,
+      ].map(String), { timeout: 3000 }, (err, stdout, stderr) => {
+        const out = String(stdout || '').trim();
+        resolve(!err && /^closed\|/.test(out)
+          ? { ok: true, out }
+          : { ok: false, error: String(stderr || err || out || '').trim() });
+      });
+    });
+  }
+
+  // System Events 的 AXPosition setter 会对 Codex Pet 静默 no-op，但 Swift
+  // 直调 AX C API 可以把 243px 透明窗精确移出屏幕 81px，并读回真实落点。
+  async function snapRivalWindow(rival, x, y) {
+    const helper = await ensureDragHelper();
+    if (!helper.ok) return helper;
+    return new Promise((resolve) => {
+      execFile(helper.bin, [
+        '--move-window', rival.pid, rival.w, rival.h, x, y,
+      ].map(String), { timeout: 2500 }, (err, stdout, stderr) => {
+        const out = String(stdout || '').trim();
+        const match = /^moved\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)$/.exec(out);
+        resolve(!err && match
+          ? { ok: true, bx: Number(match[1]), by: Number(match[2]), ax: Number(match[3]), ay: Number(match[4]) }
+          : { ok: false, error: String(stderr || err || out || '').trim() });
+      });
+    });
+  }
+
   async function probeDragPoint(rival, points) {
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
@@ -1125,7 +1295,7 @@ function createTerritory(hooks) {
     });
   }
 
-  async function calibrateDragPoint(rival, dir) {
+  async function calibrateDragPoint(rival, dir, shouldAbort = hooks.shouldAbort) {
     const learned = getPreferredDragPoint(rival);
     let points;
     if (/chatgpt/i.test(rival.name)) {
@@ -1147,7 +1317,7 @@ function createTerritory(hooks) {
       for (const [rx, ry] of points) {
         // ChatGPT 只接受全局 HID capture；helper 会先用 AX hit-test 验证
         // 候选点，未命中时不发送 mouseDown，直接继续下一个象限。
-        if (hooks.shouldAbort() || !(await userHandsOff())) return null;
+        if (shouldAbort() || !(await userHandsOff())) return null;
         const beforeX = current.x;
         const probeX = beforeX + dir * 22;
         const dragged = /chatgpt/i.test(rival.name)
@@ -1211,7 +1381,33 @@ function createTerritory(hooks) {
     return maxTravel > 8 ? 'partial' : 'defeat';
   }
 
-  async function physicalPush(rival, dir, petB) {
+  async function physicalPush(rival, dir, petB, shouldAbort = hooks.shouldAbort, options = {}) {
+    // 巡视沿用贴身推挤；掠夺则是一脚踢飞，LLMPET 留在出脚位置，只有
+    // 对方窗口沿拖拽轨迹移动。默认值保持旧行为，避免影响已经稳定的巡视。
+    const followPet = options.followPet !== false;
+    const kickMotion = options.motion === 'kick';
+    const dragDurationMs = kickMotion ? 420 : 720;
+    let landedCallbackDone = false;
+    let beforeDragDone = false;
+    let moveStartNotified = false;
+    async function tryLandedAction(landedRival) {
+      if (!options.onLanded || !landedRival || landedCallbackDone) return;
+      try {
+        const result = await options.onLanded({ ...landedRival });
+        landedCallbackDone = !!(result && result.ok);
+      } catch (e) {
+        log('loot', 'immediate close after kick failed:', String(e && e.message || e));
+      }
+    }
+    async function completeAtEdge(outcome, landedRival) {
+      // 掠夺的关闭动作只能建立在真实复扫确认的可见边缘上。巡视的 partial
+      // 仍保留原有行为；踢击模式绝不能拿“预计落点”冒充已经到墙边。
+      if (outcome === 'victory' || (outcome === 'partial' && !kickMotion)) {
+        if (kickMotion) await wait(80);
+        await tryLandedAction(landedRival);
+      }
+      return outcome;
+    }
     let point = getPreferredDragPoint(rival);
     let current = { ...rival };
     const startX = current.x;
@@ -1219,17 +1415,22 @@ function createTerritory(hooks) {
     // LLMPET 重启后，真实透明外框可能仍在系统边缘，但上次的 CGS
     // transform/锚点内存都没了。这时无需再向屏外校准，直接重施视觉补偿。
     const alreadyClamped = await finishClampedVisualEdge(current, dir, maxTravel);
-    if (alreadyClamped) return alreadyClamped;
+    if (alreadyClamped) return completeAtEdge(alreadyClamped, current);
+    if (visualAtEdgeInDirection(
+      rivalVisualBounds(current, true, dir), hooks.getWorkArea(current), dir)) {
+      return completeAtEdge('victory', current);
+    }
     if (!point) {
-      const calibrated = await calibrateDragPoint(current, dir);
+      const calibrated = await calibrateDragPoint(current, dir, shouldAbort);
       if (!calibrated) return 'defeat';
       current = calibrated;
       maxTravel = Math.max(maxTravel, dir * (current.x - startX));
       point = getPreferredDragPoint(rival);
       if (!point) return 'defeat';
     }
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (hooks.shouldAbort()) return 'abort';
+    const maxAttempts = kickMotion ? 5 : 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (shouldAbort()) return 'abort';
       if (!(await userHandsOff())) return 'abort';
       // 行军最长数秒，ChatGPT 桌宠可能已经自行走动。正式长拖前必须重新
       // 读取目标 frame，并确认目标窗能被抬起，绝不能对陈旧坐标发 mouseDown。
@@ -1245,11 +1446,11 @@ function createTerritory(hooks) {
       const visual = rivalVisualBounds(current, true, dir);
       const targetX = windowTargetForVisual(current, visual, wa, dir);
       const finalVisualX = visual.x + (targetX - current.x);
-      const finalPetX = Math.min(Math.max(
+      const finalPetX = followPet ? Math.min(Math.max(
         standX(finalVisualX, visual.w, dir, petB.width),
-        wa.x - petB.width + 60), wa.x + wa.width - 60);
+        wa.x - petB.width + 60), wa.x + wa.width - 60) : null;
       let dragged;
-      const startPet = hooks.getPetBounds();
+      const startPet = followPet ? hooks.getPetBounds() : null;
       let syncFrames = 0;
       let finalProgress = 0;
       const syncStarted = Date.now();
@@ -1258,41 +1459,83 @@ function createTerritory(hooks) {
           hooks.setPetClickThrough(true);
           await wait(60);
         }
-        dragged = await performIsolatedDrag(current, targetX, point[0], point[1], 720, (progress) => {
-          if (!hooks.setPetFrame) return;
+        // 校准、复扫、抬窗和 helper 编译都已在这里之前完成。掠夺的踢击演出
+        // 只允许放在最后一次真实拖拽之前，不能再把数秒准备工作夹在 GIF 与
+        // Codex 起飞之间。
+        if (!beforeDragDone && options.beforeDrag) {
+          beforeDragDone = true;
+          await options.beforeDrag();
+          if (shouldAbort()) return 'abort';
+        }
+        const onProgress = (progress) => {
+          if (!moveStartNotified) {
+            moveStartNotified = true;
+            if (options.onMoveStart) options.onMoveStart();
+          }
+          if (!followPet || !hooks.setPetFrame) return;
           syncFrames++;
           finalProgress = progress;
           const frame = interpolateFrame(startPet, { x: finalPetX, y: petB.y }, progress);
           hooks.setPetFrame(frame.x, frame.y);
-        });
+        };
+        dragged = await performIsolatedDrag(
+          current, targetX, point[0], point[1], dragDurationMs, onProgress);
       } finally {
-        if (hooks.endPetFrames) hooks.endPetFrames();
+        if (followPet && hooks.endPetFrames) hooks.endPetFrames();
         if (hooks.setPetClickThrough) hooks.setPetClickThrough(false);
       }
-      log('territory', `sync frames=${syncFrames} duration=${Date.now() - syncStarted}ms final=${finalProgress.toFixed(3)}`);
+      log('territory', `${followPet ? 'sync' : 'kick'} frames=${syncFrames} ` +
+        `duration=${Date.now() - syncStarted}ms final=${finalProgress.toFixed(3)}`);
       if (!dragged.ok) return dragged.interrupted ? 'abort' : 'defeat';
-      await wait(260);
+      await wait(kickMotion ? 60 : 260);
       const observed = await observeRival(rival.pid, 3);
       if (!observed.ok) {
         log('territory', 'physical push rescan failed:', observed.error.slice(0, 240));
         return 'defeat';
       }
       if (observed.gone) return 'victory';
-      const rescanned = observed.rival;
-      log('territory', `physical push ${attempt + 1}: ${current.x},${current.y} -> ${rescanned.x},${rescanned.y}`);
+      let rescanned = observed.rival;
+      let directedStep = dir * (rescanned.x - current.x);
+      let rescannedVisual = rivalVisualBounds(rescanned, true, dir);
+      // macOS 可能先把透明窗口钳在工作区边缘（左侧 x=0 / 右侧
+      // right=workArea.right），但 Codex 机器人本体仍因 81px 内边距悬空。
+      // 真实 HID 已证明目标可拖后，用原生 AX 对窗口做最后的精确越界补位。
+      const rescannedWa = hooks.getWorkArea(rescanned);
+      if (chatGPTShape(rescanned.w, rescanned.h) === 'codex'
+        && !visualAtEdgeInDirection(rescannedVisual, rescannedWa, dir)
+        && atEdgeInDirection(rescanned, rescannedWa, dir, 3)) {
+        const snapped = await snapRival(rescanned, targetX, rescanned.y);
+        if (snapped && snapped.ok) {
+          rescanned = { ...rescanned, x: snapped.ax, y: snapped.ay };
+          directedStep = dir * (rescanned.x - current.x);
+          rescannedVisual = rivalVisualBounds(rescanned, true, dir);
+          log('territory', `native edge snap: requested ${Math.round(targetX)},${Math.round(rescanned.y)}; ` +
+            `actual ${snapped.bx},${snapped.by} -> ${snapped.ax},${snapped.ay}`);
+        } else {
+          log('territory', 'native edge snap failed:', String(snapped && snapped.error || '').slice(0, 240));
+        }
+      }
+      log('territory', `physical push ${attempt + 1}/${maxAttempts}: target=${Math.round(targetX)}; ` +
+        `actual ${current.x},${current.y} -> ${rescanned.x},${rescanned.y}; ` +
+        `visual=${Math.round(rescannedVisual.x)}..${Math.round(rescannedVisual.x + rescannedVisual.w)}`);
       maxTravel = Math.max(maxTravel, dir * (rescanned.x - startX));
       current = rescanned;
-      if (visualAtEdgeInDirection(rivalVisualBounds(current, true, dir), hooks.getWorkArea(current), dir)) return 'victory';
+      if (visualAtEdgeInDirection(rescannedVisual, hooks.getWorkArea(current), dir)) {
+        return completeAtEdge('victory', current);
+      }
       // ChatGPT 把 356px 透明外框完整 clamp 在屏内；右推最多只能到
       // workArea.right - 356，可见机器人还会留下约 55px 空白。外框已经贴边时
       // 不再进行一轮必败的重新校准，直接用 WindowServer transform 平滑补齐
       // 剩余视觉距离。它不发送输入事件，也不会抢 Codex/ChatGPT 的焦点。
       const edgeFinished = await finishClampedVisualEdge(current, dir, maxTravel);
-      if (edgeFinished) return edgeFinished;
+      if (edgeFinished) return completeAtEdge(edgeFinished, current);
       // 点击区域会随 ChatGPT 桌宠姿态/位置变化。每次停滞后重新抬窗和校准，
       // 不要拿同一失效锚点机械重试。
       if (!(await raiseRival(current))) return maxTravel > 8 ? 'partial' : 'defeat';
-      const recalibrated = await calibrateDragPoint(current, dir);
+      // 已经沿正确方向明显移动，证明当前拖点有效；下一轮直接拖剩余距离，
+      // 不再插入一次 22px 校准，避免踢飞中途出现不必要的停顿。
+      if (kickMotion && directedStep > 6) continue;
+      const recalibrated = await calibrateDragPoint(current, dir, shouldAbort);
       if (recalibrated) {
         maxTravel = Math.max(maxTravel, dir * (recalibrated.x - startX));
         current = recalibrated;
@@ -1300,7 +1543,7 @@ function createTerritory(hooks) {
       }
     }
     // 窗口发生了明显位移但透明外框被系统边界 clamp，不能误报「纹丝不动」。
-    return maxTravel > 8 ? 'partial' : 'defeat';
+    return maxTravel > 8 ? completeAtEdge('partial', current) : 'defeat';
   }
 
   // 推挤主循环。返回 'victory' | 'defeat' | 'abort'。
@@ -1467,7 +1710,7 @@ function createTerritory(hooks) {
       // 写它们的窗口要么无效(狗),要么只挪动特效层"雾"(Codex 的 Mascot Effect
       // 窗)。唯一有效的是隔离 HID 真实拖拽,由 physicalPush 统一处理。
       outcome = /chatgpt/i.test(rival.name)
-        ? await physicalPush({ ...rival }, dir, { ...pet, x: sx, y: sy })
+        ? await pushHostRival({ ...rival }, dir, { ...pet, x: sx, y: sy })
         : await pushLoop({ ...rival }, dir, targetX, wa, { ...pet, x: sx, y: sy });
       if (outcome === 'victory' || outcome === 'partial' || outcome === 'defeat') {
         log('territory', `episode vs "${rival.name}": ${outcome}`);
@@ -1484,6 +1727,219 @@ function createTerritory(hooks) {
       episode = false;
       episodeInterrupted = false;
     }
+  }
+
+  async function runLootEpisode(rival, sessions) {
+    episode = true;
+    episodeInterrupted = false;
+    manualDragAuthorized = true;
+    let home = null;
+    let outcome = 'abort';
+    let kickCommitted = false;
+    let captureFlow = null;
+    const lootShouldAbort = hooks.shouldAbortLoot || (() => false);
+    try {
+      home = hooks.getPetBounds();
+      log('loot', `target Codex pet pid=${rival.pid} at ${rival.x},${rival.y} ${rival.w}x${rival.h}; sessions=${sessions.length}`);
+
+      const normalized = await clearVisual(rival);
+      if (normalized && normalized.ok) visualShiftByPid.delete(rival.pid);
+      else log('loot', 'visual transform reset skipped:', String(normalized && normalized.error || '').slice(0, 200));
+
+      const wa = hooks.getWorkArea(rival);
+      const pet = hooks.getPetBounds();
+      const visualRival = rivalVisualBounds(rival);
+      const { dir } = edgeAwayFromPet(visualRival, wa, pet);
+      let sx = lootApproachX(
+        visualRival.x, visualRival.w, dir, pet.x, pet.width);
+      let sy = visualRival.y + visualRival.h - pet.height;
+      sx = Math.min(Math.max(sx, wa.x - pet.width + 60), wa.x + wa.width - 60);
+      sy = Math.min(Math.max(sy, wa.y), wa.y + wa.height - pet.height);
+
+      log('loot', `approach: pet ${pet.x},${pet.y} ${pet.width}x${pet.height}; ` +
+        `rival window ${rival.x},${rival.y} ${rival.w}x${rival.h}; ` +
+        `visual ${Math.round(visualRival.x)},${Math.round(visualRival.y)} ` +
+        `${Math.round(visualRival.w)}x${Math.round(visualRival.h)}; ` +
+        `kick ${dir === 1 ? 'right' : 'left'}; stand ${Math.round(sx)},${Math.round(sy)}`);
+
+      hooks.emit({ kind: 'loot', phase: 'approach', direction: dir, rival: rival.name, ts: Date.now() });
+      const dist = Math.hypot(sx - pet.x, sy - pet.y);
+      await hooks.tweenPetTo(sx, sy, Math.min(2600, Math.max(700, dist / 0.6)));
+      const arrived = hooks.getPetBounds();
+      log('loot', `arrived: visible pet ${arrived.x},${arrived.y}; ` +
+        `target ${Math.round(sx)},${Math.round(sy)}; ` +
+        `delta ${Math.round(arrived.x - sx)},${Math.round(arrived.y - sy)}`);
+      if (lootShouldAbort()) return 'abort';
+
+      hooks.emit({ kind: 'loot', phase: 'taunt', direction: dir, rival: rival.name, ts: Date.now() });
+      // 会话流与 helper 编译、抬窗、锚点校准并行。后端每秒发一条真实
+      // session，不再让 renderer 用固定定时器猜测 native ready 时间。
+      captureFlow = createLootCaptureFlow(sessions, {
+        wait,
+        emit: hooks.emit,
+        direction: dir,
+        rival: rival.name,
+      });
+
+      let closeAtLanding = null;
+      let targetClosedEmitted = false;
+      outcome = await pushHostRival(
+        { ...rival }, dir, { ...pet, x: sx, y: sy }, lootShouldAbort,
+        {
+          followPet: false,
+          motion: 'kick',
+          beforeDrag: async () => {
+            // 到这里说明 native 预检真正 ready。若它来得太早，等至少 3 条；
+            // 若它来得慢，流式掠夺已按秒继续。只等当前卡片剩余入场帧。
+            const captured = await captureFlow.stopForReady();
+            hooks.emit({
+              kind: 'loot', phase: 'ready', direction: dir, rival: rival.name,
+              count: captured.length, ts: Date.now(),
+            });
+            await wait(captureFlow.remainingAnimationMs());
+            log('loot', 'drag preflight complete; starting kick visual');
+            hooks.emit({ kind: 'loot', phase: 'kick', direction: dir, rival: rival.name, ts: Date.now() });
+            // helper 内部 mouseDown 前还有约 320ms 的激活；预播 420ms 让
+            // 真实移动首帧落在 GIF 出脚段。
+            await wait(420);
+          },
+          onMoveStart: () => {
+            kickCommitted = true;
+            log('loot', 'kick made contact; Codex flight started');
+            hooks.emit({ kind: 'loot', phase: 'push', direction: dir, rival: rival.name, ts: Date.now() });
+          },
+          onLanded: async (landedRival) => {
+            // 落到墙边的同一拍直接打开右键菜单并关闭；不先回猫、不插气泡。
+            const result = await closeRival(landedRival);
+            closeAtLanding = { rival: landedRival, result };
+            if (result && result.ok && !targetClosedEmitted) {
+              targetClosedEmitted = true;
+              hooks.emit({ kind: 'loot', phase: 'targetClosed', direction: dir, rival: rival.name, ts: Date.now() });
+            }
+            return result;
+          },
+        });
+      if (outcome !== 'victory' && outcome !== 'partial') {
+        if (outcome !== 'abort') hooks.emit({ kind: 'loot', phase: 'pushFailed', rival: rival.name, ts: Date.now() });
+        return outcome;
+      }
+
+      const current = await observeRival(rival.pid, 4);
+      if (!current.ok) {
+        log('loot', 'post-push rescan failed:', current.error.slice(0, 240));
+        hooks.emit({ kind: 'loot', phase: 'closeFailed', rival: rival.name, ts: Date.now() });
+        return 'close-failed';
+      }
+      if (current.gone) {
+        hooks.emit({ kind: 'loot', phase: 'closed', direction: dir, rival: rival.name, ts: Date.now() });
+        return 'closed';
+      }
+
+      // 注入测试或兼容旧 push hook 时 onLanded 可能没有被调用，保留一次安全
+      // 回退；真实踢击路径已经在目标落墙的同一拍完成右键关闭。
+      // 兼容注入的旧 physicalPush hook 时，也必须先用真实复扫坐标确认已经
+      // 到目标边缘。未到边缘不能把“有明显位移”的 partial 当作可关闭条件。
+      if (!closeAtLanding && !visualAtEdgeInDirection(
+        rivalVisualBounds(current.rival, true, dir), hooks.getWorkArea(current.rival), dir)) {
+        log('loot', `refusing close before edge: ${current.rival.x},${current.rival.y}`);
+        hooks.emit({ kind: 'loot', phase: 'pushFailed', rival: rival.name, ts: Date.now() });
+        return 'partial';
+      }
+      const closed = closeAtLanding ? closeAtLanding.result : await closeRival(current.rival);
+      if (!closed || !closed.ok) {
+        log('loot', 'close exact Codex pet window failed:', String(closed && closed.error || '').slice(0, 240));
+        hooks.emit({ kind: 'loot', phase: 'closeFailed', rival: rival.name, ts: Date.now() });
+        return 'close-failed';
+      }
+      const gone = await observeRival(rival.pid, 4);
+      if (!gone.ok || !gone.gone) {
+        log('loot', 'close action returned but target window is still present');
+        hooks.emit({ kind: 'loot', phase: 'closeFailed', rival: rival.name, ts: Date.now() });
+        return 'close-failed';
+      }
+      visualShiftByPid.delete(rival.pid);
+      hooks.emit({ kind: 'loot', phase: 'closed', direction: dir, rival: rival.name, ts: Date.now() });
+      return 'closed';
+    } catch (e) {
+      outcome = 'failed';
+      log('loot', 'episode error:', e.message);
+      hooks.emit({ kind: 'loot', phase: 'failed', rival: rival.name, ts: Date.now() });
+      return 'failed';
+    } finally {
+      if (captureFlow) captureFlow.stop();
+      if (outcome === 'abort') hooks.emit({ kind: 'loot', phase: 'abort', rival: rival.name, ts: Date.now() });
+      // 一旦真正出脚，LLMPET 就留在踢击位置看战果；不能再无条件回到掠夺
+      // 前的 home（home 若在屏幕顶部，就会造成用户看到的瞬移到最上方）。
+      // 只有尚未出脚便失败/取消时才撤回原位。
+      try { if (home && !kickCommitted) await hooks.tweenPetTo(home.x, home.y, 1500); } catch {}
+      manualDragAuthorized = false;
+      episode = false;
+      episodeInterrupted = false;
+    }
+  }
+
+  function runLoot(sessions = []) {
+    if (lootRunPromise) return lootRunPromise;
+    const publicSessions = uniqueLootSessions(sessions, LOOT_CAPTURE_MAX);
+    const run = (async () => {
+      if (episode || checking) {
+        hooks.emit({ kind: 'loot', phase: 'busy', ts: Date.now() });
+        return 'busy';
+      }
+      checking = true;
+      hooks.emit({ kind: 'loot', phase: 'searching', ts: Date.now() });
+      try {
+        let scanAllowed = hooks.canScan();
+        for (let attempt = 0; attempt < 4 && !scanAllowed; attempt++) {
+          await wait(120);
+          scanAllowed = hooks.canScan();
+        }
+        if (!scanAllowed) {
+          hooks.emit({ kind: 'loot', phase: 'blocked', ts: Date.now() });
+          return 'blocked';
+        }
+        const first = await scanDetailed();
+        if (!first.ok) {
+          hooks.emit({ kind: 'loot', phase: 'failed', ts: Date.now() });
+          return 'scan-error';
+        }
+        let target = first.rivals.find((candidate) => /chatgpt/i.test(candidate.name));
+        if (!target) {
+          await wait(180);
+          const second = await scanDetailed();
+          if (!second.ok) {
+            hooks.emit({ kind: 'loot', phase: 'failed', ts: Date.now() });
+            return 'scan-error';
+          }
+          target = second.rivals.find((candidate) => /chatgpt/i.test(candidate.name));
+        }
+        if (!target) {
+          hooks.emit({ kind: 'loot', phase: 'notFound', ts: Date.now() });
+          return 'not-found';
+        }
+        await wait(140);
+        const confirmed = (await scan()).find((candidate) => candidate.pid === target.pid
+          && /chatgpt/i.test(candidate.name)
+          && Math.abs(candidate.w - target.w) <= 2 && Math.abs(candidate.h - target.h) <= 2);
+        if (!confirmed) {
+          hooks.emit({ kind: 'loot', phase: 'notFound', ts: Date.now() });
+          return 'not-found';
+        }
+        target = confirmed;
+        checking = false;
+        return runLootEpisode(target, publicSessions);
+      } finally {
+        checking = false;
+      }
+    })();
+    lootRunPromise = run;
+    // 用双分支清理，避免 finally() 派生出的 Promise 在原任务异常时成为
+    // 未处理拒绝；run 本身仍原样返回给调用方记录错误。
+    run.then(
+      () => { if (lootRunPromise === run) lootRunPromise = null; },
+      () => { if (lootRunPromise === run) lootRunPromise = null; },
+    );
+    return run;
   }
 
   async function tick(force = false) {
@@ -1667,7 +2123,7 @@ function createTerritory(hooks) {
     emergencyRelease();
   }
 
-  return { start, stop, emergencyRelease, scan, tick, runNow, get busy() { return episode || checking; }, get dominating() { return dominating; } };
+  return { start, stop, emergencyRelease, scan, tick, runNow, runLoot, get busy() { return episode || checking; }, get dominating() { return dominating; } };
 }
 
 module.exports = {
@@ -1694,6 +2150,9 @@ module.exports = {
   parseWarpHelperLine,
   warpHoldNeedsRecovery,
   standX,
+  lootStandX,
+  lootApproachX,
+  createLootCaptureFlow,
   DEFAULT_RIVALS,
   HOST_RIVALS,
   MAX_RIVAL_SIZE,

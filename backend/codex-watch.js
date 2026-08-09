@@ -198,11 +198,12 @@ function createCodexWatch(deps) {
     return out;
   }
 
-  // 全量扫描：递归所有 年/月/日 目录，只收 1h 内仍在写的文件。
+  // 全量扫描：递归所有 年/月/日 目录。正常 watcher 只收 1h 内仍在写的
+  // 文件；“掠夺”会显式请求最近历史会话，因此也复用这里但不设时间上限。
   // rollout 永远留在「会话开始日」的目录里——ChatGPT Desktop 一个对话连聊几天，
   // 文件还在 5 天前的目录里被追加（实测踩坑）。只扫今天/昨天永远看不见它，
   // 所以启动第一轮 + 之后每 FULL_SWEEP_TICKS 轮做一次全量兜底。
-  function sweepAllRecent(onFile) {
+  function sweepAllRecent(onFile, maxAgeMs = IDLE_UNTRACK_MS) {
     const out = [];
     const now = Date.now();
     let years;
@@ -224,7 +225,7 @@ function createCodexWatch(deps) {
             const e = statEntry(path.join(sessionsDir, y, m, d, n));
             if (!e) continue;
             if (onFile) onFile(e);
-            if (now - e.mtimeMs <= IDLE_UNTRACK_MS) out.push(e);
+            if (now - e.mtimeMs <= maxAgeMs) out.push(e);
           }
         }
       }
@@ -467,6 +468,55 @@ function createCodexWatch(deps) {
     t.titleSet = !!title;
   }
 
+  // “掠夺”要拿的是用户最近的 Codex 会话，而不是仅限 30 分钟内仍活跃的
+  // watcher 集合。按 mtime 倒序扫描历史 rollout，只读 meta + 128KB 尾部，
+  // 过滤 guardian/subagent 后静默补进 core；不回放历史事件。
+  function seedRecent(limit = 3) {
+    const wanted = Math.max(0, Math.min(20, Number(limit) || 0));
+    if (!wanted) return [];
+    const files = sweepAllRecent(null, Number.POSITIVE_INFINITY)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const ids = [];
+    for (const file of files) {
+      const t = newTracker(file.fp, null);
+      hydrateMeta(t);
+      if (t.ignored || !t.sid) continue;
+
+      let title = null;
+      let contextUsage = null;
+      const start = Math.max(0, file.size - TAIL_PROBE_BYTES);
+      const tail = readBytes(file.fp, start, file.size - start);
+      if (tail) {
+        const lines = tail.toString('utf8').split('\n');
+        if (start > 0) lines.shift();
+        for (const line of lines) {
+          const obj = parseLine(line);
+          if (!obj || obj.type !== 'event_msg') continue;
+          const p = obj.payload || {};
+          if (p.type === 'user_message') title = promptTitle(String(p.message || '')) || title;
+          if (p.type === 'token_count') contextUsage = toContextUsage(p.info) || contextUsage;
+        }
+      }
+      core.seedSession({
+        id: t.sid,
+        agentId: 'codex',
+        cwd: t.cwd || '',
+        transcriptPath: t.fp,
+        sessionTitle: title,
+        contextUsage,
+        originator: t.originator || null,
+        sourcePid: null,
+        headless: false,
+        state: 'idle',
+        createdAt: file.mtimeMs,
+        updatedAt: file.mtimeMs,
+      });
+      ids.push(t.sid);
+      if (ids.length >= wanted) break;
+    }
+    return ids;
+  }
+
   // ── 增量泵：读新增字节 → 攒整行 → handleLine ────────────────────────────────
   function pump(t, size) {
     if (size < t.offset) { t.offset = 0; t.carry = ''; } // 文件被截断/重写
@@ -569,7 +619,7 @@ function createCodexWatch(deps) {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  return { start, stop, tick, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
+  return { start, stop, tick, seedRecent, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
 }
 
 module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool };

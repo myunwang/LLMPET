@@ -94,6 +94,33 @@ check('meta+尾部 user_message/token_count → seedSession(不发事件)', () =
 });
 
 console.log('[C3] live：运行期间新会话的事件映射');
+check('掠夺按历史 mtime 补齐最近三条用户会话，不受 30 分钟 backfill 限制', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const ids = [
+    '019f5103-921c-7ac1-9a8d-c4f8ff8a6701',
+    '019f5103-921c-7ac1-9a8d-c4f8ff8a6702',
+    '019f5103-921c-7ac1-9a8d-c4f8ff8a6703',
+    '019f5103-921c-7ac1-9a8d-c4f8ff8a6704',
+  ];
+  ids.forEach((id, index) => {
+    const fp = path.join(dir, `rollout-loot-${id}.jsonl`);
+    fs.writeFileSync(fp, meta(id) + line({ type: 'event_msg', payload: { type: 'user_message', message: `历史会话 ${index + 1}` } }));
+    const when = new Date(Date.now() - (4 - index) * 86400000);
+    fs.utimesSync(fp, when, when);
+  });
+  const guardian = path.join(dir, 'rollout-loot-guardian.jsonl');
+  fs.writeFileSync(guardian, meta(UUID_A, { thread_source: 'subagent', source: { subagent: { other: 'guardian' } } }));
+  const newest = new Date();
+  fs.utimesSync(guardian, newest, newest);
+
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  const selected = w.seedRecent(3);
+  assert.deepStrictEqual(selected, ids.slice(1).reverse());
+  assert.deepStrictEqual(core.seeds.map((s) => s.sessionTitle), ['历史会话 4', '历史会话 3', '历史会话 2']);
+  assert.ok(core.seeds.every((s) => s.agentId === 'codex' && s.headless === false));
+});
+
 check('SessionStart→prompt→tool→complete 全链路', () => {
   const { root, dir } = mkSessions();
   const core = fakeCore();

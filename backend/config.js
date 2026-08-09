@@ -27,6 +27,7 @@ const DEFAULTS = Object.freeze({
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
   archivedSessions: [],   // 会话 HUD 归档项（不影响后端任务本身）
+  lootCapturedSessions: [], // 掠夺会话快照：限时留在普通会话列表，过期自动隐藏
 });
 
 let cache = null;
@@ -37,6 +38,42 @@ function sanitizeSessionIds(value) {
     .filter((id) => typeof id === 'string' && id.trim())
     .map((id) => id.trim().slice(0, 256)))]
     .slice(0, 300);
+}
+
+function sanitizeLootCapturedSessions(value, now = Date.now()) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const states = new Set([
+    'waiting', 'needsinput', 'working', 'juggling', 'sweeping', 'thinking',
+    'loafing', 'error', 'idle', 'sleeping',
+  ]);
+  const text = (v, max) => typeof v === 'string' ? v.slice(0, max) : '';
+  const out = [];
+  for (const session of value) {
+    if (!session || typeof session !== 'object') continue;
+    const sessionId = text(session.sessionId || session.id, 256).trim();
+    if (!sessionId || seen.has(sessionId)
+        || !Number.isFinite(session.expiresAt) || session.expiresAt <= now) continue;
+    seen.add(sessionId);
+    out.push({
+      sessionId,
+      project: text(session.project, 240),
+      cwd: text(session.cwd, 1024),
+      agent: 'codex',
+      state: states.has(session.state) ? session.state : 'idle',
+      badge: text(session.badge, 32),
+      op: text(session.op, 240),
+      reason: text(session.reason, 240),
+      contextPercent: Number.isFinite(session.contextPercent)
+        ? Math.min(100, Math.max(0, Math.round(session.contextPercent))) : null,
+      idleMs: Number.isFinite(session.idleMs) ? Math.max(0, session.idleMs) : 0,
+      updatedAt: Number.isFinite(session.updatedAt) ? session.updatedAt : 0,
+      capturedAt: Number.isFinite(session.capturedAt) ? session.capturedAt : now,
+      expiresAt: session.expiresAt,
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 function sanitize(raw) {
@@ -66,6 +103,7 @@ function sanitize(raw) {
   out.pinnedSessions = sanitizeSessionIds(raw.pinnedSessions);
   out.archivedSessions = sanitizeSessionIds(raw.archivedSessions)
     .filter((id) => !out.pinnedSessions.includes(id));
+  out.lootCapturedSessions = sanitizeLootCapturedSessions(raw.lootCapturedSessions);
   return out;
 }
 

@@ -36,6 +36,20 @@ assert(/class="ask-scroll"[^>]*>[\s\S]*class="ask-card"[\s\S]*class="ask-toolbar
 assert(/id="ask-back"[\s\S]*id="ask-submit"[\s\S]*id="ask-term"/s.test(html), 'footer actions should use back, submit, terminal order');
 assert(/const POPUP_W = 520;/.test(js), 'popup window should provide more horizontal room');
 assert(/const ASK_VIEWPORT_MAX_H = 520;/.test(js), 'ask measurement must use the same vertical cap');
+assert(/const SESSION_PANEL_H = 310;/.test(js),
+  'ordinary and streaming session panels must share one fixed three-row height');
+assert(/fixedSessionPage[\s\S]*POPUP_BOTTOM \+ SESSION_PANEL_H[\s\S]*popupHeight: SESSION_PANEL_H/.test(js)
+  && /fixedSessionPage[\s\S]{0,500}SESSION_PANEL_H \+ 24/.test(js),
+  'session pages must resize once to the measured three-row baseline instead of measuring each row');
+assert(/\.sesslist\.session-list-mode\s*\{[^}]*height\s*:\s*310px\s*;[^}]*max-height\s*:\s*310px\s*;/s.test(css),
+  'the visible session shell must be exactly three rows tall');
+assert(/\.sl-scroll::\-webkit-scrollbar-track[\s\S]*background\s*:\s*transparent/s.test(css)
+  && /\.sl-scroll::\-webkit-scrollbar-corner[\s\S]*background\s*:\s*transparent/s.test(css),
+  'the compact session scrollbar must not expose a light native track or corner');
+assert(/function showSessionPage[\s\S]*session-list-mode/.test(js)
+  && /function openMemePage[\s\S]*remove\('session-list-mode'\)/.test(js)
+  && /function openTravelPage[\s\S]*remove\('session-list-mode'\)/.test(js),
+  'only the ordinary/loot session page should use the compact fixed shell');
 assert(/window\.innerWidth[^\n]*targetW/.test(js), 'fitPopup must resize to the active surface width before measuring content height');
 assert(/askScroll\.scrollTop\s*=\s*0/.test(js), 'switching questions or sessions must reset only the content scroll position');
 assert(/\.sesslist\s*\{[^}]*max-height\s*:\s*calc\(100vh - 70px\)[^}]*overflow\s*:\s*hidden\s*;/s.test(css),
@@ -89,9 +103,57 @@ assert(/compactVerticalFrame\s*&&\s*next\.vertical\s*===\s*'below'/s.test(js)
 assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-\s*BASE_PET_FRAME_H\)/s.test(js)
   && /snapshot\.petRect\.y\s*-\s*frameHeightExcess\s*\+\s*2/s.test(js),
   'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
+const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const territoryTween = mainJs.slice(
+  mainJs.indexOf('function tweenTerritoryPetTo'),
+  mainJs.indexOf('function bootTerritory'));
+assert(/const from = getTerritoryPetBounds\(\)/.test(territoryTween)
+  && /const rect = primaryVisualRect\(\)[\s\S]*petWin\.setBounds/.test(territoryTween)
+  && !/return tweenPetTo\(/.test(territoryTween),
+  'territory tween must recompute the visible-body offset on every frame while popups resize');
 assert(/wr\.y\s*<=\s*wa\.y\s*\+\s*3[\s\S]*screenY\s*=\s*wa\.y/.test(js),
   'a top-clamped transparent frame must snap the visible pet body to the work-area top');
 assert(/PetGeometry\.radialLayout/.test(js),
   'right-click menu must use bounded edge-aware geometry');
+assert(/getWindowMetrics:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('get-window-metrics'\)/.test(
+  fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')),
+  'renderer must be able to request exact BrowserWindow and display bounds');
+assert(/ipcMain\.handle\('get-window-metrics'[\s\S]*screen\.getDisplayMatching\(windowBounds\)\.workArea/.test(mainJs),
+  'radial layout must use the main-process work area for the window current display');
+assert(/async function openRadial[\s\S]*closeSessList\(\)[\s\S]*await settledRadialMetrics\(\)[\s\S]*buildRadial\(metrics\)/.test(js),
+  'right-click menu must wait for popup collapse and renderer reflow before positioning controls');
+assert(/id="sl-loot"/.test(html),
+  'session panel must include the loot progress banner');
+assert(/\.sl-row\.loot-enter/.test(css) && /@keyframes lootSessionIn/.test(css),
+  'captured Codex sessions must enter with a visible staggerable animation');
+assert(/case 'loot':/.test(js)
+  && /case 'captureStart':[\s\S]*startLootCapture\(ev\.available\)/.test(js)
+  && /case 'sessionCaptured':[\s\S]*appendLootSession\(ev\.session\)/.test(js),
+  'renderer must consume the backend-owned per-session capture stream');
+assert(/function appendLootSession[\s\S]*enteringSessionId = key[\s\S]*renderSessList\(\)/.test(js)
+  && /case 'ready':[\s\S]*revealLootReady\(ev\.count\)/.test(js),
+  'each explicit session event must animate once before the real drag-ready event');
+const appendLootSource = js.slice(js.indexOf('function appendLootSession'), js.indexOf('function markLootCaptureWaiting'));
+assert(!/fitPopup\(sesslist\)/.test(appendLootSource)
+  && /slRows\.scrollTop\s*=\s*slRows\.scrollHeight/.test(appendLootSource),
+  'streamed sessions must scroll inside the fixed panel without resizing the pet window');
+assert(/else if \(!lootCapture\) \{ renderSessList\(\); fitPopup\(sesslist\); \}/.test(js)
+  && /sessListOpen && !memeTarget && !lootCapture/.test(js),
+  'ordinary stats/config refreshes must not rebuild and restart an active loot animation');
+assert(/#cat\.loot-action-mirrored img\s*\{[^}]*scaleX\(-1\)/s.test(css)
+  && /function lootVisualNeedsMirror[\s\S]*const nativeDirection = -1/.test(js)
+  && /case 'captureStart':[\s\S]*startLootCaptureVisual\(ev\.direction\)/.test(js)
+  && /case 'kick':[\s\S]*startLootKick\(ev\.direction\)/.test(js)
+  && /function startLootKick[\s\S]*loot-kick=[\s\S]*Date\.now\(\)/.test(js),
+  'loot visuals must respect each GIF native direction and restart the kick from frame one');
+assert(/lookout:\s*'cat-thinking-2\.gif'/.test(js)
+  && /case 'targetClosed':[\s\S]*startLootLookout\(ev\.direction, 3600\)/.test(js),
+  'the kick GIF must stop as soon as the exact Codex pet close action succeeds');
+assert(/success \? 1400 : 2200/.test(js),
+  'the special loot view must return quickly to the normal session list');
+assert(/function mergedOrdinarySessions/.test(js)
+  && /lootCapturedUntil/.test(js)
+  && /lootKeptSessions = Array\.isArray\(cfg\.lootCapturedSessions\)/.test(js),
+  'captured sessions must survive as time-bounded entries in the normal session list');
 
 console.log('popup style checks passed');

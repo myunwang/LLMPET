@@ -74,9 +74,7 @@
     const wr = normalizeRect(windowRect);
     const pr = normalizeRect(petRect);
     const petTop = wr.y + pr.y;
-    const petBottom = petTop + pr.height;
     const above = Math.max(0, petTop - wa.y);
-    const below = Math.max(0, wa.bottom - petBottom);
     const need = Math.max(80, Number(popupHeight) || 0);
     const resting = chooseRestingLayout({
       workArea: wa,
@@ -87,10 +85,9 @@
       inferHorizontalFrameClamp,
     });
 
-    let vertical = resting.vertical;
-    if (above < need && below > above) vertical = 'below';
-    else if (below < need && above >= below) vertical = 'above';
-    else if (above >= need && below >= need) vertical = above >= below ? 'above' : 'below';
+    // 单一规则：只有桌宠本体上方放不下完整卡片时才向下翻；除此之外
+    // 一律向上。不要把下方剩余空间、历史方向或当前透明窗口高度掺进来。
+    const vertical = above < need ? 'below' : 'above';
     return { vertical, horizontal: resting.horizontal };
   }
 

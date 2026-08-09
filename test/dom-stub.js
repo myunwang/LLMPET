@@ -137,6 +137,10 @@ function createStubWorld() {
     wanderTravel: () => { calls.push(['wanderTravel']); return Promise.resolve({ ok: true }); },
     cancelTravel: () => { calls.push(['cancelTravel']); return Promise.resolve({ ok: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
+    getWindowMetrics: () => Promise.resolve({
+      window: { x: 0, y: 0, width: 320, height: 340 },
+      workArea: { x: 0, y: 0, width: 1440, height: 900 },
+    }),
     setWinPos: (...a) => calls.push(['setWinPos', a]),
     setPetSize: (...a) => calls.push(['setPetSize', a]),
     setIgnoreMouse: (...a) => calls.push(['setIgnoreMouse', a]),

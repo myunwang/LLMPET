@@ -26,12 +26,14 @@ contextBridge.exposeInMainWorld('pet', {
   toggleMute: () => ipcRenderer.send('toggle-mute'),
   setSessionPrefs: (pinned, archived) => ipcRenderer.send('set-session-prefs', pinned, archived),
   territoryRunNow: () => ipcRenderer.send('territory-run-now'),
+  lootCodexPet: () => ipcRenderer.send('loot-codex-pet'),
   territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),
   // 双宠模式：只收起自己这只宠（独立事件，另一只和 app 不受影响）
   closePet: () => ipcRenderer.send('close-pet'),
   // 手动拖动窗口
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
+  getWindowMetrics: () => ipcRenderer.invoke('get-window-metrics'),
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
   // 唤起 Claude / Codex 客户端
   launchClaude: () => ipcRenderer.send('launch-claude'),

@@ -662,6 +662,11 @@ body.skin-cat .sessions { width: 120px; }
 }
 #cat img { width: 100%; height: 100%; object-fit: contain; -webkit-user-drag: none; }
 
+/* 掠夺素材的原生朝向不一致：attention 朝右，飞踢/看战果朝左。
+   JS 按“素材原生朝向 → 目标方向”决定是否镜像；只翻 GIF，不动容器、
+   命中区、气泡和会话点。 */
+#cat.loot-action-mirrored img { transform: scaleX(-1); }
+
 /* GIF 自带动效，容器不加任何位移动画；只保留「需要你出手」的发光提示 */
 #cat.waiting,
 #cat.needsinput {
@@ -704,6 +709,11 @@ body.skin-cat .sessions { width: 120px; }
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
 }
 .sesslist.hidden { display: none; }
+.sesslist.session-list-mode {
+  box-sizing: border-box;
+  height: 310px;
+  max-height: 310px;
+}
 .sl-top { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
 .sl-title { font-size: 12px; font-weight: 700; color: #fff; }
 .sl-sub { font-size: 10.5px; color: #9a9aa0; margin-left: 2px; flex: 1; }
@@ -721,6 +731,27 @@ body.skin-cat .sessions { width: 120px; }
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+}
+.sl-loot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  margin: 0 2px 8px; padding: 8px 10px; border-radius: 10px;
+  color: #f4eaff; font-size: 11px; font-weight: 700;
+  border: 1px solid rgba(164, 123, 255, 0.38);
+  background: linear-gradient(90deg, rgba(116, 78, 190, 0.28), rgba(217, 119, 87, 0.18));
+  box-shadow: inset 0 0 16px rgba(139, 103, 230, 0.1);
+}
+.sl-loot.hidden { display: none; }
+.sl-loot-mark { color: #c8a8ff; font-size: 18px; animation: lootPulse 0.72s ease-in-out infinite alternate; }
+@keyframes lootPulse { from { transform: translateX(-2px); opacity: 0.55; } to { transform: translateX(4px); opacity: 1; } }
+.sl-row.loot-enter {
+  animation: lootSessionIn 0.56s cubic-bezier(.18,.85,.28,1.12) both;
+  border: 1px solid rgba(167, 129, 255, 0.48);
+  box-shadow: 0 0 18px rgba(125, 91, 210, 0.28);
+}
+@keyframes lootSessionIn {
+  0% { opacity: 0; transform: translateX(90px) scale(.86); filter: blur(5px); }
+  62% { opacity: 1; transform: translateX(-5px) scale(1.02); filter: blur(0); }
+  100% { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
 }
 .sl-tools {
   flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
@@ -750,12 +781,23 @@ body.skin-cat .sessions { width: 120px; }
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.sl-scroll::-webkit-scrollbar { width: 7px; }
-.sl-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.sl-scroll::-webkit-scrollbar { width: 5px; background: transparent; }
+.sl-scroll::-webkit-scrollbar-track,
+.sl-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.sl-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border: 0;
+  border-radius: 999px;
+}
 
 .sl-row {
   display: flex; align-items: center; gap: 10px;
