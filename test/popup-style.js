@@ -153,6 +153,15 @@ assert(/else if \(!memeTarget && !takeoverTarget && !lootCapture\)/.test(js)
 assert(/lastPetSizeRequestSig/.test(js)
   && /requestSig === lastPetSizeRequestSig/.test(js),
   'identical popup geometry must not repaint the transparent BrowserWindow');
+assert(/function popupFrameAlreadySettled[\s\S]*window\.innerWidth[\s\S]*window\.innerHeight[\s\S]*nextLayout\.vertical === edgeLayout\.vertical/.test(js)
+  && /options\.popup && popupFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
+  'an already settled popup must ignore live anchor drift instead of repainting the BrowserWindow');
+assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
+  && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
+  && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),
+  'switching popup surfaces must not collapse through the 340px resting frame');
+assert(/function resetPetSize\(\)\s*\{[\s\S]{0,500}if \(sessListOpen \|\| askActive \|\| todoPopOpen\) return false;/.test(js),
+  'stale delayed callbacks must not collapse a popup that still owns the BrowserWindow');
 assert(/lastSessListRenderSig/.test(js)
   && /renderSig === lastSessListRenderSig/.test(js)
   && /existingRows = new Map/.test(js)

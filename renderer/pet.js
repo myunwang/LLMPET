@@ -505,6 +505,17 @@ function popupEdgeLayout(height, popupHeight) {
   });
 }
 
+function popupFrameAlreadySettled(width, height, nextLayout) {
+  if (!(width > 0) || !(height > 0) || !nextLayout) return false;
+  const wa = browserWorkArea();
+  const targetWidth = Math.min(width, wa.width);
+  const targetHeight = Math.min(height, wa.height);
+  return Math.abs((window.innerWidth || 0) - targetWidth) <= 1
+    && Math.abs((window.innerHeight || 0) - targetHeight) <= 1
+    && nextLayout.vertical === edgeLayout.vertical
+    && nextLayout.horizontal === edgeLayout.horizontal;
+}
+
 function setRequestedPetSize(w, h, options = {}) {
   let width = Number(w) || 0;
   let height = Number(h) || 0;
@@ -515,6 +526,11 @@ function setRequestedPetSize(w, h, options = {}) {
   const nextLayout = options.popup
     ? popupEdgeLayout(height, options.popupHeight)
     : restingEdgeLayout();
+  // Stats arrive every few seconds. Once an open popup already owns the exact
+  // viewport and edge direction, a changing DOM anchor is not a resize request.
+  // Reapplying the same BrowserWindow bounds makes macOS briefly repaint only
+  // half of the transparent window, which looks like the panel lost its top.
+  if (options.popup && popupFrameAlreadySettled(width, height, nextLayout)) return false;
   const anchor = anchoredLayoutPayload(nextLayout);
   // Stats arrive continuously. Re-sending an identical BrowserWindow resize
   // makes the transparent window briefly repaint even when nothing visible
@@ -577,9 +593,14 @@ function fitPopup(el) {
   });
 }
 function resetPetSize() {
+  // Delayed bubble/meme/choice callbacks can outlive the surface that created
+  // them. They must never collapse a newer popup which now owns the window.
+  // Legitimate close paths clear their open flag before calling this function.
+  if (sessListOpen || askActive || todoPopOpen) return false;
   fitPopupSeq++;
   if (memeLayoutActive) setRequestedPetSize(MEME_WINDOW_W, MEME_WINDOW_H);
   else setRequestedPetSize(0, 0);
+  return true;
 }
 
 function settleEdgeLayout() {
@@ -942,14 +963,18 @@ function gotoSession(choice) {
   finishChoice(choice, t('ask.toTerminal'));
 }
 
-function hideAsk() {
+function hideAsk(preserveSize = false) {
   if (askActive) rlog('ask', 'hide');
   lastAskSig = '';
   elic = null;
   askEl.classList.add('hidden');
   askHover = false;
   if (askText) askText.value = ''; // 清掉草稿，避免关闭后仍被判为「交互中」冻住状态
-  if (askActive) { askActive = false; resetPetSize(); window.pet.blurPet(); }
+  if (askActive) {
+    askActive = false;
+    if (!preserveSize) resetPetSize();
+    window.pet.blurPet();
+  }
 }
 
 // ---------- 记事本 / 行动清单 ----------
@@ -1099,20 +1124,20 @@ function maybeCloseEmptyPop() {
 }
 
 function openTodoPop() {
-  if (askActive) hideAsk(); // 别和选项面板抢窗口
-  if (sessListOpen) closeSessList();
+  if (askActive) hideAsk(true); // 直接交给新面板接管尺寸，不经过 340px 中间帧
+  if (sessListOpen) closeSessList(true);
   renderTodoPop();
   todopop.classList.remove('hidden');
   todoPopOpen = true;
   rlog('pop', `open acts=${actionableItems().length} todos=${curTodos.length}`);
   fitPopup(todopop);
 }
-function closeTodoPop() {
+function closeTodoPop(preserveSize = false) {
   todopop.classList.add('hidden');
   todoPopOpen = false;
   rlog('pop', 'close');
   window.pet.blurPet();
-  resetPetSize();
+  if (!preserveSize) resetPetSize();
 }
 
 // ---------- 会话列表 HUD（左键弹出）----------
@@ -2447,8 +2472,8 @@ function showSessionPage() {
 
 function openSessList() {
   if (radialOpen) closeRadial();
-  if (todoPopOpen) closeTodoPop();
-  hideAsk();
+  if (todoPopOpen) closeTodoPop(true);
+  hideAsk(true);
   resetSessionListOrder();
   showSessionPage();
   sesslist.classList.remove('hidden');
@@ -2456,7 +2481,7 @@ function openSessList() {
   rlog('sesslist', 'open ' + visibleSessions().length);
   fitPopup(sesslist); // 动态定高 + 440 宽，会话名不截断
 }
-function closeSessList() {
+function closeSessList(preserveSize = false) {
   if (!sessListOpen) return;
   sesslist.classList.add('hidden');
   sessListOpen = false;
@@ -2464,7 +2489,7 @@ function closeSessList() {
   takeoverTarget = null;
   travelTarget = null;
   rlog('sesslist', 'close');
-  resetPetSize();
+  if (!preserveSize) resetPetSize();
 }
 
 function alignMemePlayer() {
