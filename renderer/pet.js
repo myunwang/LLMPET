@@ -376,6 +376,7 @@ const RESTING_FRAME_MAX_W = 360;
 const RESTING_FRAME_MAX_H = 360;
 let memeLayoutActive = false;
 let fitPopupSeq = 0;
+let lastPetSizeRequestSig = '';
 let edgeLayout = { vertical: 'above', horizontal: 'center' };
 
 function browserWorkArea() {
@@ -511,7 +512,18 @@ function setRequestedPetSize(w, h, options = {}) {
     ? popupEdgeLayout(height, options.popupHeight)
     : restingEdgeLayout();
   const anchor = anchoredLayoutPayload(nextLayout);
-  try { window.pet.setPetSize(width, height, anchor); } catch {}
+  // Stats arrive continuously. Re-sending an identical BrowserWindow resize
+  // makes the transparent window briefly repaint even when nothing visible
+  // changed, which reads as a flash around every open panel.
+  const requestSig = JSON.stringify({ width, height, anchor });
+  if (requestSig === lastPetSizeRequestSig) return false;
+  try {
+    window.pet.setPetSize(width, height, anchor);
+    lastPetSizeRequestSig = requestSig;
+    return true;
+  } catch {
+    return false;
+  }
 }
 function fitPopup(el) {
   if (!el) return;
@@ -676,7 +688,11 @@ function enqueueChoice(c) {
 function showAskPanel() {
   const c = askQueue[askIdx];
   if (!c) { hideAsk(); return; }
-  if (sessListOpen) closeSessList(); // 卡片优先于会话列表
+  // The user explicitly opened the session surface. A short-lived background
+  // permission snapshot must not close it and then disappear on the next poll.
+  // Keep the choice queued; the next stats push after the user closes the list
+  // will present it normally.
+  if (sessListOpen) return;
   askEl.classList.toggle('travel-letter', c.travel === true);
 
   const sess = c.sessionId ? ' · #' + String(c.sessionId).slice(-3) : '';
@@ -934,6 +950,7 @@ let curTodos = [];
 let curTodosProj = '';
 let curSessions = [];
 let todoPopOpen = false;
+let lastTodoPopRenderSig = '';
 const TODO_ICON = { completed: '✅', in_progress: '▶️', pending: '⬜️' };
 
 // 当前需要你处理的事项：有 choice、还没答过的 waiting/needsinput 会话
@@ -972,6 +989,14 @@ function updateNotepad(s) {
 
 function renderTodoPop() {
   const acts = actionableItems();
+  const renderSig = JSON.stringify({
+    lang: window.OctoI18n.getLang(),
+    project: curTodosProj,
+    todos: curTodos,
+    actions: acts,
+  });
+  if (renderSig === lastTodoPopRenderSig) return false;
+  lastTodoPopRenderSig = renderSig;
   const done = curTodos.filter((t) => t.status === 'completed').length;
   tpProg.textContent = curTodos.length ? t('todo.progress', { done, total: curTodos.length }) : '';
   // 需要你处理
@@ -996,6 +1021,7 @@ function renderTodoPop() {
     tpTodoSec.classList.add('hidden');
     tpList.innerHTML = '';
   }
+  return true;
 }
 
 // 一张「需要你处理」卡片：问题 + 选项按钮(可点即答) + 自定义输入
@@ -1084,6 +1110,9 @@ function closeTodoPop() {
 
 // ---------- 会话列表 HUD（左键弹出）----------
 let sessListOpen = false;
+let lastSessListRenderSig = '';
+let lastSessionDotsRenderSig = '';
+let stableSessionOrder = [];
 let memeCatalog = { schemaVersion: 2, items: [] };
 let memeTarget = null;
 let takeoverTarget = null;
@@ -1096,6 +1125,9 @@ let travelPostcards = [];
 let selectedPostcardId = null;
 let selectedPostcardStop = 0;
 let renderedPostcardKey = '';
+let lastTravelMailboxRenderSig = '';
+let lastTravelHistoryRenderSig = '';
+let lastTravelTemplatesRenderSig = '';
 let travelTemplateId = null;
 let travelMissionDirty = false;
 let lootCapture = null;
@@ -1230,8 +1262,27 @@ function visibleSessions() {
 }
 
 function sessionsForList() {
-  if (!lootCapture) return visibleSessions();
-  return lootCapture.sessions;
+  if (lootCapture) return lootCapture.sessions;
+  const list = visibleSessions();
+  const byKey = new Map(list.map((session) => [sessionKey(session), session]));
+  const ordered = [];
+  for (const key of stableSessionOrder) {
+    const session = byKey.get(key);
+    if (!session) continue;
+    ordered.push(session);
+    byKey.delete(key);
+  }
+  // While the panel is open, state/idle-time polling updates rows in place;
+  // it must not reshuffle the list under the user's pointer. New sessions are
+  // appended. Explicit search/filter/pin actions reset this order separately.
+  ordered.push(...byKey.values());
+  stableSessionOrder = ordered.map(sessionKey);
+  return ordered;
+}
+
+function resetSessionListOrder() {
+  stableSessionOrder = [];
+  lastSessListRenderSig = '';
 }
 
 function clearLootTimers() {
@@ -1317,15 +1368,162 @@ function finishLootCapture(success) {
   }, success ? 1400 : 2200));
 }
 
+function createSessRow() {
+  const row = document.createElement('div');
+  row.className = 'sl-row';
+  row.innerHTML =
+    '<span class="sl-dot"></span>' +
+    '<span class="sl-icon"></span>' +
+    '<div class="sl-main"><div class="sl-name"></div><div class="sl-meta"></div></div>' +
+    '<span class="sl-ctx hidden"></span>' +
+    '<button class="sl-takeover-entry"></button>' +
+    '<button class="sl-meme-entry"></button>' +
+    '<button class="sl-travel-entry">🧳</button>' +
+    '<span class="sl-actions">' +
+    '<button class="sl-action pin">★</button>' +
+    '<button class="sl-action archive">▣</button>' +
+    '</span>';
+  row._parts = {
+    dot: row.querySelector('.sl-dot'),
+    icon: row.querySelector('.sl-icon'),
+    name: row.querySelector('.sl-name'),
+    meta: row.querySelector('.sl-meta'),
+    context: row.querySelector('.sl-ctx'),
+    takeover: row.querySelector('.sl-takeover-entry'),
+    meme: row.querySelector('.sl-meme-entry'),
+    travel: row.querySelector('.sl-travel-entry'),
+    pin: row.querySelector('.sl-action.pin'),
+    archive: row.querySelector('.sl-action.archive'),
+  };
+  row._parts.takeover.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openTakeoverPage(row._session);
+  });
+  row._parts.meme.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openMemePage(row._session);
+  });
+  row._parts.travel.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openTravelPage(row._session);
+  });
+  row._parts.pin.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const key = sessionKey(row._session);
+    const pinned = pinnedSessionIds.includes(key);
+    if (pinned) pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
+    else {
+      pinnedSessionIds = [key, ...pinnedSessionIds.filter((id) => id !== key)];
+      archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
+    }
+    window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
+    resetSessionListOrder();
+    renderSessList();
+  });
+  row._parts.archive.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const key = sessionKey(row._session);
+    const archived = archivedSessionIds.includes(key);
+    if (archived) archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
+    else {
+      archivedSessionIds = [key, ...archivedSessionIds.filter((id) => id !== key)];
+      pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
+    }
+    window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
+    resetSessionListOrder();
+    renderSessList();
+  });
+  row.addEventListener('click', () => {
+    const session = row._session || {};
+    window.pet.focusSession(session.sessionId || '');
+    rlog('sesslist', 'focus ' + (session.project || ''));
+    closeSessList();
+  });
+  return row;
+}
+
+function updateSessRow(row, session) {
+  row._session = session;
+  const parts = row._parts;
+  const key = sessionKey(session);
+  const attention = session.state === 'waiting' || session.state === 'needsinput';
+  let meta;
+  if (attention) meta = session.reason
+    ? t(session.state === 'waiting' ? 'sess.waitFor' : 'sess.replyFor', { reason: reasonWord(session.reason) })
+    : sessMeta(session.state);
+  else if (['working', 'juggling', 'sweeping', 'thinking'].includes(session.state)) {
+    meta = session.op || sessMeta(session.state);
+  } else if (session.badge === 'done') meta = t('sess.justDone');
+  else if (session.badge === 'interrupted') meta = t('sess.interrupted');
+  else meta = sessMeta(session.state) || session.state;
+
+  const pinned = pinnedSessionIds.includes(key);
+  const archived = archivedSessionIds.includes(key);
+  row.dataset.sessionKey = key;
+  row.className = 'sl-row' + (
+    lootCapture && key === lootCapture.enteringSessionId ? ' loot-enter' : ''
+  );
+  parts.dot.className = `sl-dot ${sessionDotClass(session)}`;
+  parts.icon.title = session.agent === 'codex' ? 'Codex' : 'Claude';
+  const iconMarkup = agentIcon(session);
+  if (parts.icon.innerHTML !== iconMarkup) parts.icon.innerHTML = iconMarkup;
+  parts.name.textContent = session.project || '';
+  parts.meta.className = `sl-meta${attention ? ' attn' : ''}`;
+  parts.meta.textContent = meta || '';
+  if (typeof session.contextPercent === 'number') {
+    parts.context.className = `sl-ctx ${ctxClass(session.contextPercent)}`.trim();
+    parts.context.textContent = `${session.contextPercent}%`;
+  } else {
+    parts.context.className = 'sl-ctx hidden';
+    parts.context.textContent = '';
+  }
+  parts.takeover.title = t('takeover.entryTitle');
+  parts.takeover.textContent = t('takeover.entry');
+  parts.meme.title = t('meme.entryTitle');
+  parts.meme.textContent = t('meme.entry');
+  parts.travel.title = t('travel.entryTitle');
+  parts.pin.className = `sl-action pin${pinned ? ' active' : ''}`;
+  parts.pin.title = t(pinned ? 'sess.unpin' : 'sess.pin');
+  parts.archive.className = `sl-action archive${archived ? ' active' : ''}`;
+  parts.archive.title = t(archived ? 'sess.unarchive' : 'sess.archive');
+}
+
 function renderSessList() {
   const list = sessionsForList();
+  const waitingLetters = (curSessions || []).filter((session) => (
+    session &&
+    session.sessionRole === 'travel' &&
+    session.choice &&
+    (session.state === 'waiting' || session.state === 'needsinput')
+  )).length;
+  const renderSig = JSON.stringify({
+    lang: window.OctoI18n.getLang(),
+    search: sessionSearch,
+    filter: sessionFilter,
+    archived: showArchived,
+    waitingLetters,
+    loot: lootCapture && {
+      ready: lootCapture.ready,
+      enteringSessionId: lootCapture.enteringSessionId,
+      count: lootCapture.sessions.length,
+    },
+    rows: list.map((s) => ({
+      key: sessionKey(s),
+      project: s.project,
+      agent: s.agent,
+      state: s.state,
+      reason: s.reason,
+      op: s.op,
+      badge: s.badge,
+      contextPercent: s.contextPercent,
+      pinned: pinnedSessionIds.includes(sessionKey(s)),
+      archived: archivedSessionIds.includes(sessionKey(s)),
+    })),
+  });
+  if (renderSig === lastSessListRenderSig) return false;
+  lastSessListRenderSig = renderSig;
+  const previousScrollTop = slRows.scrollTop;
   if (slTravelInbox) {
-    const waitingLetters = (curSessions || []).filter((session) => (
-      session &&
-      session.sessionRole === 'travel' &&
-      session.choice &&
-      (session.state === 'waiting' || session.state === 'needsinput')
-    )).length;
     slTravelInbox.textContent = waitingLetters
       ? `${t('travel.inboxEntry')} · ${waitingLetters}`
       : t('travel.inboxEntry');
@@ -1334,95 +1532,42 @@ function renderSessList() {
   slSub.textContent = lootCapture
     ? t('loot.countStreaming', { done: lootCapture.sessions.length })
     : (list.length ? t('sess.count', { n: list.length }) : '');
-  slRows.innerHTML = '';
   if (!list.length) {
+    slRows.innerHTML = '';
     const e = document.createElement('div');
     e.className = 'sl-empty';
     e.textContent = lootCapture ? t('loot.waiting') : t('sess.empty');
     slRows.appendChild(e);
-    return;
+    return true;
   }
-  for (const [index, s] of list.entries()) {
-    const row = document.createElement('div');
-    row.className = 'sl-row';
-    if (lootCapture && sessionKey(s) === lootCapture.enteringSessionId) row.classList.add('loot-enter');
-    const attn = s.state === 'waiting' || s.state === 'needsinput';
-    // meta：等待类显示「等你…」；忙碌显示当前操作；其余只显示状态（不要把陈旧 op 显示成"处理中"）
-    let meta;
-    if (attn) meta = s.reason
-      ? t(s.state === 'waiting' ? 'sess.waitFor' : 'sess.replyFor', { reason: reasonWord(s.reason) })
-      : sessMeta(s.state);
-    else if (s.state === 'working' || s.state === 'juggling' || s.state === 'sweeping' || s.state === 'thinking') meta = s.op || sessMeta(s.state);
-    else if (s.badge === 'done') meta = t('sess.justDone');
-    else if (s.badge === 'interrupted') meta = t('sess.interrupted');
-    else meta = sessMeta(s.state) || s.state;
-    const dotCls = sessionDotClass(s); // 与头顶小点同一套配色
-    const ctx = typeof s.contextPercent === 'number'
-      ? `<span class="sl-ctx ${ctxClass(s.contextPercent)}">${s.contextPercent}%</span>` : '';
-    const key = sessionKey(s);
-    const pinned = pinnedSessionIds.includes(key);
-    const archived = archivedSessionIds.includes(key);
-    row.innerHTML =
-      `<span class="sl-dot ${dotCls}"></span>` +
-      `<span class="sl-icon" title="${s.agent === 'codex' ? 'Codex' : 'Claude'}">${agentIcon(s)}</span>` +
-      `<div class="sl-main"><div class="sl-name">${esc(s.project)}</div>` +
-      `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
-      ctx +
-      `<button class="sl-takeover-entry" title="${esc(t('takeover.entryTitle'))}">${esc(t('takeover.entry'))}</button>` +
-      `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>` +
-      `<button class="sl-travel-entry" title="${esc(t('travel.entryTitle'))}">🧳</button>` +
-      `<span class="sl-actions">` +
-      `<button class="sl-action pin ${pinned ? 'active' : ''}" title="${esc(t(pinned ? 'sess.unpin' : 'sess.pin'))}">★</button>` +
-      `<button class="sl-action archive ${archived ? 'active' : ''}" title="${esc(t(archived ? 'sess.unarchive' : 'sess.archive'))}">▣</button>` +
-      `</span>`;
-    const takeoverBtn = row.querySelector('.sl-takeover-entry');
-    if (takeoverBtn) {
-      takeoverBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openTakeoverPage(s);
-      });
-    }
-    const memeBtn = row.querySelector('.sl-meme-entry');
-    if (memeBtn) {
-      memeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openMemePage(s);
-      });
-    }
-    const travelBtn = row.querySelector('.sl-travel-entry');
-    if (travelBtn) {
-      travelBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openTravelPage(s);
-      });
-    }
-    row.querySelector('.sl-action.pin').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (pinned) pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
-      else {
-        pinnedSessionIds = [key, ...pinnedSessionIds.filter((id) => id !== key)];
-        archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
-      }
-      window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
-      renderSessList();
-    });
-    row.querySelector('.sl-action.archive').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (archived) archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
-      else {
-        archivedSessionIds = [key, ...archivedSessionIds.filter((id) => id !== key)];
-        pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
-      }
-      window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
-      renderSessList();
-    });
-    row.addEventListener('click', () => {
-      window.pet.focusSession(s.sessionId || '');
-      rlog('sesslist', 'focus ' + (s.project || ''));
-      closeSessList();
-    });
-    slRows.appendChild(row);
+  const existingRows = new Map();
+  for (const child of [...slRows.children]) {
+    const key = child.dataset && child.dataset.sessionKey;
+    if (key) existingRows.set(key, child);
+    else child.remove();
   }
+  const retainedKeys = new Set();
+  for (const [index, session] of list.entries()) {
+    const key = sessionKey(session);
+    const row = existingRows.get(key) || createSessRow();
+    retainedKeys.add(key);
+    updateSessRow(row, session);
+    const currentAtIndex = slRows.children[index] || null;
+    if (currentAtIndex !== row) {
+      if (typeof slRows.insertBefore === 'function') slRows.insertBefore(row, currentAtIndex);
+      else if (!row.parentNode) slRows.appendChild(row);
+    }
+  }
+  for (const [key, row] of existingRows) {
+    if (!retainedKeys.has(key)) row.remove();
+  }
+  // Preserve reading position even when rows are added, removed, or reordered.
+  const maxScrollTop = Math.max(
+    0,
+    (Number(slRows.scrollHeight) || 0) - (Number(slRows.clientHeight) || 0),
+  );
+  slRows.scrollTop = Math.min(Number(previousScrollTop) || 0, maxScrollTop);
+  return true;
 }
 
 function setTakeoverStatus(text, kind = '') {
@@ -1606,6 +1751,26 @@ function renderTravelMailboxes() {
   if (!slTravelMailboxes) return;
   const sessions = travelMailboxSessions();
   const agents = AGENT === 'all' ? ['claude', 'codex'] : [AGENT];
+  const active = travelData && travelData.active;
+  const renderSig = JSON.stringify({
+    lang: window.OctoI18n.getLang(),
+    agents,
+    active: active && {
+      agent: active.agent,
+      status: active.status,
+      minute: Math.max(0, Math.floor((Date.now() - Number(active.startedAt || Date.now())) / 60000)),
+    },
+    sessions: sessions.map((session) => ({
+      key: sessionKey(session),
+      agent: session.travelAgent || session.agent,
+      project: session.project,
+      state: session.state,
+      badge: session.badge,
+      choice: !!session.choice,
+    })),
+  });
+  if (renderSig === lastTravelMailboxRenderSig) return false;
+  lastTravelMailboxRenderSig = renderSig;
   slTravelMailboxes.innerHTML = '';
   for (const agent of agents) {
     const session = sessions.find((item) => (item.travelAgent || item.agent) === agent) || null;
@@ -1662,6 +1827,7 @@ function renderTravelMailboxes() {
     }
     slTravelMailboxes.appendChild(row);
   }
+  return true;
 }
 
 const POSTCARD_ART = {
@@ -2048,6 +2214,19 @@ function selectedTravelPostcard() {
 function renderTravelHistory() {
   if (!slTravelHistory) return;
   const all = Array.isArray(travelPostcards) ? travelPostcards : [];
+  const renderSig = JSON.stringify({
+    lang: window.OctoI18n.getLang(),
+    selectedPostcardId,
+    trips: all.map((trip) => ({
+      id: trip.id,
+      agent: trip.agent,
+      project: trip.project,
+      status: trip.status,
+      tokens: trip.usage && trip.usage.tokens,
+    })),
+  });
+  if (renderSig === lastTravelHistoryRenderSig) return false;
+  lastTravelHistoryRenderSig = renderSig;
   slTravelHistory.innerHTML = '';
   if (!all.length) {
     const empty = document.createElement('div');
@@ -2078,6 +2257,7 @@ function renderTravelHistory() {
     });
     slTravelHistory.appendChild(card);
   }
+  return true;
 }
 
 function renderTravelTemplates() {
@@ -2086,6 +2266,18 @@ function renderTravelTemplates() {
   if (!travelTemplateId || !available.some((item) => item.id === travelTemplateId)) {
     travelTemplateId = available[0].id;
   }
+  const renderSig = JSON.stringify({
+    lang: window.OctoI18n.getLang(),
+    selected: travelTemplateId,
+    templates: available.map((item) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      mission: item.mission,
+    })),
+  });
+  if (renderSig === lastTravelTemplatesRenderSig) return false;
+  lastTravelTemplatesRenderSig = renderSig;
   slTravelTemplates.innerHTML = '';
   for (const item of available) {
     const card = document.createElement('button');
@@ -2104,6 +2296,7 @@ function renderTravelTemplates() {
     const selected = available.find((item) => item.id === travelTemplateId) || available[0];
     slTravelMission.value = selected.mission || '';
   }
+  return true;
 }
 
 function renderTravelPage() {
@@ -2245,6 +2438,7 @@ function openSessList() {
   if (radialOpen) closeRadial();
   if (todoPopOpen) closeTodoPop();
   hideAsk();
+  resetSessionListOrder();
   showSessionPage();
   sesslist.classList.remove('hidden');
   sessListOpen = true;
@@ -2962,9 +3156,13 @@ function applyStats(s) {
   updateNotepad(s); // 记事本：行动清单 + 待办
   if (sessListOpen) {
     if (!slTravelView.classList.contains('hidden')) renderTravelPage();
-    // 掠夺面板由 captureStart/sessionCaptured/ready 显式驱动。普通快照每次
-    // 刷新都 innerHTML 重建列表，会让当前 Session 的入场 CSS 动画反复重播。
-    else if (!lootCapture) { renderSessList(); fitPopup(sesslist); }
+    // Sub-pages own their DOM while open. A stats push must not rebuild the
+    // hidden session page or resize the window underneath the current page.
+    // Loot is likewise driven only by its explicit capture events.
+    else if (!memeTarget && !takeoverTarget && !lootCapture) {
+      renderSessList();
+      fitPopup(sesslist);
+    }
   } // HUD 开着时随快照刷新并重定高
 
   // 选项面板：按快照重建队列（多任务都在、标明项目；防漏事件/启动时已在等待）
@@ -3010,7 +3208,6 @@ function applyStats(s) {
 window.pet.onStats(applyStats);
 
 function renderSessions(sessions) {
-  sessionsEl.innerHTML = '';
   // 与会话列表 HUD 完全联动：同一过滤(非 headless/非睡眠)、同一配色、同一排序。
   const list = (sessions || []).filter(isVisibleSession).sort((a, b) => {
     const pinA = pinnedSessionIds.includes(sessionKey(a)) ? 0 : 1;
@@ -3020,6 +3217,19 @@ function renderSessions(sessions) {
     const pb = SESS_SORT[b.state] != null ? SESS_SORT[b.state] : 3;
     return pa !== pb ? pa - pb : (a.idleMs || 0) - (b.idleMs || 0);
   });
+  const renderSig = JSON.stringify(list.map((s) => ({
+    key: sessionKey(s),
+    project: s.project,
+    state: s.state,
+    reason: s.reason,
+    dot: sessionDotClass(s),
+  })));
+  if (renderSig === lastSessionDotsRenderSig) {
+    if (radialOpen) updateRadialBadge();
+    return false;
+  }
+  lastSessionDotsRenderSig = renderSig;
+  sessionsEl.innerHTML = '';
   for (const s of list) {
     const d = document.createElement('div');
     d.className = 'sess-dot ' + sessionDotClass(s);
@@ -3029,6 +3239,7 @@ function renderSessions(sessions) {
   }
   // 菜单开着时同步「待处理」角标
   if (radialOpen) updateRadialBadge();
+  return true;
 }
 
 window.pet.onConfig((cfg) => {
@@ -3067,6 +3278,12 @@ function applyLang(next) {
   // the signature so an open card is relabelled instead of sitting in the old
   // language until its content happens to change.
   lastAskSig = '';
+  lastTodoPopRenderSig = '';
+  lastSessListRenderSig = '';
+  lastSessionDotsRenderSig = '';
+  lastTravelMailboxRenderSig = '';
+  lastTravelHistoryRenderSig = '';
+  lastTravelTemplatesRenderSig = '';
   // Live views rebuild from the state we already hold; everything else refreshes
   // on the stats push the main process fires right after the switch.
   if (sessListOpen) {
@@ -3232,6 +3449,7 @@ if (slTakeoverCodex) slTakeoverCodex.addEventListener('click', (e) => {
 slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
 slSearch.addEventListener('input', () => {
   sessionSearch = slSearch.value || '';
+  resetSessionListOrder();
   renderSessList();
   fitPopup(sesslist);
 });
@@ -3248,6 +3466,7 @@ slFilters.addEventListener('click', (e) => {
     sessionFilter = btn.dataset.filter;
     slFilters.querySelectorAll('[data-filter]').forEach((el) => el.classList.toggle('active', el === btn));
   }
+  resetSessionListOrder();
   renderSessList();
   fitPopup(sesslist);
 });

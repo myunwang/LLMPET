@@ -284,6 +284,35 @@ async function main() {
     check('旅行来信提供专属终端入口', () => {
       assert.strictEqual(w.elements('ask-term').textContent, '💬 去旅行终端看看');
     });
+
+    const w2 = world();
+    w2.handlers.stats(baseStats({
+      sessions: [{ sessionId: 'ordinary', agent: 'codex', project: '普通任务', state: 'idle', headless: false }],
+    }));
+    const pet = w2.elements('cat');
+    pet.dispatch('pointerdown', { button: 0, pointerId: 1, screenX: 0, screenY: 0 });
+    pet.dispatch('pointerup', { pointerId: 1 });
+    w2.handlers.stats(baseStats({
+      waitingCount: 1,
+      sessions: [{
+        sessionId: 'background-choice',
+        agent: 'codex',
+        project: '后台任务',
+        state: 'waiting',
+        headless: false,
+        choice: {
+          kind: 'continue',
+          sessionId: 'background-choice',
+          project: '后台任务',
+          question: '继续吗？',
+          options: [{ label: '继续', key: 'continue' }],
+        },
+      }],
+    }));
+    check('后台授权快照不会闪关用户打开的会话面板', () => {
+      assert(!w2.elements('sesslist').classList.contains('hidden'));
+      assert(w2.elements('ask').classList.contains('hidden'));
+    });
   }
 
   console.log('[R13] 旅行会话独立列表 + 字符画明信片');
@@ -350,8 +379,9 @@ async function main() {
     cat.dispatch('pointerup', { pointerId: 1 });
     check('普通任务列表不再混入旅行会话', () => {
       assert.strictEqual(w.elements('sl-rows').children.length, 1);
-      assert(w.elements('sl-rows').children[0].innerHTML.includes('普通任务'));
-      assert(!w.elements('sl-rows').children[0].innerHTML.includes('旅行信箱'));
+      const row = w.elements('sl-rows').children[0];
+      assert.strictEqual(row._parts.name.textContent, '普通任务');
+      assert(!row._parts.name.textContent.includes('旅行信箱'));
     });
     w.elements('sl-travel-inbox').dispatch('click', { stopPropagation() {} });
     await sleep(20);

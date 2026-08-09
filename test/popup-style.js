@@ -137,9 +137,30 @@ const appendLootSource = js.slice(js.indexOf('function appendLootSession'), js.i
 assert(!/fitPopup\(sesslist\)/.test(appendLootSource)
   && /slRows\.scrollTop\s*=\s*slRows\.scrollHeight/.test(appendLootSource),
   'streamed sessions must scroll inside the fixed panel without resizing the pet window');
-assert(/else if \(!lootCapture\) \{ renderSessList\(\); fitPopup\(sesslist\); \}/.test(js)
+assert(/else if \(!memeTarget && !takeoverTarget && !lootCapture\)/.test(js)
   && /sessListOpen && !memeTarget && !takeoverTarget && !lootCapture/.test(js),
-  'ordinary stats/config refreshes must not rebuild and restart an active loot animation');
+  'ordinary stats/config refreshes must not rebuild an open sub-page or restart an active loot animation');
+assert(/lastPetSizeRequestSig/.test(js)
+  && /requestSig === lastPetSizeRequestSig/.test(js),
+  'identical popup geometry must not repaint the transparent BrowserWindow');
+assert(/lastSessListRenderSig/.test(js)
+  && /renderSig === lastSessListRenderSig/.test(js)
+  && /existingRows = new Map/.test(js)
+  && /updateSessRow\(row, session\)/.test(js)
+  && /previousScrollTop/.test(js),
+  'session refreshes must reuse keyed row nodes and preserve the scroll position');
+assert(/lastSessionDotsRenderSig/.test(js),
+  'unchanged stats must not recreate the pet session dots');
+assert(/lastTravelMailboxRenderSig/.test(js)
+  && /lastTravelHistoryRenderSig/.test(js)
+  && /lastTravelTemplatesRenderSig/.test(js),
+  'unchanged travel snapshots must preserve mailbox, album, and template DOM');
+assert(/function showAskPanel[\s\S]*if \(sessListOpen\) return;/.test(js),
+  'background permission snapshots must not flash-close a session panel the user opened');
+assert(/let stableSessionOrder = \[\]/.test(js)
+  && /ordered\.push\(\.\.\.byKey\.values\(\)\)/.test(js)
+  && /function resetSessionListOrder/.test(js),
+  'live stats must update session rows in place instead of continuously reshuffling them');
 assert(/#cat\.loot-action-mirrored img\s*\{[^}]*scaleX\(-1\)/s.test(css)
   && /function lootVisualNeedsMirror[\s\S]*const nativeDirection = -1/.test(js)
   && /case 'captureStart':[\s\S]*startLootCaptureVisual\(ev\.direction\)/.test(js)
