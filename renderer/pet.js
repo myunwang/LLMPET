@@ -286,6 +286,13 @@ const slMemeView = document.getElementById('sl-meme-view');
 const slMemeSession = document.getElementById('sl-meme-session');
 const slMemeGrid = document.getElementById('sl-meme-grid');
 const slMemeStatus = document.getElementById('sl-meme-status');
+const slTakeoverView = document.getElementById('sl-takeover-view');
+const slTakeoverSession = document.getElementById('sl-takeover-session');
+const slTakeoverClaude = document.getElementById('sl-takeover-claude');
+const slTakeoverCodex = document.getElementById('sl-takeover-codex');
+const slTakeoverClaudeMode = document.getElementById('sl-takeover-claude-mode');
+const slTakeoverCodexMode = document.getElementById('sl-takeover-codex-mode');
+const slTakeoverStatus = document.getElementById('sl-takeover-status');
 const slTravelView = document.getElementById('sl-travel-view');
 const slTravelSession = document.getElementById('sl-travel-session');
 const slTravelRankIcons = document.getElementById('sl-travel-rank-icons');
@@ -1079,6 +1086,7 @@ function closeTodoPop() {
 let sessListOpen = false;
 let memeCatalog = { schemaVersion: 2, items: [] };
 let memeTarget = null;
+let takeoverTarget = null;
 let memeTimer = null;
 let memeAudio = null;
 let memeCatalogRefreshTimer = null;
@@ -1169,7 +1177,7 @@ function scheduleLootKeptExpiry() {
   if (!Number.isFinite(next)) return;
   lootKeptExpiryTimer = setTimeout(() => {
     lootKeptSessions = activeLootKeptSessions();
-    if (sessListOpen && !lootCapture && !memeTarget) {
+    if (sessListOpen && !lootCapture && !memeTarget && !takeoverTarget) {
       renderSessList();
       fitPopup(sesslist);
     }
@@ -1360,12 +1368,20 @@ function renderSessList() {
       `<div class="sl-main"><div class="sl-name">${esc(s.project)}</div>` +
       `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
       ctx +
+      `<button class="sl-takeover-entry" title="${esc(t('takeover.entryTitle'))}">${esc(t('takeover.entry'))}</button>` +
       `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>` +
       `<button class="sl-travel-entry" title="${esc(t('travel.entryTitle'))}">🧳</button>` +
       `<span class="sl-actions">` +
       `<button class="sl-action pin ${pinned ? 'active' : ''}" title="${esc(t(pinned ? 'sess.unpin' : 'sess.pin'))}">★</button>` +
       `<button class="sl-action archive ${archived ? 'active' : ''}" title="${esc(t(archived ? 'sess.unarchive' : 'sess.archive'))}">▣</button>` +
       `</span>`;
+    const takeoverBtn = row.querySelector('.sl-takeover-entry');
+    if (takeoverBtn) {
+      takeoverBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTakeoverPage(s);
+      });
+    }
     const memeBtn = row.querySelector('.sl-meme-entry');
     if (memeBtn) {
       memeBtn.addEventListener('click', (e) => {
@@ -1409,6 +1425,68 @@ function renderSessList() {
   }
 }
 
+function setTakeoverStatus(text, kind = '') {
+  slTakeoverStatus.textContent = text || '';
+  slTakeoverStatus.className = 'sl-takeover-status' + (kind ? ' ' + kind : '');
+}
+
+function takeoverResultText(result, target) {
+  const code = result && result.code;
+  if (code === 'native-fork') return t('takeover.nativeFork');
+  if (code === 'native-resume') return t('takeover.nativeResume');
+  if (code === 'handoff-launched') return t('takeover.handoffLaunched');
+  if (code === 'invalid-target') return t('takeover.invalidTarget');
+  if (code === 'invalid-provider') return t('takeover.invalidProvider');
+  if (code === 'cli-missing') return t('takeover.cliMissing', { who: target === 'codex' ? 'Codex' : 'Claude' });
+  return t('takeover.launchFailed');
+}
+
+function openTakeoverPage(session) {
+  memeTarget = null;
+  travelTarget = null;
+  takeoverTarget = session;
+  sesslist.classList.remove('session-list-mode');
+  slSessionView.classList.add('hidden');
+  slMemeView.classList.add('hidden');
+  slTravelView.classList.add('hidden');
+  slTakeoverView.classList.remove('hidden');
+  slBack.classList.remove('hidden');
+  slTitle.textContent = t('takeover.pickTitle');
+  slSub.textContent = '';
+  const source = session.agent === 'codex' ? 'Codex' : 'Claude';
+  slTakeoverSession.textContent = t('takeover.source', { who: source, project: session.project });
+  slTakeoverClaudeMode.textContent = t(session.agent === 'claude' ? 'takeover.nativeMode' : 'takeover.handoffMode');
+  slTakeoverCodexMode.textContent = t(session.agent === 'codex' ? 'takeover.nativeMode' : 'takeover.handoffMode');
+  slTakeoverClaude.disabled = false;
+  slTakeoverCodex.disabled = false;
+  setTakeoverStatus('');
+  fitPopup(sesslist);
+}
+
+async function runTakeover(target) {
+  const source = takeoverTarget;
+  if (!source) return;
+  slTakeoverClaude.disabled = true;
+  slTakeoverCodex.disabled = true;
+  setTakeoverStatus(t('takeover.starting'), 'warn');
+  let result;
+  try {
+    result = await window.pet.takeOverSession(source.sessionId || '', target);
+  } catch {
+    result = { ok: false, code: 'launch-failed' };
+  }
+  if (!takeoverTarget || takeoverTarget.sessionId !== source.sessionId) return;
+  setTakeoverStatus(takeoverResultText(result, target), result && result.ok ? 'ok' : 'error');
+  slTakeoverClaude.disabled = false;
+  slTakeoverCodex.disabled = false;
+  rlog(
+    'takeover',
+    `${source.agent || '-'}→${target} id=${String(source.sessionId || '').slice(-8)} ` +
+      `ok=${!!(result && result.ok)} code=${result && result.code || '-'}`,
+  );
+  fitPopup(sesslist);
+}
+
 async function loadMemeCatalog() {
   try {
     const next = await window.pet.getMemeCatalog();
@@ -1432,8 +1510,10 @@ function setMemeStatus(text, kind = '') {
 
 async function openMemePage(session) {
   memeTarget = session;
+  takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
   slSessionView.classList.add('hidden');
+  slTakeoverView.classList.add('hidden');
   slMemeView.classList.remove('hidden');
   slBack.classList.remove('hidden');
   slTitle.textContent = t('meme.pickTitle');
@@ -2100,11 +2180,13 @@ function renderTravelPage() {
 
 async function openTravelPage(session) {
   travelTarget = session || null;
+  takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
   travelMissionDirty = false;
   travelTemplateId = null;
   slSessionView.classList.add('hidden');
   slMemeView.classList.add('hidden');
+  slTakeoverView.classList.add('hidden');
   slTravelView.classList.remove('hidden');
   slBack.classList.remove('hidden');
   slTitle.textContent = session ? t('travel.pickTitle') : t('travel.inboxTitle');
@@ -2146,9 +2228,11 @@ function openTravelInbox() {
 
 function showSessionPage() {
   memeTarget = null;
+  takeoverTarget = null;
   travelTarget = null;
   sesslist.classList.add('session-list-mode');
   slMemeView.classList.add('hidden');
+  slTakeoverView.classList.add('hidden');
   slTravelView.classList.add('hidden');
   slSessionView.classList.remove('hidden');
   slBack.classList.add('hidden');
@@ -2172,6 +2256,7 @@ function closeSessList() {
   sesslist.classList.add('hidden');
   sessListOpen = false;
   memeTarget = null;
+  takeoverTarget = null;
   travelTarget = null;
   rlog('sesslist', 'close');
   resetPetSize();
@@ -2957,7 +3042,7 @@ window.pet.onConfig((cfg) => {
   archivedSessionIds = Array.isArray(cfg.archivedSessions) ? cfg.archivedSessions.slice() : [];
   lootKeptSessions = Array.isArray(cfg.lootCapturedSessions) ? cfg.lootCapturedSessions.slice() : [];
   scheduleLootKeptExpiry();
-  if (sessListOpen && !memeTarget && !lootCapture) renderSessList();
+  if (sessListOpen && !memeTarget && !takeoverTarget && !lootCapture) renderSessList();
 });
 
 // Static markup carries its Chinese text inline (so the window is never blank
@@ -2984,7 +3069,11 @@ function applyLang(next) {
   lastAskSig = '';
   // Live views rebuild from the state we already hold; everything else refreshes
   // on the stats push the main process fires right after the switch.
-  if (sessListOpen) { if (memeTarget) openMemePage(memeTarget); else renderSessList(); }
+  if (sessListOpen) {
+    if (memeTarget) openMemePage(memeTarget);
+    else if (takeoverTarget) openTakeoverPage(takeoverTarget);
+    else renderSessList();
+  }
   if (todoPopOpen) renderTodoPop();
   if (radialOpen) buildRadial();
   if (lastStats) applyStats(lastStats);
@@ -3131,6 +3220,14 @@ slTravelStopPrev.addEventListener('click', (e) => {
 slTravelStopNext.addEventListener('click', (e) => {
   e.stopPropagation();
   goTravelStop(selectedPostcardStop + 1);
+});
+if (slTakeoverClaude) slTakeoverClaude.addEventListener('click', (e) => {
+  e.stopPropagation();
+  runTakeover('claude');
+});
+if (slTakeoverCodex) slTakeoverCodex.addEventListener('click', (e) => {
+  e.stopPropagation();
+  runTakeover('codex');
 });
 slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
 slSearch.addEventListener('input', () => {

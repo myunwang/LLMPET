@@ -838,6 +838,15 @@ body.skin-cat .sessions { width: 120px; }
   padding: 6px 9px; font-size: 11px; font-weight: 700; cursor: pointer;
 }
 .sl-meme-entry:hover { border-color: rgba(217, 119, 87, 0.75); background: rgba(217, 119, 87, 0.18); }
+.sl-takeover-entry {
+  flex: 0 0 auto; border: 1px solid rgba(111, 151, 238, 0.32);
+  border-radius: 9px; background: rgba(67, 106, 190, 0.14); color: #dce8ff;
+  padding: 6px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.sl-takeover-entry:hover {
+  border-color: rgba(118, 161, 255, 0.78);
+  background: rgba(72, 112, 201, 0.26); color: #fff;
+}
 .sl-actions { flex: 0 0 auto; display: flex; gap: 3px; }
 .sl-action {
   width: 25px; height: 25px; padding: 0; border: 0; border-radius: 7px;
@@ -894,6 +903,45 @@ body.skin-cat .sessions { width: 120px; }
 .sl-meme-status.ok { color: #5bd478; }
 .sl-meme-status.warn { color: #ffbd59; }
 .sl-meme-status.error { color: #ff7b73; }
+
+/* ── 会话接管：原生续接 / 跨代理交接 ───────────────────────── */
+.sl-takeover-view {
+  min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column;
+  gap: 10px; padding: 0 4px 4px;
+}
+.sl-takeover-view.hidden { display: none; }
+.sl-takeover-session {
+  padding: 9px 11px; border-radius: 10px;
+  background: rgba(72, 112, 201, 0.14); color: #dce8ff;
+  border: 1px solid rgba(111, 151, 238, 0.22);
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-takeover-intro {
+  color: #c3c3ca; font-size: 11px; line-height: 1.5; padding: 0 3px;
+}
+.sl-takeover-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.sl-takeover-option {
+  min-width: 0; min-height: 82px; display: flex; flex-direction: column;
+  align-items: flex-start; justify-content: center; gap: 7px; padding: 12px;
+  border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.045); color: #f4f4f7; cursor: pointer;
+  text-align: left;
+}
+.sl-takeover-option:hover {
+  border-color: rgba(118, 161, 255, 0.66);
+  background: linear-gradient(135deg, rgba(72, 112, 201, 0.2), rgba(217, 119, 87, 0.1));
+}
+.sl-takeover-option:disabled { opacity: 0.55; cursor: wait; }
+.sl-takeover-agent { font-size: 14px; font-weight: 780; }
+.sl-takeover-mode { color: #aaaab2; font-size: 10px; line-height: 1.35; }
+.sl-takeover-safety {
+  padding: 8px 10px; border-radius: 9px; color: #e7c49a; font-size: 10px;
+  line-height: 1.4; background: rgba(191, 121, 51, 0.1); border: 1px solid rgba(225, 153, 78, 0.18);
+}
+.sl-takeover-status { min-height: 18px; padding: 0 3px; color: #a7a7af; font-size: 10.5px; }
+.sl-takeover-status.ok { color: #86b7ff; }
+.sl-takeover-status.warn { color: #ffc66d; }
+.sl-takeover-status.error { color: #ff827b; }
 
 /* ── 青蛙旅行：从会话对应项目启动独立只读探索 ───────────────── */
 .sl-travel-entry {
@@ -1381,6 +1429,7 @@ body.skin-cat .sessions { width: 120px; }
 /* 弹层标题栏可拖动整窗（内容长时可挪开），按钮/输入/选项/行不拖 */
 .ask-head, .sl-top, .tp-top { -webkit-app-region: drag; cursor: move; }
 .ask-opt, .ask-btn, .ask-term, .ask-other input, .sl-row, .sl-foot button, .sl-back, .sl-meme-entry, .sl-meme-card,
+.sl-takeover-entry, .sl-takeover-option,
 .sl-travel-entry, .sl-travel-template, #sl-travel-mission, #sl-travel-start, #sl-travel-cancel,
 .sl-travel-wander, .sl-travel-letter-open, .sl-travel-terminal-open, .sl-travel-history-card,
 .sl-travel-postcard-nav button, .sl-travel-stop-track,

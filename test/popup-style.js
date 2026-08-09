@@ -138,7 +138,7 @@ assert(!/fitPopup\(sesslist\)/.test(appendLootSource)
   && /slRows\.scrollTop\s*=\s*slRows\.scrollHeight/.test(appendLootSource),
   'streamed sessions must scroll inside the fixed panel without resizing the pet window');
 assert(/else if \(!lootCapture\) \{ renderSessList\(\); fitPopup\(sesslist\); \}/.test(js)
-  && /sessListOpen && !memeTarget && !lootCapture/.test(js),
+  && /sessListOpen && !memeTarget && !takeoverTarget && !lootCapture/.test(js),
   'ordinary stats/config refreshes must not rebuild and restart an active loot animation');
 assert(/#cat\.loot-action-mirrored img\s*\{[^}]*scaleX\(-1\)/s.test(css)
   && /function lootVisualNeedsMirror[\s\S]*const nativeDirection = -1/.test(js)

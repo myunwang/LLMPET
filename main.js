@@ -35,6 +35,7 @@ const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
+const { createSessionTakeover } = require('./backend/session-handoff');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -62,6 +63,7 @@ let codexWatch = null;  // Codex rollout 只读监听器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
+let sessionTakeover = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
@@ -760,6 +762,7 @@ function bootBackend() {
     // the main Epitaxy view; this route focuses its real prompt editor.
     openClaudeThread: (sessionId) => shell.openExternal(`claude://claude.ai/epitaxy/${encodeURIComponent(sessionId)}`),
   });
+  sessionTakeover = createSessionTakeover();
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
@@ -1000,6 +1003,22 @@ function registerIpc() {
     if (!id || !core.getSession(id)) return false;
     clipboard.writeText(id);
     return true;
+  });
+  ipcMain.handle('session-takeover', async (_e, sessionId, targetAgent) => {
+    const id = typeof sessionId === 'string' ? sessionId : '';
+    const target = targetAgent === 'codex' ? 'codex' : targetAgent === 'claude' ? 'claude' : '';
+    const session = id && core ? core.getSession(id) : null;
+    if (!sessionTakeover || !session || session.headless || session.sessionRole === 'travel') {
+      return { ok: false, code: 'invalid-target' };
+    }
+    if (!target) return { ok: false, code: 'invalid-provider' };
+    const result = await sessionTakeover.takeOver(session, target, { locale: i18n.getLang() });
+    log(
+      'takeover',
+      `${String(session.id).slice(-8)} ${adapter.agentOf(session)}→${target} ` +
+        `ok=${!!result.ok} mode=${result.mode || '-'} code=${result.code || '-'}`,
+    );
+    return result;
   });
   ipcMain.handle('meme-catalog', () => publicCatalog(i18n.getLang()));
   ipcMain.handle('travel-get', () => (

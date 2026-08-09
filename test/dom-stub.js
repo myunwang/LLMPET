@@ -131,6 +131,7 @@ function createStubWorld() {
     getConfig: () => Promise.resolve(null),
     getMemeCatalog: () => Promise.resolve({ schemaVersion: 2, items: [] }),
     triggerMeme: (...a) => { calls.push(['triggerMeme', a]); return Promise.resolve({ ok: true, submitted: true }); },
+    takeOverSession: (...a) => { calls.push(['takeOverSession', a]); return Promise.resolve({ ok: true, code: 'handoff-launched' }); },
     getTravel: () => Promise.resolve({ active: null, latest: null, growth: { totalTokens: 0, completed: 0, rank: {} }, templates: [] }),
     getTravelPostcards: () => Promise.resolve([]),
     startTravel: (...a) => { calls.push(['startTravel', a]); return Promise.resolve({ ok: true }); },

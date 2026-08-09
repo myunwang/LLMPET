@@ -140,6 +140,22 @@
           <div id="sl-meme-grid" class="sl-meme-grid"></div>
           <div id="sl-meme-status" class="sl-meme-status"></div>
         </div>
+        <div id="sl-takeover-view" class="sl-takeover-view hidden">
+          <div id="sl-takeover-session" class="sl-takeover-session"></div>
+          <div class="sl-takeover-intro" data-i18n="takeover.intro">选择接管者。同代理保留完整历史，跨代理会生成一份本地交接单。</div>
+          <div class="sl-takeover-options">
+            <button id="sl-takeover-claude" class="sl-takeover-option" data-agent="claude">
+              <span class="sl-takeover-agent">Claude</span>
+              <span id="sl-takeover-claude-mode" class="sl-takeover-mode"></span>
+            </button>
+            <button id="sl-takeover-codex" class="sl-takeover-option" data-agent="codex">
+              <span class="sl-takeover-agent">Codex</span>
+              <span id="sl-takeover-codex-mode" class="sl-takeover-mode"></span>
+            </button>
+          </div>
+          <div class="sl-takeover-safety" data-i18n="takeover.safety">源会话不会被关闭；若它仍在工作，请留意并行修改。</div>
+          <div id="sl-takeover-status" class="sl-takeover-status" aria-live="polite"></div>
+        </div>
         <div id="sl-travel-view" class="sl-travel-view hidden">
           <div id="sl-travel-session" class="sl-travel-session"></div>
           <div class="sl-travel-ranks">

@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld('pet', {
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
   // 面板会话行点 id 芯片 → 复制完整 session id，方便贴给另一个 agent 去 resume
   copySessionId: (sessionId) => ipcRenderer.invoke('copy-session-id', sessionId),
+  // 会话接管：同代理走官方 resume/fork，跨代理由主进程生成脱敏交接包后新开 CLI。
+  takeOverSession: (sessionId, targetAgent) => ipcRenderer.invoke('session-takeover', sessionId, targetAgent),
   getMemeCatalog: () => ipcRenderer.invoke('meme-catalog'),
   triggerMeme: (sessionId, memeId) => ipcRenderer.invoke('meme-trigger', sessionId, memeId),
   getTravel: () => ipcRenderer.invoke('travel-get'),
