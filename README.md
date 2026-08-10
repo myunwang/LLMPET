@@ -2,6 +2,11 @@
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
+<p align="center">
+  <a href="https://github.com/myunwang/LLMPET/stargazers"><img src="https://img.shields.io/github/stars/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Stars&amp;labelColor=2d2735&amp;color=ee7348" alt="GitHub Stars"></a>
+  <a href="https://github.com/myunwang/LLMPET/forks"><img src="https://img.shields.io/github/forks/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Forks&amp;labelColor=2d2735&amp;color=8a5b88" alt="GitHub Forks"></a>
+</p>
+
 一个实时盯着 **Claude Code 和 OpenAI Codex** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
 共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 只读监听本机 rollout 文件，不修改 Codex 配置。
@@ -217,3 +222,13 @@ test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗�
 ## 未做 / 后续
 - 其它 agent（Gemini / Copilot…）尚未适配；当前支持 Claude Code 与 OpenAI Codex。
 - Linux 的会话定位（Windows 已支持）、Windows 领地模式、远程审批、自动更新：本项目暂未实现。
+
+---
+
+## ⭐ Star 轨迹
+
+<p align="center">
+  <a href="https://github.com/myunwang/LLMPET/stargazers">
+    <img src="assets/star-history.svg" width="880" alt="LLMPET 手绘风格 GitHub Star 增长曲线">
+  </a>
+</p>
