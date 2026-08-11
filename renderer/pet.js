@@ -3590,6 +3590,11 @@ slNewBtn.addEventListener('click', (e) => {
   closeSessList();
 });
 if (slNewCodexBtn) slNewCodexBtn.addEventListener('click', (e) => { e.stopPropagation(); window.pet.launchCodex(); closeSessList(); });
+document.getElementById('sl-archive').addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.pet.openSessionArchive();
+  closeSessList();
+});
 document.getElementById('sl-panel').addEventListener('click', (e) => { e.stopPropagation(); window.pet.openPanel(); closeSessList(); });
 sesslist.addEventListener('contextmenu', (e) => e.stopPropagation());
 todopop.querySelectorAll('.tp-ops button').forEach((b) => {

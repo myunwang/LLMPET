@@ -26,6 +26,7 @@
     // ── tray ────────────────────────────────────────────────────────────────
     'tray.tooltip': 'LLMPET — Claude Code / Codex 桌宠',
     'tray.panel': '📊 详情面板',
+    'tray.archive': '📚 会话档案馆',
     'tray.showPet': '🐙 显示桌宠',
     'tray.codexPet': '🛰️ Codex 桌宠',
     'tray.settings': '⚙️ 设置',
@@ -184,6 +185,7 @@
     'sess.newClaude': '🚀 新开 Claude',
     'sess.newCodex': '🛰️ 新开 Codex',
     'sess.panel': '📊 详情',
+    'sess.archiveLibrary': '📚 档案',
     'sess.back': '返回会话',
     'sess.close': '关闭',
     'sess.search': '搜索项目、会话或操作…',
@@ -461,6 +463,7 @@
   const en = {
     'tray.tooltip': 'LLMPET — Claude Code / Codex desk pet',
     'tray.panel': '📊 Dashboard',
+    'tray.archive': '📚 Session archive',
     'tray.showPet': '🐙 Show pet',
     'tray.codexPet': '🛰️ Codex pet',
     'tray.settings': '⚙️ Settings',
@@ -610,6 +613,7 @@
     'sess.newClaude': '🚀 New Claude',
     'sess.newCodex': '🛰️ New Codex',
     'sess.panel': '📊 Details',
+    'sess.archiveLibrary': '📚 Archive',
     'sess.back': 'Back to sessions',
     'sess.close': 'Close',
     'sess.search': 'Search projects, sessions, or actions…',
@@ -878,6 +882,7 @@
   const ja = {
     'tray.tooltip': 'LLMPET — Claude Code / Codex デスクトップペット',
     'tray.panel': '📊 ダッシュボード',
+    'tray.archive': '📚 セッション保管庫',
     'tray.showPet': '🐙 ペットを表示',
     'tray.codexPet': '🛰️ Codex ペット',
     'tray.settings': '⚙️ 設定',
@@ -1027,6 +1032,7 @@
     'sess.newClaude': '🚀 Claude を新規',
     'sess.newCodex': '🛰️ Codex を新規',
     'sess.panel': '📊 詳細',
+    'sess.archiveLibrary': '📚 保管庫',
     'sess.back': 'セッションに戻る',
     'sess.close': '閉じる',
     'sess.search': 'プロジェクト・セッション・操作を検索…',

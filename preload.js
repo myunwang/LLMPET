@@ -13,13 +13,24 @@ contextBridge.exposeInMainWorld('pet', {
   onConfig: (cb) => {
     ipcRenderer.on('pet:config', (_e, data) => cb(data));
     ipcRenderer.on('panel:config', (_e, data) => cb(data));
+    ipcRenderer.on('archive:config', (_e, data) => cb(data));
   },
   onPrice: (cb) => ipcRenderer.on('panel:price', (_e, data) => cb(data)),
+  onArchiveChanged: (cb) => ipcRenderer.on('archive:changed', (_e, data) => cb(data)),
   // 渲染进程 -> 主进程
   getConfig: () => ipcRenderer.invoke('get-config'),
   getStats: () => ipcRenderer.invoke('get-stats'),
   openPanel: () => ipcRenderer.send('open-panel'),
   closePanel: () => ipcRenderer.send('close-panel'),
+  openSessionArchive: () => ipcRenderer.send('open-session-archive'),
+  closeSessionArchive: () => ipcRenderer.send('close-session-archive'),
+  getSessionArchive: (query) => ipcRenderer.invoke('session-archive-list', query),
+  setSessionArchiveSettings: (settings) => ipcRenderer.invoke('session-archive-settings', settings),
+  backupSessionsNow: () => ipcRenderer.invoke('session-archive-backup-now'),
+  resumeArchivedSession: (key, targetAgent) => ipcRenderer.invoke('session-archive-resume', key, targetAgent),
+  restoreArchivedSession: (key) => ipcRenderer.invoke('session-archive-restore', key),
+  revealArchivedSession: (key) => ipcRenderer.invoke('session-archive-reveal', key),
+  openSessionBackupFolder: () => ipcRenderer.send('session-archive-open-backup'),
   setMode: (m) => ipcRenderer.send('set-mode', m),
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),

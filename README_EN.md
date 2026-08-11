@@ -122,6 +122,10 @@ Patrol mode is currently macOS-only.
 
 ## Privacy and security
 
+The **📚 Archive** button in the live session panel opens a separate desktop-style session archive. It indexes every user-owned Claude Code and Codex session created from either the desktop client or CLI, while filtering out internal subagent threads. Same-provider sessions resume through the provider's official flow; cross-provider takeover uses a local handoff packet.
+
+Scheduled local backup is **off by default**. When the user explicitly enables it, transcripts are copied incrementally to `~/.octopus/session-vault`. Restore only recreates a missing transcript and never overwrites one that still exists. This protects against provider reinstall or deleted local history; it is not cloud sync and does not protect against losing the whole disk.
+
 - The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
 - Codex rollout access is read-only.
