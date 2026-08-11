@@ -297,6 +297,11 @@ function closePanel() {
 // transient pet HUD and the token dashboard. Closing it only hides the library;
 // indexing and an explicitly enabled local backup schedule continue in main.
 function openArchive() {
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show();
+    const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.icns'));
+    if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+  }
   if (archiveWin && !archiveWin.isDestroyed()) {
     archiveWin.show();
     archiveWin.focus();
@@ -1535,9 +1540,16 @@ if (!gotTheLock) {
   log('main', 'another instance holds the lock — quitting');
   app.quit();
 } else {
-  app.on('second-instance', () => { try { for (const st of petStates()) st.win.show(); } catch {} });
+  app.on('second-instance', () => {
+    try { for (const st of petStates()) st.win.show(); } catch {}
+    openArchive();
+  });
   app.whenReady().then(async () => {
-    if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    if (process.platform === 'darwin' && app.dock) {
+      const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.icns'));
+      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+      await app.dock.show();
+    }
     const rival = await findRivalInstance();
     if (rival) {
       log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
@@ -1555,6 +1567,9 @@ if (!gotTheLock) {
     startMemeWatcher();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
+    // LLMPET now has a real desktop library. The initial launch remains pet-only,
+    // while a later Dock click always opens or focuses the archive window.
+    app.on('activate', openArchive);
     log('main', 'LLMPET ready');
   });
 }

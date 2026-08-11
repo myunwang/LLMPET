@@ -122,7 +122,7 @@ Patrol mode is currently macOS-only.
 
 ## Privacy and security
 
-The **📚 Archive** button in the live session panel opens a separate desktop-style session archive. It indexes every user-owned Claude Code and Codex session created from either the desktop client or CLI, while filtering out internal subagent threads. Same-provider sessions resume through the provider's official flow; cross-provider takeover uses a local handoff packet.
+The **📚 Archive** button in the live session panel opens a separate desktop-style session archive. It indexes every user-owned Claude Code and Codex session created from either the desktop client or CLI, while filtering out internal subagent threads. Same-provider sessions resume through the provider's official flow; cross-provider takeover uses a local handoff packet. On macOS, LLMPET keeps one Dock entry; clicking it reopens or focuses the archive without creating another instance.
 
 Scheduled local backup is **off by default**. When the user explicitly enables it, transcripts are copied incrementally to `~/.octopus/session-vault`. Restore only recreates a missing transcript and never overwrites one that still exists. This protects against provider reinstall or deleted local history; it is not cloud sync and does not protect against losing the whole disk.
 

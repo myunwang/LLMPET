@@ -90,6 +90,13 @@ async function main() {
   const invalid = config.sanitize({ sessionArchive: { backupEnabled: 'yes', backupIntervalHours: 13 } });
   assert.deepStrictEqual(invalid.sessionArchive, { backupEnabled: false, backupIntervalHours: 24 });
 
+  const archiveRenderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.js'), 'utf8');
+  assert.ok(archiveRenderer.includes('const CLAUDE_ICON ='), 'archive rows use the Claude brand mark');
+  assert.ok(archiveRenderer.includes('const CODEX_ICON ='), 'archive rows use the Codex brand mark');
+  const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(mainSource.includes("app.on('activate', openArchive)"), 'Dock activation opens the archive');
+  assert.ok(!mainSource.includes('app.dock.hide()'), 'the desktop archive remains available from the Dock');
+
   fs.rmSync(root, { recursive: true, force: true });
   console.log('session archive tests passed');
 }

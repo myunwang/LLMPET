@@ -58,6 +58,12 @@ const copy = () => COPY[lang] || COPY.zh;
 const template = (value, vars = {}) => String(value || '').replace(/\{(\w+)\}/g, (_, key) => vars[key] == null ? '' : String(vars[key]));
 const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
+// Keep the archive visually identical to the live session HUD: Claude uses
+// its orange burst and Codex uses the blue terminal mark already used there.
+const CLAUDE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#d97757" d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
+const CODEX_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" fill="#3b82f6"/><path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>';
+const providerIcon = (value) => value === 'codex' ? CODEX_ICON : CLAUDE_ICON;
+
 function fmtBytes(value) {
   const n = Number(value) || 0;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
@@ -163,7 +169,7 @@ function renderList() {
   if (!selectedKey || !data.sessions.some((session) => session.key === selectedKey)) selectedKey = data.sessions[0].key;
   list.innerHTML = data.sessions.map((session) => `
     <div class="session-row ${session.key === selectedKey ? 'active' : ''}" data-key="${escapeHtml(session.key)}">
-      <div class="provider-icon">${session.provider === 'codex' ? '🛰️' : '✦'}</div>
+      <div class="provider-icon ${session.provider === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(providerLabel(session.provider))}">${providerIcon(session.provider)}</div>
       <div class="session-copy">
         <strong>${escapeHtml(session.title || session.project || session.id)}</strong>
         <small>${escapeHtml(session.project || session.cwd || session.id)} · ${escapeHtml(fmtDate(session.updatedAt))}</small>

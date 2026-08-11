@@ -44,15 +44,17 @@
             <input id="backup-toggle" type="checkbox" />
             <span></span>
           </label>
-          <select id="backup-interval" aria-label="备份周期">
-            <option value="6">每 6 小时</option>
-            <option value="12">每 12 小时</option>
-            <option value="24">每天</option>
-            <option value="72">每 3 天</option>
-            <option value="168">每周</option>
-          </select>
-          <button id="backup-now" class="soft-button">立即备份</button>
-          <button id="backup-folder" class="soft-button quiet">打开目录</button>
+          <div class="backup-controls">
+            <select id="backup-interval" aria-label="备份周期">
+              <option value="6">每 6 小时</option>
+              <option value="12">每 12 小时</option>
+              <option value="24">每天</option>
+              <option value="72">每 3 天</option>
+              <option value="168">每周</option>
+            </select>
+            <button id="backup-now" class="soft-button">立即备份</button>
+            <button id="backup-folder" class="soft-button quiet">打开目录</button>
+          </div>
         </article>
       </section>
 
