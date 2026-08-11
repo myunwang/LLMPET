@@ -92,6 +92,53 @@ assert.strictEqual(
 );
 
 assert.strictEqual(
+  geometry.chooseDragHorizontalLayout({
+    current: 'center', workArea, targetWindowX: -1, windowWidth: 520,
+    petScreenX: 199, centeredPetOffset: 200,
+  }),
+  'left',
+  'a wide popup must switch to its left anchor before the frame is clipped',
+);
+
+assert.strictEqual(
+  geometry.chooseDragHorizontalLayout({
+    current: 'left', workArea, targetWindowX: 140, windowWidth: 520,
+    petScreenX: 340, centeredPetOffset: 200,
+  }),
+  'center',
+  'moving away from the left edge restores the centered popup during the gesture',
+);
+
+assert.strictEqual(
+  geometry.chooseDragHorizontalLayout({
+    current: 'center', workArea, targetWindowX: 921, windowWidth: 520,
+    petScreenX: 1121, centeredPetOffset: 200,
+  }),
+  'right',
+  'a wide popup must switch to its right anchor before the frame is clipped',
+);
+
+assert.strictEqual(
+  geometry.chooseDragHorizontalLayout({
+    current: 'right', workArea, targetWindowX: 760, windowWidth: 520,
+    petScreenX: 960, centeredPetOffset: 200,
+  }),
+  'center',
+  'moving away from the right edge restores the centered popup during the gesture',
+);
+
+assert.strictEqual(
+  geometry.windowFitsWorkArea({ x: 460, y: 24, width: 520, height: 624 }, workArea),
+  true,
+  'a fully visible popup frame is settled',
+);
+assert.strictEqual(
+  geometry.windowFitsWorkArea({ x: -120, y: 24, width: 520, height: 624 }, workArea),
+  false,
+  'a same-sized popup frame that moved off-screen still needs re-anchoring',
+);
+
+assert.strictEqual(
   geometry.choosePopupLayout({
     workArea,
     windowRect: { x: 900, y: 560, width: 320, height: 340 },

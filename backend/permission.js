@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const { SERVER_HEADER, SERVER_ID } = require('./transport');
 const { log } = require('./log');
+const transcript = require('./transcript');
 
 // Tools Claude Code may ask permission for but which are pure orchestration —
 // auto-allow so the pet never blocks them.
@@ -26,6 +27,13 @@ const PASSTHROUGH_TOOLS = new Set([
 // Resolve a hair before CC's own 600s hook timeout so a forgotten bubble lets
 // CC fall back to its in-terminal prompt instead of hanging.
 const AUTO_CLOSE_MS = 8 * 60 * 1000;
+// Claude's own CLI/Desktop prompt can be answered while our HTTP hook is still
+// parked. That answer is written to the session transcript, but Claude does not
+// necessarily close the hook connection, so the pet card used to stay visible.
+// Poll only while requests are pending; 350ms feels immediate without keeping a
+// permanent filesystem watcher alive.
+const EXTERNAL_ANSWER_POLL_MS = 350;
+const TOOL_USE_LOOKBACK_MS = 10 * 1000;
 
 // AskUserQuestion (elicitation): Claude Code sends it through the same
 // PermissionRequest HTTP hook with tool_input.questions[]. We answer it by
@@ -64,11 +72,56 @@ function buildElicitationUpdatedInput(toolInput, answers) {
 // Identity of a permission request, for collapsing duplicate re-sends. Distinct
 // requests can overlap when parallel/background agents share a session_id, so
 // only an identical session+tool+input signature is merged as the same retry.
+function stableJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableJson(value[key])).join(',') + '}';
+  }
+  if (value === undefined) return 'null';
+  try { return JSON.stringify(value); } catch { return 'null'; }
+}
+
 function requestSig(sessionId, toolName, toolInput) {
-  let inp = '';
-  try { inp = JSON.stringify(toolInput); } catch { inp = ''; }
-  if (inp.length > 2000) inp = inp.slice(0, 2000);
-  return sessionId + '|' + toolName + '|' + inp;
+  const raw = `${sessionId || ''}\0${toolName || ''}\0${stableJson(toolInput || {})}`;
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function contentBlocks(entry) {
+  const content = entry && entry.message ? entry.message.content : entry && entry.content;
+  return Array.isArray(content) ? content : [];
+}
+
+// PermissionRequest deliberately omits tool_use_id. Recover it from the nearby
+// assistant tool_use using the exact request signature, then wait for the
+// matching user tool_result. Timestamp gating prevents an older identical ask
+// in the same long-running session from closing a new card.
+function findMatchingToolUseId(entries, entry) {
+  if (!Array.isArray(entries) || !entry) return null;
+  const minTs = entry.createdAt - TOOL_USE_LOOKBACK_MS;
+  let found = null;
+  for (const item of entries) {
+    if (!item || item.type !== 'assistant') continue;
+    if (item.sessionId && item.sessionId !== entry.sessionId) continue;
+    const ts = Date.parse(item.timestamp || '') || 0;
+    if (ts < minTs) continue;
+    for (const block of contentBlocks(item)) {
+      if (!block || block.type !== 'tool_use' || !block.id || block.name !== entry.toolName) continue;
+      if (requestSig(entry.sessionId, block.name, block.input) === entry.sig) found = block.id;
+    }
+  }
+  return found;
+}
+
+function hasToolResult(entries, entry, toolUseId) {
+  if (!Array.isArray(entries) || !entry || !toolUseId) return false;
+  for (const item of entries) {
+    if (!item || item.type !== 'user') continue;
+    if (item.sessionId && item.sessionId !== entry.sessionId) continue;
+    const ts = Date.parse(item.timestamp || '') || 0;
+    if (ts && ts < entry.createdAt - TOOL_USE_LOOKBACK_MS) continue;
+    if (contentBlocks(item).some((block) => block && block.type === 'tool_result' && block.tool_use_id === toolUseId)) return true;
+  }
+  return false;
 }
 
 function sendPermissionResponse(res, decision) {
@@ -93,6 +146,14 @@ function createPermissions(options = {}) {
 
   /** @type {Map<string, object>} */
   const pending = new Map();
+  let externalAnswerTimer = null;
+
+  function stopExternalAnswerPollIfIdle() {
+    if (!externalAnswerTimer) return;
+    if ([...pending.values()].some((entry) => entry.transcriptPath)) return;
+    clearInterval(externalAnswerTimer);
+    externalAnswerTimer = null;
+  }
 
   function destroy(res) {
     try { res.destroy(); } catch {}
@@ -161,8 +222,30 @@ function createPermissions(options = {}) {
     }
     const dn = entry.dupes && entry.dupes.length ? ` (+${entry.dupes.length} dup)` : '';
     log('perm', `resolve id=${entry.id.slice(0, 8)} ${entry.toolName} -> ${behavior}${dn}${message ? ' (' + message + ')' : ''}`);
+    stopExternalAnswerPollIfIdle();
     onChange();
     return true;
+  }
+
+  function reconcileExternalAnswers() {
+    if (!pending.size) { stopExternalAnswerPollIfIdle(); return; }
+    const byPath = new Map();
+    for (const entry of pending.values()) {
+      if (!entry.transcriptPath) continue;
+      if (!byPath.has(entry.transcriptPath)) byPath.set(entry.transcriptPath, transcript.readTail(entry.transcriptPath));
+      const entries = byPath.get(entry.transcriptPath);
+      if (!Array.isArray(entries)) continue;
+      if (!entry.toolUseId) entry.toolUseId = findMatchingToolUseId(entries, entry);
+      if (entry.toolUseId && hasToolResult(entries, entry, entry.toolUseId)) {
+        resolveEntry(entry, 'no-decision', 'Answered in Claude');
+      }
+    }
+  }
+
+  function ensureExternalAnswerPoll() {
+    if (externalAnswerTimer) return;
+    externalAnswerTimer = setInterval(reconcileExternalAnswers, EXTERNAL_ANSWER_POLL_MS);
+    if (externalAnswerTimer.unref) externalAnswerTimer.unref();
   }
 
   // Ingress from the HTTP /permission route. `parsed` is already normalized by
@@ -200,6 +283,11 @@ function createPermissions(options = {}) {
         e.dupes.push(dup);
         try { res.on('close', dup.closeHandler); } catch {}
         log('perm', `dup -> ${e.id.slice(0, 8)} ${toolName} (${e.dupes.length} pending copies)`);
+        if (!e.transcriptPath && typeof parsed.transcriptPath === 'string') {
+          e.transcriptPath = parsed.transcriptPath;
+          ensureExternalAnswerPoll();
+          reconcileExternalAnswers();
+        }
         return;
       }
     }
@@ -218,6 +306,8 @@ function createPermissions(options = {}) {
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
       resolvedSuggestion: null,
       agentId: parsed.agentId || 'claude-code',
+      transcriptPath: typeof parsed.transcriptPath === 'string' ? parsed.transcriptPath : null,
+      toolUseId: null,
       createdAt: Date.now(),
       timer: null,
       abortHandler: null,
@@ -233,6 +323,12 @@ function createPermissions(options = {}) {
     log('perm', `pending id=${entry.id.slice(0, 8)} ${toolName} session=${String(sessionId).slice(-6)}`);
     try { onAdded(entry); } catch (err) { log('perm', 'onAdded error:', err.message); }
     onChange();
+    if (entry.transcriptPath) {
+      ensureExternalAnswerPoll();
+      // Capture the nearby tool_use immediately. A later giant tool result can
+      // push that assistant line out of transcript.readTail's bounded window.
+      reconcileExternalAnswers();
+    }
   }
 
   // Frontend decision:
@@ -307,6 +403,7 @@ function createPermissions(options = {}) {
 
   function cleanup() {
     for (const entry of [...pending.values()]) resolveEntry(entry, 'deny', 'Pet is quitting');
+    if (externalAnswerTimer) { clearInterval(externalAnswerTimer); externalAnswerTimer = null; }
   }
 
   return {

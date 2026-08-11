@@ -109,6 +109,37 @@
     return normalWindowY >= edgeY ? 'above' : 'below';
   }
 
+  function chooseDragHorizontalLayout({
+    current,
+    workArea,
+    targetWindowX,
+    windowWidth,
+    petScreenX,
+    centeredPetOffset,
+    boundarySlack = 2,
+  }) {
+    const wa = normalizeRect(workArea);
+    const horizontal = ['left', 'right'].includes(current) ? current : 'center';
+    const slack = Math.max(0, Number(boundarySlack) || 0);
+    const width = Math.max(1, Number(windowWidth) || 1);
+    if (horizontal === 'center') {
+      if (Number(targetWindowX) <= wa.x + slack) return 'left';
+      if (Number(targetWindowX) + width >= wa.right - slack) return 'right';
+      return 'center';
+    }
+    const centeredWindowX = Number(petScreenX) - Math.max(0, Number(centeredPetOffset) || 0);
+    if (horizontal === 'left') return centeredWindowX >= wa.x + slack ? 'center' : 'left';
+    return centeredWindowX + width <= wa.right - slack ? 'center' : 'right';
+  }
+
+  function windowFitsWorkArea(windowRect, workArea, slack = 1) {
+    const wr = normalizeRect(windowRect);
+    const wa = normalizeRect(workArea);
+    const s = Math.max(0, Number(slack) || 0);
+    return wr.x >= wa.x - s && wr.y >= wa.y - s
+      && wr.right <= wa.right + s && wr.bottom <= wa.bottom + s;
+  }
+
   const ARCS = {
     // A real 180-degree fan. The previous 156-degree arcs compressed eight
     // 46px controls until they overlapped into a heart-shaped cluster.
@@ -182,5 +213,12 @@
     };
   }
 
-  return { chooseRestingLayout, choosePopupLayout, chooseDragVerticalLayout, radialLayout };
+  return {
+    chooseRestingLayout,
+    choosePopupLayout,
+    chooseDragVerticalLayout,
+    chooseDragHorizontalLayout,
+    windowFitsWorkArea,
+    radialLayout,
+  };
 });

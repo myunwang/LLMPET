@@ -7,6 +7,9 @@
 
 const http = require('http');
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { createCore } = require('../backend/core');
 const { createPermissions } = require('../backend/permission');
 const { createServer } = require('../backend/server');
@@ -278,6 +281,42 @@ async function main() {
     assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === soloSid).length, 0);
   });
 
+  console.log('\n[7c] CLI/Desktop 已回答选择 → 精确关闭对应桌宠弹窗');
+  const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-external-answer-'));
+  const extFile = path.join(extDir, 'external-answer.jsonl');
+  const externalAnswerSid = 'external-answer-session';
+  const extInput = { questions: [{ question: '选哪个方案？', options: [{ label: 'A' }, { label: 'B' }] }] };
+  const otherInput = { questions: [{ question: '另一个并行问题？', options: [{ label: '甲' }, { label: '乙' }] }] };
+  const askTs = Date.now();
+  fs.writeFileSync(extFile,
+    JSON.stringify({ type: 'assistant', sessionId: externalAnswerSid, timestamp: new Date(askTs).toISOString(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_external_answer', name: 'AskUserQuestion', input: extInput }] } }) + '\n' +
+    JSON.stringify({ type: 'assistant', sessionId: externalAnswerSid, timestamp: new Date(askTs + 1).toISOString(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_other_live', name: 'AskUserQuestion', input: otherInput }] } }) + '\n');
+  const extOutcomeP = post('/permission', {
+    tool_name: 'AskUserQuestion', tool_input: extInput, session_id: externalAnswerSid, transcript_path: extFile,
+  }).then((resp) => ({ resp }), (err) => ({ err }));
+  const otherOutcomeP = post('/permission', {
+    tool_name: 'AskUserQuestion', tool_input: otherInput, session_id: externalAnswerSid, transcript_path: extFile,
+  });
+  await sleep(80);
+  check('同 session 的两个不同选择都先保持 pending', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === externalAnswerSid).length, 2);
+  });
+  fs.appendFileSync(extFile,
+    JSON.stringify({ type: 'user', sessionId: externalAnswerSid, timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_external_answer', content: 'Your questions have been answered: "选哪个方案？"="A".' }] } }) + '\n');
+  for (let i = 0; i < 20 && permissions.getPending().filter((p) => p.sessionId === externalAnswerSid).length !== 1; i++) await sleep(100);
+  const extPending = permissions.getPending().filter((p) => p.sessionId === externalAnswerSid);
+  check('外部已回答的卡片自动消失，另一个并行选择仍保留', () => {
+    assert.strictEqual(extPending.length, 1);
+    assert.strictEqual(extPending[0].toolInput.questions[0].question, '另一个并行问题？');
+  });
+  const extOutcome = await extOutcomeP;
+  check('自动关闭只撤销自己的 HTTP hook，不伪造第二次答案', () => assert(extOutcome.err));
+  permissions.decide(extPending[0].id, {
+    type: 'elicitation-submit', answers: { '另一个并行问题？': '甲' },
+  });
+  await otherOutcomeP;
+  fs.rmSync(extDir, { recursive: true, force: true });
+
   console.log('\n[8] juggling/sweeping 透传（皮肤素材可达）+ 计数');
   const jSid = 'juggle-session-eeee';
   await post('/state', { state: 'juggling', event: 'SubagentStart', session_id: jSid, cwd: '/Users/me/proj-j' });
@@ -425,9 +464,6 @@ async function main() {
   check('慢长任务不被 WORKING_STALE 打成 idle', () => assert.strictEqual(core.getSession(tgSid).state, 'working'));
 
   console.log('\n[15] SessionStart 无 source 时用 transcript 历史兜底');
-  const fs = require('fs');
-  const os = require('os');
-  const path = require('path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-test-'));
   const histFile = path.join(tmpDir, 'hist.jsonl');
   fs.writeFileSync(histFile, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '之前聊过' }] } }) + '\n'

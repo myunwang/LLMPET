@@ -262,6 +262,7 @@ function createServer(deps) {
         sessionId: data.session_id || 'default',
         agentId: 'claude-code',
         headless: data.headless === true,
+        transcriptPath: normTranscriptPath(data.transcript_path),
       };
       // permission module parks `res` and writes the decision later.
       permissions.addPermission(res, parsed);

@@ -510,8 +510,20 @@ function popupFrameAlreadySettled(width, height, nextLayout) {
   const wa = browserWorkArea();
   const targetWidth = Math.min(width, wa.width);
   const targetHeight = Math.min(height, wa.height);
+  const frame = {
+    x: Number(window.screenX) || 0,
+    y: Number(window.screenY) || 0,
+    width: targetWidth,
+    height: targetHeight,
+  };
+  const fullyVisible = window.PetGeometry && window.PetGeometry.windowFitsWorkArea
+    ? window.PetGeometry.windowFitsWorkArea(frame, wa)
+    : frame.x >= wa.x - 1 && frame.y >= wa.y - 1
+      && frame.x + frame.width <= wa.x + wa.width + 1
+      && frame.y + frame.height <= wa.y + wa.height + 1;
   return Math.abs((window.innerWidth || 0) - targetWidth) <= 1
     && Math.abs((window.innerHeight || 0) - targetHeight) <= 1
+    && fullyVisible
     && nextLayout.vertical === edgeLayout.vertical
     && nextLayout.horizontal === edgeLayout.horizontal;
 }
@@ -536,7 +548,11 @@ function setRequestedPetSize(w, h, options = {}) {
   // makes the transparent window briefly repaint even when nothing visible
   // changed, which reads as a flash around every open panel.
   const requestSig = JSON.stringify({ width, height, anchor });
-  if (requestSig === lastPetSizeRequestSig) return false;
+  // For popups the real BrowserWindow is authoritative. A drag/native clamp can
+  // leave it at 520x340 even though our last *requested* signature says
+  // 520x544. popupFrameAlreadySettled() already proved the live frame is wrong,
+  // so never let this historical signature swallow the repair request.
+  if (!options.popup && requestSig === lastPetSizeRequestSig) return false;
   try {
     window.pet.setPetSize(width, height, anchor);
     lastPetSizeRequestSig = requestSig;
@@ -603,11 +619,24 @@ function resetPetSize() {
   return true;
 }
 
+function activeSizedSurface() {
+  if (sessListOpen && !sesslist.classList.contains('hidden')) return sesslist;
+  if (askActive && !askEl.classList.contains('hidden')) return askEl;
+  if (todoPopOpen && !todopop.classList.contains('hidden')) return todopop;
+  if (!bubble.classList.contains('hidden')) return bubble;
+  return null;
+}
+
 function settleEdgeLayout() {
   // No screen coordinates in the headless renderer tests; the real Electron
   // window always has them. This also avoids inventing a desktop in Node.
   if (!petGeometrySnapshot()) return;
-  setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
+  const surface = activeSizedSurface();
+  // Dragging used to collapse the BrowserWindow back to 320x340 even while the
+  // session list / question card / speech bubble was still open. The DOM kept
+  // rendering, but Electron clipped it to that smaller transparent frame.
+  if (surface) fitPopup(surface);
+  else setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
   requestAnimationFrame(reportPetVisualBounds);
 }
 
@@ -628,6 +657,7 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const petScreenY = targetY + before.top;
   const wa = browserWorkArea();
   let nextVertical = edgeLayout.vertical;
+  let nextHorizontal = edgeLayout.horizontal;
 
   if (edgeLayout.vertical === 'above') {
     nextVertical = window.PetGeometry
@@ -654,8 +684,26 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
     }
   }
 
-  if (nextVertical !== edgeLayout.vertical) {
-    setStageEdgeLayout({ ...edgeLayout, vertical: nextVertical });
+  if (window.PetGeometry && window.PetGeometry.chooseDragHorizontalLayout) {
+    let centeredPetOffset = before.left;
+    if (edgeLayout.horizontal !== 'center') {
+      const previous = { ...edgeLayout };
+      setStageEdgeLayout({ ...previous, horizontal: 'center' });
+      centeredPetOffset = el.getBoundingClientRect().left;
+      setStageEdgeLayout(previous);
+    }
+    nextHorizontal = window.PetGeometry.chooseDragHorizontalLayout({
+      current: edgeLayout.horizontal,
+      workArea: wa,
+      targetWindowX: targetX,
+      windowWidth: Math.max(1, window.innerWidth || 320),
+      petScreenX,
+      centeredPetOffset,
+    });
+  }
+
+  if (nextVertical !== edgeLayout.vertical || nextHorizontal !== edgeLayout.horizontal) {
+    setStageEdgeLayout({ vertical: nextVertical, horizontal: nextHorizontal });
   }
   const after = el.getBoundingClientRect();
   const anchoredX = petScreenX - after.left;
@@ -2803,7 +2851,11 @@ function showBubble(text, holdMs = 3200, force = false) {
   bubble.scrollTop = 0; // 重置滚动到顶（上次长气泡可能滚到了下边）
   // 大段文字：把窗口按实际高度撑开（fitPopup 已按屏幕封顶，永远不顶出屏幕；
   // 实在超屏时由 #bubble 自身 overflow-y:auto 内滚动兜底）。
-  fitPopup(bubble);
+  // A status bubble may arrive while a session/takeover/choice panel is open.
+  // Those interactive surfaces own the transparent BrowserWindow geometry;
+  // allowing the background bubble to fit its short content would collapse a
+  // 520x544 takeover page back to 520x340 and visibly cut the page in half.
+  fitPopup(activeSizedSurface() || bubble);
   clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(hideBubble, holdMs);
 }
