@@ -91,8 +91,13 @@ async function main() {
   assert.deepStrictEqual(invalid.sessionArchive, { backupEnabled: false, backupIntervalHours: 24 });
 
   const archiveRenderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.js'), 'utf8');
-  assert.ok(archiveRenderer.includes('const CLAUDE_ICON ='), 'archive rows use the Claude brand mark');
-  assert.ok(archiveRenderer.includes('const CODEX_ICON ='), 'archive rows use the Codex brand mark');
+  for (const [provider, file] of [['Claude', 'claude.webp'], ['Codex', 'codex.webp']]) {
+    const assetPath = path.join(__dirname, '..', 'assets', 'agents', file);
+    const asset = fs.readFileSync(assetPath);
+    assert.ok(archiveRenderer.includes(`../assets/agents/${file}`), `archive rows use the supplied ${provider} icon`);
+    assert.strictEqual(asset.subarray(0, 4).toString('ascii'), 'RIFF', `${provider} icon is a WebP RIFF file`);
+    assert.strictEqual(asset.subarray(8, 12).toString('ascii'), 'WEBP', `${provider} icon has a WebP signature`);
+  }
   const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.ok(mainSource.includes("app.on('activate', openArchive)"), 'Dock activation opens the archive');
   assert.ok(!mainSource.includes('app.dock.hide()'), 'the desktop archive remains available from the Dock');

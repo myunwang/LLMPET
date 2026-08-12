@@ -105,10 +105,15 @@ select { padding: 0 7px; }
 }
 .session-row:hover { background: rgba(255,255,255,.045); }
 .session-row.active { background: var(--violet-soft); border-color: rgba(157,130,229,.27); }
-.provider-icon { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; }
-.provider-icon svg { width: 22px; height: 22px; display: block; }
-.provider-icon.claude { background: rgba(217, 119, 87, .15); border: 1px solid rgba(217, 119, 87, .13); }
-.provider-icon.codex { background: rgba(59, 130, 246, .14); border: 1px solid rgba(59, 130, 246, .13); }
+.provider-icon {
+  width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+  overflow: hidden; flex: 0 0 auto;
+}
+.provider-icon img { display: block; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.provider-icon.claude img { width: 38px; height: 38px; object-fit: contain; }
+/* The supplied Codex WebP includes a baked checkerboard outside its logo.
+   Crop to the inner rounded square so only the real mark is visible. */
+.provider-icon.codex img { width: 54px; height: 54px; max-width: none; object-fit: contain; }
 .session-copy { min-width: 0; }
 .session-copy strong, .session-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-copy strong { font-size: 12.5px; }
