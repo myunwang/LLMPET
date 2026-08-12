@@ -115,10 +115,21 @@ if ! git -C "$INTEGRATION_WORKTREE" merge --no-ff "$SOURCE_BRANCH" -m "Merge bra
   die 'Merge conflict detected. No local main or GitHub main update was performed.'
 fi
 
-if [[ ! -d "$SOURCE_ROOT/node_modules/electron" ]]; then
-  die "Electron dependencies are missing in $SOURCE_ROOT/node_modules. Run npm install first."
+DEPENDENCY_ROOT=''
+while IFS= read -r candidate; do
+  if [[ -d "$candidate/node_modules/electron" ]]; then
+    DEPENDENCY_ROOT="$candidate/node_modules"
+    break
+  fi
+done < <(git -C "$SOURCE_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10) }')
+
+if [[ -n "$DEPENDENCY_ROOT" ]]; then
+  note "Reusing installed dependencies from $(dirname "$DEPENDENCY_ROOT")"
+  ln -s "$DEPENDENCY_ROOT" "$INTEGRATION_WORKTREE/node_modules"
+else
+  note 'No reusable Electron dependencies found; installing the lockfile dependencies'
+  npm --prefix "$INTEGRATION_WORKTREE" ci
 fi
-ln -s "$SOURCE_ROOT/node_modules" "$INTEGRATION_WORKTREE/node_modules"
 
 if [[ "${LLMPET_SKIP_TESTS:-0}" != "1" ]]; then
   note 'Validating the integrated main candidate'
