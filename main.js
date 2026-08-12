@@ -336,7 +336,10 @@ function openArchive() {
   archiveWin.loadFile(path.join(__dirname, 'renderer', 'archive.html'));
   archiveWin.webContents.on('did-finish-load', () => {
     sendWin(archiveWin, 'archive:config', frontendConfig());
-    if (lastStats) sendWin(archiveWin, 'workbench:stats', lastStats);
+    // Usage ledgers scan independently from the activity core. Always build a
+    // fresh payload when the workbench opens; a cached startup snapshot may
+    // still contain Codex 0 while rollout scanning has already advanced.
+    if (core) sendWin(archiveWin, 'workbench:stats', buildStats('all'));
     if (metering) sendWin(archiveWin, 'workbench:price', metering.priceInfo());
     setTimeout(() => {
       try { if (archiveWin && !archiveWin.isDestroyed()) { archiveWin.show(); archiveWin.focus(); } } catch {}
@@ -862,6 +865,7 @@ function bootBackend() {
   } else {
     codexMetering = createCodexMetering({
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
+      onChange: scheduleEmit,
     });
     codexMetering.start(30000);
     codexWatch = createCodexWatch({
@@ -1007,7 +1011,9 @@ function registerIpc() {
   ipcMain.handle('get-config', (e) => frontendConfig(senderAgent(e)));
   ipcMain.handle('get-stats', (e) => {
     const agent = senderAgent(e);
-    if (agent === 'all') return lastStats || buildStats();
+    // Do not return a stale cached price/token snapshot to a newly opened
+    // dashboard. buildStats is read-only and reflects the latest ledger scan.
+    if (agent === 'all') return buildStats();
     return buildStats(agent);
   });
   ipcMain.handle('get-win-pos', (e) => {

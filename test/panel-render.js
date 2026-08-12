@@ -26,7 +26,7 @@ const codex = {
   today: { cost: 20.068, tokens: 23_000_000, msgs: 152, input: 22_000_000, output: 120_000, cachedInput: 20_000_000, reasoningOutput: 30_000 },
   window5h: { cost: 36.799, tokens: 40_000_000, startTs: Date.now() - 4.0e6, resetTs: Date.now() + 1.3e7 },
   byModel: {
-    'gpt-5.6-sol': { cost: 18.991, tokens: 21_500_000, msgs: 136, input: 20_600_000, output: 110_000, cachedInput: 19_000_000, reasoningOutput: 28_000 },
+    'gpt-5.6-sol': { cost: 18.991, tokens: 21_500_000, msgs: 136, input: 20_600_000, output: 110_000, cachedInput: 19_000_000, reasoningOutput: 28_000, unitPrice: { input: 5, cachedInput: 0.5, output: 30 }, priceExact: true },
     // guardian / auto-review threads: a Codex-internal profile with no public
     // price, billed at the tier fallback and reported as an estimate.
     'codex-auto-review': { cost: 1.077, tokens: 1_500_000, msgs: 16, input: 1_400_000, output: 10_000, cachedInput: 1_000_000, reasoningOutput: 2_000 },

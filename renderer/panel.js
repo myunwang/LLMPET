@@ -222,7 +222,8 @@ function renderCodexUsage(usage, diag) {
     return;
   }
   wrap.classList.remove('hidden');
-  // Codex 现在也有价了：大数给钱，token 退到脚注（与 Claude 两个大数对齐）。
+  // This is an API-standard equivalent derived from local rollout tokens. A
+  // ChatGPT/Codex subscription is governed by its quota, not billed this sum.
   $('codex-today').textContent = '$' + (today.cost || 0).toFixed(3);
   $('codex-lifetime').textContent = '$' + (lifetime.cost || 0).toFixed(2);
   $('codex-today-detail').textContent = fmt(today.tokens) + ' tok · ' + t('panel.codexBreakdown', {
