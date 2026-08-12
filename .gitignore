@@ -10,7 +10,9 @@ dist/
 usage.json
 
 # Editor / local project config
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 .vscode/
 .idea/
 

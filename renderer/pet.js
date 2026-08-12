@@ -352,7 +352,7 @@ const reasonWord = (reason) => (reason ? t('reason.' + reason) : t('reason.defau
 const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // 带上 sessionId：否则同一项目下两个并行会话若问了同样的问题，会共用一个 key，
 // 答掉一个就把另一个也标记成 answered 吞掉。choice 各构造处都带 sessionId。
-const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
+const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.requestId || c.permId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
 
 // 动态定高：弹层贴 pet 上方(bottom:200)，把窗口高度调到刚好容纳内容，
 // 避免固定大窗口留白 / 顶屏被下移。先扩到目标宽度再量高度：如果在基础
@@ -782,7 +782,8 @@ function showAskPanel() {
     renderElicitation(c);
   } else {
     elic = null;
-    if (c.kind === 'perm' && c.permId) renderPerm(c);
+    if (c.kind === 'codex-ask') renderCodexElicitation(c);
+    else if (c.kind === 'perm' && c.permId) renderPerm(c);
     else if (c.kind === 'plan' && c.permId) renderPlan(c);
     else renderContinue(c);
   }
@@ -851,6 +852,43 @@ function renderElicitation(c) {
   askTerm.classList.remove('hidden');
   updateSubmitEnabled(q);
   fitPopup(askEl); // 题目切换后内容高度变了，重新定高
+}
+
+// Codex 选择对话的只读镜像。rollout watcher 能看见真实选项，
+// 但不持有 app-server 的响应通道；因此这里展示完整内容，并引导
+// 用户回到原 Codex 客户端/CLI 点选。原会话继续后快照会自动撤卡。
+function renderCodexElicitation(c) {
+  clearAskBody();
+  askLabel.textContent = t('ask.needsInput');
+  const qs = Array.isArray(c.questions) && c.questions.length
+    ? c.questions
+    : [{ header: c.header || '', question: c.question || t('ask.needAnswer'), options: c.options || [] }];
+  askQhead.textContent = qs.length === 1 ? (qs[0].header || '') : c.header || '';
+  askQ.textContent = qs.length === 1 ? (qs[0].question || c.question || '') : t('ask.codexMultiple', { n: qs.length });
+  askHint.textContent = t('ask.codexReplyHint');
+
+  for (const [index, q] of qs.entries()) {
+    if (qs.length > 1) {
+      const head = document.createElement('div');
+      head.className = 'ask-external-question';
+      head.textContent = `${index + 1}. ${q.header ? `【${q.header}】 ` : ''}${q.question || ''}`;
+      askOpts.appendChild(head);
+    }
+    for (const o of (q.options || [])) {
+      const row = document.createElement('div');
+      row.className = 'ask-opt readonly';
+      const label = typeof o === 'string' ? o : o.label;
+      const desc = typeof o === 'string' ? '' : o.description || o.desc || '';
+      row.innerHTML = '<span class="ask-radio"></span><span class="ask-ot">' +
+        `<span class="ask-ol">${esc(label)}</span>` +
+        (desc ? `<span class="ask-od">${esc(desc)}</span>` : '') + '</span>';
+      askOpts.appendChild(row);
+    }
+  }
+  askFoot.classList.add('hidden');
+  askTerm.textContent = t('ask.goCodex');
+  askTerm.classList.remove('hidden');
+  fitPopup(askEl);
 }
 
 function buildRadioCard(label, desc, value, q) {
@@ -1008,6 +1046,13 @@ function submitPerm(key, choice, label) {
 function gotoSession(choice) {
   if (choice.permId) window.pet.decidePermission(choice.permId, 'deny');
   window.pet.focusSession(choice.sessionId || '');
+  // Codex 的选择卡是只读镜像，不能因“打开原会话”就当成
+  // 已回答。保留在队列里，等 rollout 真正继续后 refreshAsk 自动关闭。
+  if (choice.externalOnly) {
+    hideAsk();
+    showBubble(t('ask.toCodex'), 2600);
+    return;
+  }
   finishChoice(choice, t('ask.toTerminal'));
 }
 

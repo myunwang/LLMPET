@@ -54,6 +54,20 @@ check('release packaging never falls back to ad-hoc signing', () => {
   assert.match(packageMac, /mac-\$ARCH-unsigned\.zip/);
 });
 
+check('local package carries generated-program registration support', () => {
+  assert.match(packageMac, /hook \.agents/);
+  assert.match(packageMac, /scripts\/register-generated-program\.js/);
+});
+
+const threePiece = read('scripts/three-piece.sh');
+check('three-piece publishing is guarded and verifies main equality', () => {
+  assert.match(threePiece, /status --porcelain/);
+  assert.match(threePiece, /merge --no-ff/);
+  assert.match(threePiece, /package:mac:dev/);
+  assert.match(threePiece, /push "\$REMOTE" "\$MAIN_BRANCH:\$MAIN_BRANCH"/);
+  assert.match(threePiece, /LOCAL_MAIN.*REMOTE_MAIN/s);
+});
+
 const verifyMac = read('scripts/verify-mac-release.sh');
 check('verification covers signature, ticket, quarantine and Gatekeeper', () => {
   assert.match(verifyMac, /Signature=adhoc/);

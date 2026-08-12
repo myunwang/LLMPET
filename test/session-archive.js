@@ -91,6 +91,21 @@ async function main() {
   assert.deepStrictEqual(invalid.sessionArchive, { backupEnabled: false, backupIntervalHours: 24 });
 
   const archiveRenderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.js'), 'utf8');
+  const archiveMarkup = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.html'), 'utf8');
+  for (const id of ['usage-provider-grid', 'usage-calendar', 'usage-quotas', 'usage-token-breakdown', 'usage-diagnostics']) {
+    assert.ok(archiveMarkup.includes(`id="${id}"`), `detailed workbench usage view keeps ${id}`);
+  }
+  for (const id of ['dashboard-todos', 'dashboard-ops', 'runtime-session-list', 'runtime-session-bg-list', 'runtime-process-list']) {
+    assert.ok(archiveMarkup.includes(`id="${id}"`), `workbench preserves the old panel block ${id}`);
+  }
+  for (const field of ['lastOps', 'todos', 'backgroundTasksCount', 'sessionCronsCount', 'bg.items']) {
+    assert.ok(archiveRenderer.includes(field), `workbench preserves old panel data ${field}`);
+  }
+  for (const field of ['todayByProvider', 'window5hByProvider', 'codexLimits', 'cacheWrite5m', 'cachedInput', 'reasoningOutput', 'codexDiagnostics']) {
+    assert.ok(archiveRenderer.includes(field), `detailed usage renderer keeps ${field}`);
+  }
+  assert.ok(archiveRenderer.includes("data-usage-view"), 'usage dashboard can switch between 24h and calendar views');
+  assert.ok(archiveRenderer.includes("window.pet.setBudget"), 'usage dashboard keeps the 5h budget control');
   for (const [provider, file, signature] of [['Claude', 'claude.webp', 'WEBP'], ['Codex', 'codex.png', 'PNG']]) {
     const assetPath = path.join(__dirname, '..', 'assets', 'agents', file);
     const asset = fs.readFileSync(assetPath);

@@ -172,6 +172,10 @@
     'ask.kindChoice': '选择',
     'ask.needHandling': '需要你处理',
     'ask.goReply': '💬 去这个会话回复 →',
+    'ask.goCodex': '💬 去 Codex 选择',
+    'ask.toCodex': '💬 已带你去 Codex',
+    'ask.codexReplyHint': '在 Codex 里选择；完成后这张卡会自动关闭',
+    'ask.codexMultiple': 'Codex 有 {n} 个问题需要你选择',
 
     // ── session list HUD ────────────────────────────────────────────────────
     'sess.title': '🗂️ 会话',
@@ -601,6 +605,10 @@
     'ask.kindChoice': 'Choose',
     'ask.needHandling': 'Needs you',
     'ask.goReply': '💬 Reply in this session →',
+    'ask.goCodex': '💬 Choose in Codex',
+    'ask.toCodex': '💬 Opened the Codex session',
+    'ask.codexReplyHint': 'Choose in Codex. This card closes automatically when the session continues.',
+    'ask.codexMultiple': 'Codex has {n} questions for you',
 
     'sess.title': '🗂️ Sessions',
     'sess.fallbackName': 'session',
@@ -1020,6 +1028,10 @@
     'ask.kindChoice': '選択',
     'ask.needHandling': '対応が必要です',
     'ask.goReply': '💬 このセッションで返信 →',
+    'ask.goCodex': '💬 Codex で選択',
+    'ask.toCodex': '💬 Codex セッションを開きました',
+    'ask.codexReplyHint': 'Codex 側で選択すると、このカードは自動的に閉じます',
+    'ask.codexMultiple': 'Codex から {n} 件の質問があります',
 
     'sess.title': '🗂️ セッション',
     'sess.fallbackName': 'セッション',

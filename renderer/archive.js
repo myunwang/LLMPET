@@ -3,313 +3,155 @@
 const $ = (id) => document.getElementById(id);
 const COPY = {
   zh: {
-    title: '会话档案馆', subtitle: 'Claude Code 与 Codex 的全部本机会话', total: '全部会话', source: '来源', backup: '本机备份',
-    backupTitle: '定期备份', backupNote: '默认关闭 · 只存本机 · 不上传云端', backupNever: '尚未备份', backupNow: '立即备份', folder: '打开目录', close: '关闭', backupInterval: '备份周期',
-    search: '搜索标题、项目、路径或 Session ID', all: '全部', allSources: '全来源', desktop: '客户端', cli: 'CLI', saved: '已备份', active: '活跃',
-    scanning: '正在扫描…', results: '{n} 条会话', emptyTitle: '选择一条会话', emptyCopy: '查看来源、项目、备份状态，并继续或交给另一个 Agent 接管。',
-    indexNote: '索引只保存元数据；会话正文仍由 Claude/Codex 管理。', noResults: '没有符合条件的会话', available: '源会话可用', missing: '源会话已不在原位置',
-    project: '项目', origin: '来源', updated: '最后更新', size: '文件大小', sessionId: 'Session ID', path: '原始路径',
-    continueClaude: '由 Claude 继续', continueCodex: '由 Codex 继续', restore: '恢复原会话', reveal: '在 Finder 中显示',
-    handoffNote: '同代理会使用官方 resume；跨代理会生成本地交接单。源会话正在工作时不会被停止。',
-    localWarning: '开启后会立即进行首次本机备份，预计需要 {size} 空间。它不能防止整块硬盘损坏，也不是云同步。是否继续？',
-    backupRunning: '正在备份 {done}/{total}…', backupDone: '备份完成：新增/更新 {copied}，未变化 {skipped}，失败 {failed}', backupFailed: '备份失败，请查看日志。',
-    opening: '正在打开会话…', restoring: '正在恢复原会话…', restored: '原会话已恢复，可以继续打开。', restoreFailed: '恢复失败；现有文件不会被覆盖。', openFailed: '无法打开：源会话可能已被删除或 CLI 未登录。', every6: '每 6 小时', every12: '每 12 小时', every24: '每天', every72: '每 3 天', every168: '每周',
+    pages: {
+      dashboard: ['Dashboard', '你的 Agent、用量、会话和程序都在这里'], usage: ['用量看板', 'Claude Code 与 Codex 的真实本机消耗'],
+      sessions: ['Session 管理', '管理全部客户端与 CLI 会话，并按需本机备份'], runtime: ['运行情况', '当前 Session、后台任务与关联进程'],
+      programs: ['生成程序', '集中启动 Codex 与 Claude Code 生成并验证过的程序'],
+    }, nav: ['Dashboard', '用量看板', 'Session 管理', '运行情况', '生成程序'], connected: '本机数据已连接', close: '关闭', collapse: '收起菜单', expand: '展开菜单',
+    working: '工作中', waiting: '待处理', errors: '异常', sessions: '全部会话', todayTokens: '今日 Token', todayCost: '今日估算', window: '5 小时窗口', lifetime: '本机累计',
+    currentRun: '当前运行', recentSessions: '最近会话', recentPrograms: '最近生成的程序', allRuntime: '查看全部 →', manageSessions: '管理会话 →', managePrograms: '程序管理 →',
+    noActive: '当前没有运行中的 Session', noPrograms: '还没有登记可运行程序', noModels: '暂无模型用量', autoRefresh: '状态变化时自动刷新', runningBg: '正在运行与后台任务',
+    programTitle: '生成程序管理', programSubtitle: 'Codex 与 Claude Code 验证过的可运行项目会出现在这里。', skillNote: '真实运行成功后自动登记',
+    launch: '启动', revealProgram: '打开目录', remove: '移除', removeConfirm: '只移除快捷方式，不会删除项目文件。继续吗？', unavailable: '项目已移动或删除', ready: '可启动', launchFailed: '启动失败，请检查项目路径和命令。',
+    total: '全部会话', source: '来源', backup: '本机备份', backupTitle: '定期备份', backupNote: '默认关闭 · 只存本机 · 不上传云端', backupNever: '尚未备份', backupNow: '立即备份', folder: '打开目录', backupInterval: '备份周期',
+    search: '搜索标题、项目、路径或 Session ID', all: '全部', allSources: '全来源', desktop: '客户端', cli: 'CLI', saved: '已备份', active: '活跃', scanning: '正在扫描…', results: '{n} 条会话', emptyTitle: '选择一条会话', emptyCopy: '查看来源、项目、备份状态，并继续或交给另一个 Agent 接管。',
+    indexNote: 'LLMPET 工作台使用本机数据，不上传会话或程序。', noResults: '没有符合条件的会话', available: '源会话可用', missing: '源会话已不在原位置', project: '项目', origin: '来源', updated: '最后更新', size: '文件大小', sessionId: 'Session ID', path: '原始路径',
+    continueClaude: '由 Claude 继续', continueCodex: '由 Codex 继续', restore: '恢复原会话', reveal: '在 Finder 中显示', handoffNote: '同代理会使用官方 resume；跨代理会生成本地交接单。源会话正在工作时不会被停止。',
+    localWarning: '开启后会立即进行首次本机备份，预计需要 {size} 空间。它不是云同步，也不能防止整块硬盘损坏。是否继续？', backupRunning: '正在备份 {done}/{total}…', backupDone: '备份完成：新增/更新 {copied}，未变化 {skipped}，失败 {failed}', backupFailed: '备份失败，请查看日志。', opening: '正在打开会话…', restoring: '正在恢复原会话…', restored: '原会话已恢复，可以继续打开。', restoreFailed: '恢复失败；现有文件不会被覆盖。', openFailed: '无法打开：源会话可能已被删除或 CLI 未登录。',
+    every6: '每 6 小时', every12: '每 12 小时', every24: '每天', every72: '每 3 天', every168: '每周', pid: '进程', background: '后台', noPid: '未捕获 PID', tokens: 'tokens',
+    usageDetail: '用量明细', usageDetailNote: 'Claude Code 与 Codex 分开计量，再汇总为本机总量', metricTokens: 'Token', metricCost: '费用', hours24: '24 小时', weeks12: '12 周日历', budget5h: '5h 预算', usageTrend: '用量趋势', quotas: '额度与预算', byModelDetail: '按模型明细', tokenCategories: 'Token 构成', meteringHealth: '计量状态', messages: '轮', today: '今日', windowShort: '5h 窗口', lifetimeShort: '本机累计', resetAt: '重置', weekly: '周窗口', plan: '套餐', notReported: '暂无套餐额度数据', noBudget: '未设置 5h 费用预算', budgetUsed: '预算使用', input: '输入', output: '输出', cache5m: '缓存写入 5m', cache1h: '缓存写入 1h', cacheRead: '缓存读取', cachedInput: '缓存输入', reasoning: '推理输出', claudeMeaning: 'Claude 今日', codexMeaning: 'Codex 今日', providerTotal: '两家合计', scan: '扫描', files: '文件', records: '记录', corrections: '流式修正', estimates: '估算模型', pricing: '价目', online: '在线价目', fallback: '内置价目', peak: '峰值', acrossDays: '{n} 天合计',
   },
   en: {
-    title: 'Session archive', subtitle: 'Every local Claude Code and Codex session', total: 'All sessions', source: 'Sources', backup: 'Local backup',
-    backupTitle: 'Scheduled backup', backupNote: 'Off by default · local only · no cloud upload', backupNever: 'Never backed up', backupNow: 'Back up now', folder: 'Open folder', close: 'Close', backupInterval: 'Backup interval',
-    search: 'Search title, project, path, or Session ID', all: 'All', allSources: 'All sources', desktop: 'Desktop', cli: 'CLI', saved: 'Backed up', active: 'Active',
-    scanning: 'Scanning…', results: '{n} sessions', emptyTitle: 'Select a session', emptyCopy: 'Inspect its source and backup, then resume it or hand it to another agent.',
-    indexNote: 'The index stores metadata only. Claude and Codex still own the transcript.', noResults: 'No matching sessions', available: 'Source available', missing: 'Source is no longer in its original location',
-    project: 'Project', origin: 'Source', updated: 'Last updated', size: 'File size', sessionId: 'Session ID', path: 'Original path',
-    continueClaude: 'Continue with Claude', continueCodex: 'Continue with Codex', restore: 'Restore source session', reveal: 'Reveal in Finder',
-    handoffNote: 'Same-provider sessions use official resume. Cross-provider takeover creates a local handoff packet. Live source work is not stopped.',
-    localWarning: 'Enabling this starts the first local backup immediately and may use about {size}. This is not cloud sync and cannot protect against a lost disk. Continue?',
-    backupRunning: 'Backing up {done}/{total}…', backupDone: 'Backup complete: {copied} copied, {skipped} unchanged, {failed} failed', backupFailed: 'Backup failed. Check the log.',
-    opening: 'Opening session…', restoring: 'Restoring the source session…', restored: 'The source session was restored and can be opened again.', restoreFailed: 'Restore failed. Existing files were not overwritten.', openFailed: 'Could not open it. The source may be gone or the CLI may be signed out.', every6: 'Every 6 hours', every12: 'Every 12 hours', every24: 'Daily', every72: 'Every 3 days', every168: 'Weekly',
+    pages: { dashboard: ['Dashboard', 'Agents, usage, sessions, and programs in one place'], usage: ['Usage', 'Local Claude Code and Codex usage'], sessions: ['Session manager', 'Manage desktop and CLI sessions with optional local backups'], runtime: ['Runtime', 'Live sessions, background work, and related processes'], programs: ['Generated programs', 'Launch verified programs made by Codex and Claude Code'] },
+    nav: ['Dashboard','Usage','Sessions','Runtime','Programs'], connected: 'Local data connected', close: 'Close', collapse: 'Collapse sidebar', expand: 'Expand sidebar', working: 'Working', waiting: 'Needs input', errors: 'Errors', sessions: 'All sessions', todayTokens: 'Tokens today', todayCost: 'Estimated today', window: '5-hour window', lifetime: 'Local lifetime', currentRun: 'Running now', recentSessions: 'Recent sessions', recentPrograms: 'Recently generated', allRuntime: 'View all →', manageSessions: 'Manage →', managePrograms: 'Programs →', noActive: 'No active sessions', noPrograms: 'No runnable programs registered yet', noModels: 'No model usage yet', autoRefresh: 'Refreshes on state changes', runningBg: 'Live sessions and background work', programTitle: 'Generated program manager', programSubtitle: 'Runnable projects verified by Codex and Claude Code appear here.', skillNote: 'Registered only after a successful real run', launch: 'Launch', revealProgram: 'Open folder', remove: 'Remove', removeConfirm: 'This removes only the shortcut, not project files. Continue?', unavailable: 'Project moved or deleted', ready: 'Ready', launchFailed: 'Launch failed. Check the project path and command.',
+    total: 'All sessions', source: 'Sources', backup: 'Local backup', backupTitle: 'Scheduled backup', backupNote: 'Off by default · local only · no cloud upload', backupNever: 'Never backed up', backupNow: 'Back up now', folder: 'Open folder', backupInterval: 'Backup interval', search: 'Search title, project, path, or Session ID', all: 'All', allSources: 'All sources', desktop: 'Desktop', cli: 'CLI', saved: 'Backed up', active: 'Active', scanning: 'Scanning…', results: '{n} sessions', emptyTitle: 'Select a session', emptyCopy: 'Inspect, resume, restore, or hand it to another agent.', indexNote: 'LLMPET uses local data and does not upload sessions or programs.', noResults: 'No matching sessions', available: 'Source available', missing: 'Source missing', project: 'Project', origin: 'Source', updated: 'Updated', size: 'File size', sessionId: 'Session ID', path: 'Original path', continueClaude: 'Continue with Claude', continueCodex: 'Continue with Codex', restore: 'Restore source', reveal: 'Reveal in Finder', handoffNote: 'Same-provider sessions use official resume. Cross-provider takeover creates a local handoff packet without stopping live source work.', localWarning: 'This starts a local backup using about {size}. It is not cloud sync. Continue?', backupRunning: 'Backing up {done}/{total}…', backupDone: 'Backup complete: {copied} copied, {skipped} unchanged, {failed} failed', backupFailed: 'Backup failed.', opening: 'Opening…', restoring: 'Restoring…', restored: 'Restored.', restoreFailed: 'Restore failed.', openFailed: 'Could not open the session.', every6: 'Every 6 hours', every12: 'Every 12 hours', every24: 'Daily', every72: 'Every 3 days', every168: 'Weekly', pid: 'PID', background: 'Background', noPid: 'No PID', tokens: 'tokens',
+    usageDetail: 'Usage details', usageDetailNote: 'Claude Code and Codex are metered separately, then combined locally', metricTokens: 'Tokens', metricCost: 'Cost', hours24: '24 hours', weeks12: '12-week calendar', budget5h: '5h budget', usageTrend: 'Usage trend', quotas: 'Limits and budget', byModelDetail: 'By-model details', tokenCategories: 'Token categories', meteringHealth: 'Metering health', messages: 'turns', today: 'Today', windowShort: '5h window', lifetimeShort: 'Local lifetime', resetAt: 'Resets', weekly: 'Weekly window', plan: 'Plan', notReported: 'No plan limit data reported', noBudget: 'No 5h cost budget set', budgetUsed: 'Budget used', input: 'Input', output: 'Output', cache5m: 'Cache write 5m', cache1h: 'Cache write 1h', cacheRead: 'Cache read', cachedInput: 'Cached input', reasoning: 'Reasoning output', claudeMeaning: 'Claude today', codexMeaning: 'Codex today', providerTotal: 'Combined', scan: 'Scan', files: 'Files', records: 'Records', corrections: 'Streaming corrections', estimates: 'Estimated models', pricing: 'Pricing', online: 'Online pricing', fallback: 'Built-in pricing', peak: 'Peak', acrossDays: '{n}-day total',
   },
   ja: {
-    title: 'セッション保管庫', subtitle: 'Claude Code と Codex のすべてのローカルセッション', total: '全セッション', source: '起動元', backup: 'ローカルバックアップ',
-    backupTitle: '定期バックアップ', backupNote: '初期設定はオフ · ローカルのみ · クラウド送信なし', backupNever: '未バックアップ', backupNow: '今すぐ保存', folder: 'フォルダを開く', close: '閉じる', backupInterval: '保存間隔',
-    search: 'タイトル・プロジェクト・パス・Session ID を検索', all: 'すべて', allSources: 'すべての起動元', desktop: 'デスクトップ', cli: 'CLI', saved: '保存済み', active: 'アクティブ',
-    scanning: 'スキャン中…', results: '{n} 件', emptyTitle: 'セッションを選択', emptyCopy: '起動元と保存状態を確認し、再開または別の Agent に引き継げます。',
-    indexNote: '索引に保存するのはメタデータのみです。本文は Claude/Codex が管理します。', noResults: '該当するセッションはありません', available: '元セッションあり', missing: '元の場所にセッションがありません',
-    project: 'プロジェクト', origin: '起動元', updated: '最終更新', size: 'ファイルサイズ', sessionId: 'Session ID', path: '元のパス',
-    continueClaude: 'Claude で続ける', continueCodex: 'Codex で続ける', restore: '元セッションを復元', reveal: 'Finder で表示',
-    handoffNote: '同じプロバイダーは公式 resume、別プロバイダーはローカル引継ぎ資料を使います。実行中の元セッションは停止しません。',
-    localWarning: '有効にすると最初のローカルバックアップをすぐ開始し、約 {size} 使用する可能性があります。クラウド同期ではなく、ディスク消失には対応できません。続けますか？',
-    backupRunning: '{done}/{total} を保存中…', backupDone: '保存完了：更新 {copied}、変更なし {skipped}、失敗 {failed}', backupFailed: 'バックアップに失敗しました。ログを確認してください。',
-    opening: 'セッションを開いています…', restoring: '元セッションを復元しています…', restored: '元セッションを復元しました。再び開けます。', restoreFailed: '復元に失敗しました。既存ファイルは上書きしていません。', openFailed: '開けませんでした。元データがないか、CLI のログインが切れている可能性があります。', every6: '6 時間ごと', every12: '12 時間ごと', every24: '毎日', every72: '3 日ごと', every168: '毎週',
+    pages: { dashboard: ['Dashboard', 'Agent・使用量・セッション・プログラムを一元管理'], usage: ['使用量', 'Claude Code と Codex のローカル使用量'], sessions: ['Session 管理', 'デスクトップと CLI のセッション、ローカル保存を管理'], runtime: ['実行状況', '実行中の Session・バックグラウンド処理・PID'], programs: ['生成プログラム', 'Codex と Claude Code が検証したプログラムを起動'] },
+    nav: ['Dashboard','使用量','Session 管理','実行状況','生成プログラム'], connected: 'ローカルデータ接続済み', close: '閉じる', collapse: 'メニューを閉じる', expand: 'メニューを開く', working: '実行中', waiting: '入力待ち', errors: 'エラー', sessions: '全セッション', todayTokens: '今日の Token', todayCost: '今日の推定', window: '5 時間', lifetime: 'ローカル累計', currentRun: '実行中', recentSessions: '最近のセッション', recentPrograms: '最近の生成プログラム', allRuntime: 'すべて表示 →', manageSessions: '管理 →', managePrograms: 'プログラム →', noActive: '実行中のセッションはありません', noPrograms: '実行可能なプログラムは未登録です', noModels: 'モデル使用量はありません', autoRefresh: '状態変更時に自動更新', runningBg: '実行中とバックグラウンド処理', programTitle: '生成プログラム管理', programSubtitle: 'Codex と Claude Code が実行確認したプロジェクトを表示します。', skillNote: '実際の起動成功後のみ登録', launch: '起動', revealProgram: 'フォルダを開く', remove: '削除', removeConfirm: 'ショートカットのみ削除し、プロジェクトは残します。続けますか？', unavailable: '移動または削除済み', ready: '起動可能', launchFailed: '起動できません。パスとコマンドを確認してください。',
+    total: '全セッション', source: '起動元', backup: 'ローカル保存', backupTitle: '定期バックアップ', backupNote: '初期設定オフ · ローカルのみ', backupNever: '未保存', backupNow: '今すぐ保存', folder: 'フォルダを開く', backupInterval: '保存間隔', search: 'タイトル・プロジェクト・パス・Session ID を検索', all: 'すべて', allSources: 'すべて', desktop: 'デスクトップ', cli: 'CLI', saved: '保存済み', active: 'アクティブ', scanning: 'スキャン中…', results: '{n} 件', emptyTitle: 'セッションを選択', emptyCopy: '詳細を確認し、再開・復元・引継ぎができます。', indexNote: 'LLMPET はローカルデータのみ使用し、セッションやプログラムを送信しません。', noResults: '該当なし', available: '元データあり', missing: '元データなし', project: 'プロジェクト', origin: '起動元', updated: '更新', size: 'サイズ', sessionId: 'Session ID', path: '元のパス', continueClaude: 'Claude で続ける', continueCodex: 'Codex で続ける', restore: '復元', reveal: 'Finder で表示', handoffNote: '同じ Agent は公式 resume、別 Agent はローカル引継ぎ資料を使用します。実行中の作業は停止しません。', localWarning: '約 {size} のローカル保存を開始します。クラウド同期ではありません。続けますか？', backupRunning: '{done}/{total} を保存中…', backupDone: '保存完了：更新 {copied}、変更なし {skipped}、失敗 {failed}', backupFailed: '保存に失敗しました。', opening: '開いています…', restoring: '復元中…', restored: '復元しました。', restoreFailed: '復元に失敗しました。', openFailed: '開けませんでした。', every6: '6 時間ごと', every12: '12 時間ごと', every24: '毎日', every72: '3 日ごと', every168: '毎週', pid: 'PID', background: 'バックグラウンド', noPid: 'PID なし', tokens: 'tokens',
+    usageDetail: '使用量詳細', usageDetailNote: 'Claude Code と Codex を別々に計測し、ローカルで合算します', metricTokens: 'Token', metricCost: '費用', hours24: '24 時間', weeks12: '12 週間', budget5h: '5h 予算', usageTrend: '使用量推移', quotas: '上限と予算', byModelDetail: 'モデル別詳細', tokenCategories: 'Token 内訳', meteringHealth: '計測状態', messages: 'ターン', today: '今日', windowShort: '5h ウィンドウ', lifetimeShort: 'ローカル累計', resetAt: 'リセット', weekly: '週間ウィンドウ', plan: 'プラン', notReported: 'プラン上限データなし', noBudget: '5h 費用予算は未設定', budgetUsed: '予算使用率', input: '入力', output: '出力', cache5m: 'キャッシュ書込 5m', cache1h: 'キャッシュ書込 1h', cacheRead: 'キャッシュ読込', cachedInput: 'キャッシュ入力', reasoning: '推論出力', claudeMeaning: 'Claude 今日', codexMeaning: 'Codex 今日', providerTotal: '合計', scan: 'スキャン', files: 'ファイル', records: 'レコード', corrections: 'ストリーミング補正', estimates: '推定モデル', pricing: '価格', online: 'オンライン価格', fallback: '内蔵価格', peak: 'ピーク', acrossDays: '{n} 日合計',
   },
 };
 
-let lang = 'zh';
-let config = { sessionArchive: { backupEnabled: false, backupIntervalHours: 24 } };
-let data = { sessions: [], total: 0, summary: null };
-let loadedOnce = false;
-let selectedKey = '';
-let provider = 'all';
-let origin = 'all';
-let backup = 'all';
-let search = '';
-let searchTimer = null;
+Object.assign(COPY.zh, {
+  todoTitle:'待办清单', opsTitle:'实时操作', recentOps:'最近 30 条', noTodo:'当前没有待办', noOps:'等待操作记录',
+  sessionBg:'Session 内后台任务', systemProcesses:'实际运行脚本与 Agent 进程', noSessionBg:'Session 没有上报后台任务',
+  noProcesses:'没有捕获到运行脚本或 Agent 子进程', scripts:'脚本', agents:'Agent 进程', crons:'定时任务', scanFailed:'进程扫描失败',
+});
+Object.assign(COPY.en, {
+  todoTitle:'To-do list', opsTitle:'Live operations', recentOps:'Latest 30', noTodo:'No current to-dos', noOps:'Waiting for operations',
+  sessionBg:'Session background work', systemProcesses:'Live scripts and agent processes', noSessionBg:'No session-reported background work',
+  noProcesses:'No live scripts or agent workers found', scripts:'Scripts', agents:'Agent processes', crons:'Scheduled', scanFailed:'Process scan failed',
+});
+Object.assign(COPY.ja, {
+  todoTitle:'ToDo リスト', opsTitle:'リアルタイム操作', recentOps:'最新 30 件', noTodo:'現在の ToDo はありません', noOps:'操作を待っています',
+  sessionBg:'Session 内バックグラウンド', systemProcesses:'実行中スクリプトと Agent プロセス', noSessionBg:'Session のバックグラウンド処理なし',
+  noProcesses:'実行中のスクリプトまたは Agent ワーカーなし', scripts:'スクリプト', agents:'Agent プロセス', crons:'定期タスク', scanFailed:'プロセス取得失敗',
+});
 
+let lang = 'zh'; let config = { sessionArchive: {}, budget5h: 0 }; let page = localStorage.getItem('llmpet-workbench-page') || 'dashboard';
+let stats = null; let programs = []; let data = { sessions: [], total: 0, summary: null }; let loadedOnce = false;
+let selectedKey = '', provider = 'all', origin = 'all', backup = 'all', search = '', searchTimer = null;
+let usageMetric = localStorage.getItem('llmpet-usage-metric') === 'cost' ? 'cost' : 'tokens';
+let usageView = localStorage.getItem('llmpet-usage-view') === 'calendar' ? 'calendar' : 'hours';
+let priceInfo = null;
 const copy = () => COPY[lang] || COPY.zh;
 const template = (value, vars = {}) => String(value || '').replace(/\{(\w+)\}/g, (_, key) => vars[key] == null ? '' : String(vars[key]));
-const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+const fmt = (value) => { const n = Number(value)||0; if (n>=1e9) return `${(n/1e9).toFixed(2)}B`; if (n>=1e6) return `${(n/1e6).toFixed(2)}M`; if (n>=1e3) return `${(n/1e3).toFixed(1)}k`; return String(Math.round(n)); };
+const fmtMoney = (value) => `$${(Number(value)||0).toFixed(3)}`;
+const fmtBytes = (value) => { const n=Number(value)||0; if(n>=1024**3)return `${(n/1024**3).toFixed(1)} GB`; if(n>=1024**2)return `${(n/1024**2).toFixed(1)} MB`; if(n>=1024)return `${(n/1024).toFixed(1)} KB`; return `${n} B`; };
+const fmtDate = (value) => value ? new Date(value).toLocaleString(lang==='ja'?'ja-JP':lang==='en'?'en-US':'zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+const PROVIDER_ICONS = { claude:'../assets/agents/claude.webp', codex:'../assets/agents/codex.png' };
+const providerIcon = (value, cls='') => `<img class="${cls}" src="${PROVIDER_ICONS[value==='codex'?'codex':'claude']}" alt="" draggable="false">`;
+const providerLabel = (value) => value==='codex'?'Codex':'Claude';
+const originLabel = (value) => value==='desktop'?copy().desktop:value==='cli'?'CLI':'—';
+const timeOnly = (value) => value ? new Date(value).toLocaleTimeString(lang==='ja'?'ja-JP':lang==='en'?'en-US':'zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}) : '—';
+const dayKey = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+const shortModel = (value) => String(value||'?').replace(/^claude-/,'').replace(/\[1m\]/,'·1M');
 
-const PROVIDER_ICONS = Object.freeze({
-  claude: '../assets/agents/claude.webp',
-  codex: '../assets/agents/codex.png',
-});
-const providerIcon = (value) => `<img src="${PROVIDER_ICONS[value === 'codex' ? 'codex' : 'claude']}" alt="" draggable="false">`;
+function metric(label,value,meta,cls='') { return `<article class="metric-card ${cls}"><span class="metric-label">${escapeHtml(label)}</span><strong class="metric-value">${escapeHtml(value)}</strong><small class="metric-meta">${escapeHtml(meta||'')}</small></article>`; }
+function isBusy(session) { return ['working','thinking','juggling','sweeping','carrying'].includes(session && session.state); }
+function sessionSubline(session) { const bits=[providerLabel(session.agent),session.op||session.state]; if(session.backgroundTasksCount)bits.push(`${copy().background} ${session.backgroundTasksCount}`); return bits.join(' · '); }
 
-function fmtBytes(value) {
-  const n = Number(value) || 0;
-  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
-  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n} B`;
+function switchPage(next) {
+  if (!COPY.zh.pages[next]) next='dashboard'; page=next; localStorage.setItem('llmpet-workbench-page',page);
+  document.querySelectorAll('.nav-item').forEach((el)=>el.classList.toggle('active',el.dataset.page===page));
+  document.querySelectorAll('[data-page-view]').forEach((el)=>el.classList.toggle('active',el.dataset.pageView===page));
+  const title=copy().pages[page]; $('page-title').textContent=title[0]; $('page-subtitle').textContent=title[1]; document.title=`LLMPET · ${title[0]}`;
+  if(page==='sessions'&&!loadedOnce) loadSessions(); if(page==='programs') loadPrograms(); renderWorkbench();
 }
-
-function fmtDate(value) {
-  if (!value) return '—';
-  const locale = lang === 'ja' ? 'ja-JP' : lang === 'en' ? 'en-US' : 'zh-CN';
-  return new Date(value).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function providerLabel(value) { return value === 'codex' ? 'Codex' : 'Claude'; }
-function originLabel(value) { return value === 'desktop' ? copy().desktop : value === 'cli' ? 'CLI' : '—'; }
 
 function applyCopy() {
-  const c = copy();
-  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : lang;
-  document.title = `LLMPET · ${c.title}`;
-  $('page-title').textContent = c.title; $('page-subtitle').textContent = c.subtitle;
-  $('close').setAttribute('aria-label', c.close);
-  $('backup-toggle').parentElement.title = c.backupTitle;
-  $('backup-interval').setAttribute('aria-label', c.backupInterval);
-  $('summary-total-label').textContent = c.total; $('summary-source-label').textContent = c.source; $('summary-backup-label').textContent = c.backup;
-  $('backup-title').textContent = c.backupTitle; $('backup-note').textContent = c.backupNote;
-  $('backup-now').textContent = c.backupNow; $('backup-folder').textContent = c.folder; $('search').placeholder = c.search;
-  $('empty-title').textContent = c.emptyTitle; $('empty-copy').textContent = c.emptyCopy; $('status').textContent = c.indexNote;
-  const providerButtons = $('provider-filters').querySelectorAll('button');
-  providerButtons[0].textContent = c.all;
-  const originButtons = $('origin-filters').querySelectorAll('button');
-  originButtons[0].textContent = c.allSources; originButtons[1].textContent = c.desktop; originButtons[2].textContent = c.cli; originButtons[3].textContent = c.saved;
-  const interval = $('backup-interval');
-  interval.options[0].textContent = c.every6; interval.options[1].textContent = c.every12; interval.options[2].textContent = c.every24; interval.options[3].textContent = c.every72; interval.options[4].textContent = c.every168;
+  const c=copy(); document.documentElement.lang=lang==='zh'?'zh-CN':lang; $('close').setAttribute('aria-label',c.close); $('side-status').textContent=c.connected;
+  const sidebarCollapsed=$('app-shell').classList.contains('sidebar-collapsed');
+  $('sidebar-toggle').setAttribute('aria-label',sidebarCollapsed?c.expand:c.collapse);
+  $('sidebar-toggle').textContent=sidebarCollapsed?'›':'‹';
+  document.querySelectorAll('.nav-label').forEach((el,i)=>{ if(i<c.nav.length)el.textContent=c.nav[i]; });
+  $('dashboard-live-title').textContent=c.currentRun; $('dashboard-recent-title').textContent=c.recentSessions; $('dashboard-program-title').textContent=c.recentPrograms;$('dashboard-todo-title').textContent=c.todoTitle;$('dashboard-ops-title').textContent=c.opsTitle;$('dashboard-ops-note').textContent=c.recentOps;
+  document.querySelectorAll('[data-go="runtime"]').forEach((el)=>el.textContent=c.allRuntime); document.querySelectorAll('[data-go="sessions"]').forEach((el)=>el.textContent=c.manageSessions); document.querySelectorAll('[data-go="programs"]').forEach((el)=>el.textContent=c.managePrograms);
+  $('runtime-title').textContent=c.runningBg; $('runtime-refresh').textContent=c.autoRefresh;$('runtime-session-bg-title').textContent=c.sessionBg;$('runtime-process-title').textContent=c.systemProcesses; $('program-title').textContent=c.programTitle; $('program-subtitle').textContent=c.programSubtitle; $('program-skill-note').textContent=c.skillNote;
+  $('usage-detail-title').textContent=c.usageDetail;$('usage-detail-note').textContent=c.usageDetailNote;$('usage-budget-label').textContent=c.budget5h;$('usage-trend-title').textContent=c.usageTrend;$('usage-quota-title').textContent=c.quotas;$('usage-model-title').textContent=c.byModelDetail;$('usage-token-title').textContent=c.tokenCategories;$('usage-diagnostics-title').textContent=c.meteringHealth;
+  const metricButtons=$('usage-metric-tabs').querySelectorAll('button');metricButtons[0].textContent=c.metricTokens;metricButtons[1].textContent=c.metricCost;const viewButtons=$('usage-view-tabs').querySelectorAll('button');viewButtons[0].textContent=c.hours24;viewButtons[1].textContent=c.weeks12;
+  if(document.activeElement!==$('usage-budget'))$('usage-budget').value=config.budget5h||'';
+  $('summary-total-label').textContent=c.total; $('summary-source-label').textContent=c.source; $('summary-backup-label').textContent=c.backup; $('backup-title').textContent=c.backupTitle; $('backup-note').textContent=c.backupNote; $('backup-now').textContent=c.backupNow; $('backup-folder').textContent=c.folder; $('search').placeholder=c.search; $('empty-title').textContent=c.emptyTitle; $('empty-copy').textContent=c.emptyCopy; $('status').textContent=c.indexNote;
+  const pb=$('provider-filters').querySelectorAll('button'); pb[0].textContent=c.all; const ob=$('origin-filters').querySelectorAll('button'); ob[0].textContent=c.allSources;ob[1].textContent=c.desktop;ob[2].textContent=c.cli;ob[3].textContent=c.saved;
+  const opts=$('backup-interval').options; [c.every6,c.every12,c.every24,c.every72,c.every168].forEach((v,i)=>opts[i].textContent=v); switchPage(page);
 }
 
-async function load() {
-  $('result-count').textContent = copy().scanning;
-  try {
-    data = await window.pet.getSessionArchive({ search, provider, origin, backup, pageSize: 500 });
-    loadedOnce = true;
-    render();
-  } catch (error) {
-    setStatus(error && error.message ? error.message : copy().backupFailed, 'error');
-  }
+function renderWorkbench() {
+  const s=stats||{sessions:[],today:{},window5h:{},lifetime:{},byModel:{},hourlyTok:[]}; const sessions=s.sessions||[]; const busy=sessions.filter(isBusy); const wait=sessions.filter((x)=>x.state==='waiting'||x.state==='needsinput'); const errors=sessions.filter((x)=>x.state==='error');
+  $('runtime-dot').style.opacity=busy.length?'1':'.22'; $('nav-program-count').textContent=String(programs.length); if(data.summary)$('nav-session-count').textContent=String(data.summary.total||0);
+  $('dashboard-summary').innerHTML=[metric(copy().working,String(busy.length),`${wait.length} ${copy().waiting}`,'primary'),metric(copy().todayTokens,fmt(s.today&&s.today.tokens),`${fmt(s.window5h&&s.window5h.tokens)} · ${copy().window}`,'blue'),metric(copy().todayCost,fmtMoney(s.today&&s.today.cost),`${fmtMoney(s.window5h&&s.window5h.cost)} · ${copy().window}`,'amber'),metric(copy().sessions,String(data.summary&&data.summary.total||sessions.length),`Claude ${data.summary&&data.summary.claude||sessions.filter(x=>x.agent==='claude').length} · Codex ${data.summary&&data.summary.codex||sessions.filter(x=>x.agent==='codex').length}`)].join('');
+  renderCompact($('dashboard-live'),busy.slice(0,5),copy().noActive); const recent=(data.sessions||[]).slice(0,5); $('dashboard-recent').innerHTML=recent.length?recent.map((x)=>`<div class="compact-row">${providerIcon(x.provider,'mini-icon')}<div><strong>${escapeHtml(x.title||x.project||x.id)}</strong><small>${escapeHtml(x.project||x.cwd||'')} · ${escapeHtml(fmtDate(x.updatedAt))}</small></div><span class="state-pill">${escapeHtml(originLabel(x.origin))}</span></div>`).join(''):`<div class="empty-line">${escapeHtml(copy().noResults)}</div>`;
+  renderDashboardDetail(s);$('dashboard-programs').innerHTML=programs.length?programs.slice(0,4).map((x)=>`<span class="quick-chip">${x.provider==='codex'?'🛰️':'✦'} ${escapeHtml(x.name)}</span>`).join(''):`<div class="empty-line">${escapeHtml(copy().noPrograms)}</div>`;
+  renderUsage(s);
+  const sessionBg=sessions.reduce((n,x)=>n+(x.backgroundTasksCount||0)+(x.sessionCronsCount||0),0),systemBg=s.bg||{items:[]};$('runtime-summary').innerHTML=[metric(copy().working,String(busy.length),`${sessions.length} sessions`,'primary'),metric(copy().waiting,String(wait.length),'needs input','amber'),metric(copy().background,String(sessionBg),`${copy().crons} + ${copy().background}`,'blue'),metric(copy().systemProcesses,String(systemBg.running||0),`${systemBg.scripts||0} ${copy().scripts} · ${systemBg.agents||0} ${copy().agents}`,'amber')].join(''); renderRuntime(sessions,systemBg);
+  renderPrograms();
 }
 
-function render() {
-  renderSummary();
-  renderList();
-  renderDetail();
+function providerUsageCard(agent,row,windowRow,lifetime) { const c=copy(),messages=row&&row.messages||0;return `<article class="provider-usage-card"><div class="provider-usage-head">${providerIcon(agent)}<div><strong>${providerLabel(agent)}</strong><small>${fmt(row&&row.tokens)} ${c.tokens} · ${messages} ${c.messages}</small></div><div class="provider-cost">${fmtMoney(row&&row.cost)}</div></div><div class="provider-usage-values"><div><span>${c.today}</span><b>${fmt(row&&row.tokens)}</b></div><div><span>${c.windowShort}</span><b>${fmt(windowRow&&windowRow.tokens)} · ${fmtMoney(windowRow&&windowRow.cost)}</b></div><div><span>${c.lifetimeShort}</span><b>${fmt(lifetime&&lifetime.tokens)} · ${fmtMoney(lifetime&&lifetime.cost)}</b></div></div></article>`; }
+function tokenItem(label,value,note) { return `<div class="token-item"><span>${escapeHtml(label)}</span><b>${fmt(value)}</b><small>${escapeHtml(note||'')}</small></div>`; }
+function quotaItem(label,pct,note) { const value=Math.max(0,Math.min(100,Number(pct)||0));return `<div class="quota-item ${value>=80?'warn':''}"><div class="quota-head"><strong>${escapeHtml(label)}</strong><span>${value.toFixed(0)}%</span></div><div class="quota-bar"><i style="width:${value}%"></i></div><small>${escapeHtml(note||'')}</small></div>`; }
+function renderUsage(s) {
+  const c=copy(),today=s.today||{},window5h=s.window5h||{},lifetime=s.lifetime||{},claude=(s.todayByProvider&&s.todayByProvider.claude)||{},codex=(s.todayByProvider&&s.todayByProvider.codex)||{},claudeWindow=(s.window5hByProvider&&s.window5hByProvider.claude)||{},codexWindow=(s.window5hByProvider&&s.window5hByProvider.codex)||{},codexLifetime=(s.codexUsage&&s.codexUsage.lifetime)||{},claudeLifetime={tokens:Math.max(0,(lifetime.tokens||0)-(codexLifetime.tokens||0)),cost:Math.max(0,(lifetime.cost||0)-(codexLifetime.cost||0))};
+  $('usage-summary').innerHTML=[metric(c.todayTokens,fmt(today.tokens),`${today.messages||0} ${c.messages}`,'primary'),metric(c.todayCost,fmtMoney(today.cost),`Claude ${fmtMoney(claude.cost)} · Codex ${fmtMoney(codex.cost)}`,'amber'),metric(c.window,fmt(window5h.tokens),`${fmtMoney(window5h.cost)} · ${window5h.resetTs?`${c.resetAt} ${timeOnly(window5h.resetTs)}`:''}`,'blue'),metric(c.lifetime,fmt(lifetime.tokens),fmtMoney(lifetime.cost))].join('');
+  $('usage-provider-grid').innerHTML=providerUsageCard('claude',claude,claudeWindow,claudeLifetime)+providerUsageCard('codex',codex,codexWindow,codexLifetime);
+  document.querySelectorAll('[data-usage-metric]').forEach((button)=>button.classList.toggle('active',button.dataset.usageMetric===usageMetric));document.querySelectorAll('[data-usage-view]').forEach((button)=>button.classList.toggle('active',button.dataset.usageView===usageView));$('usage-hours-view').classList.toggle('hidden',usageView!=='hours');$('usage-calendar-view').classList.toggle('hidden',usageView!=='calendar');$('usage-trend-eyebrow').textContent=usageView==='hours'?'TODAY · 24 HOURS':'HISTORY · 12 WEEKS';
+  renderUsageTrend(s);renderUsageQuotas(s);renderUsageModels(s.byModel||{});
+  $('usage-token-breakdown').innerHTML=[tokenItem(c.input,today.input,c.providerTotal),tokenItem(c.output,today.output,c.providerTotal),tokenItem(c.cache5m,claude.cacheWrite5m,c.claudeMeaning),tokenItem(c.cache1h,claude.cacheWrite1h,c.claudeMeaning),tokenItem(c.cacheRead,claude.cacheRead,c.claudeMeaning),tokenItem(c.cachedInput,codex.cachedInput,c.codexMeaning),tokenItem(c.reasoning,codex.reasoningOutput,c.codexMeaning),tokenItem(c.messages,today.messages,c.providerTotal)].join('');
+  const diag=s.diagnostics||{},codexDiag=s.codexDiagnostics||{},pricingLabel=priceInfo&&priceInfo.live?`${c.online}${priceInfo.count?` · ${priceInfo.count}`:''}`:c.fallback;const scanTime=diag.lastScanTs?timeOnly(diag.lastScanTs):'—';$('usage-diagnostics').innerHTML=[['Claude',`${c.scan} ${scanTime}`],[c.files,String(diag.scannedFiles||0)],[c.records,String(diag.records||0)],[c.corrections,String(diag.streamingCorrections||0)],[`Codex ${c.records}`,String(codexDiag.events||0)],[c.estimates,String((diag.estimatedModelCount||0)+(codexDiag.estimatedModelCount||0))],[c.pricing,pricingLabel]].map(([label,value])=>`<div class="diagnostic-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
 }
+function renderUsageTrend(s) { const c=copy();if(usageView==='hours'){const values=(usageMetric==='cost'?s.hourly:s.hourlyTok)||new Array(24).fill(0),max=Math.max(.000001,...values.map(Number)),total=values.reduce((n,v)=>n+(Number(v)||0),0);let peakValue=0,peakHour=0;$('hour-chart').innerHTML=values.map((value,h)=>{value=Number(value)||0;if(value>peakValue){peakValue=value;peakHour=h;}const display=usageMetric==='cost'?fmtMoney(value):`${fmt(value)} ${c.tokens}`;return `<div class="hour-bar" style="height:${value?Math.max(3,value/max*100):2}%" data-tip="${h}:00 · ${escapeHtml(display)}"></div>`;}).join('');$('usage-trend-summary').textContent=`${c.today} ${usageMetric==='cost'?fmtMoney(total):fmt(total)} · ${c.peak} ${peakHour}:00 ${usageMetric==='cost'?fmtMoney(peakValue):fmt(peakValue)}`;return;}const daily=s.daily||{},end=new Date();end.setHours(0,0,0,0);const start=new Date(end);start.setDate(start.getDate()-83);start.setDate(start.getDate()-start.getDay());const cells=[];let max=.000001,total=0;for(let day=new Date(start);day<=end;day.setDate(day.getDate()+1)){const key=dayKey(day),row=daily[key]||{},value=Number(usageMetric==='cost'?row.cost:row.tokens)||0;max=Math.max(max,value);total+=value;cells.push({key,value,row});}$('usage-calendar').innerHTML=cells.map((cell)=>{const level=cell.value<=0?0:Math.min(4,Math.max(1,Math.ceil(cell.value/max*4))),display=usageMetric==='cost'?fmtMoney(cell.value):`${fmt(cell.value)} ${c.tokens}`;return `<div class="usage-calendar-cell level-${level} ${cell.key===dayKey(end)?'today':''}" data-tip="${cell.key} · ${escapeHtml(display)} · ${cell.row.msgs||0} ${c.messages}"></div>`;}).join('');$('usage-calendar-summary').textContent=template(c.acrossDays,{n:cells.length})+` · ${usageMetric==='cost'?fmtMoney(total):fmt(total)}`;$('usage-trend-summary').textContent=$('usage-calendar-summary').textContent; }
+function renderUsageQuotas(s) { const c=copy(),rows=[],rl=s.codexLimits||{};if(rl.usedPercent!=null)rows.push(quotaItem('Codex 5h',rl.usedPercent,[rl.resetsAt?`${c.resetAt} ${timeOnly(rl.resetsAt)}`:'',rl.planType?`${rl.planType} ${c.plan}`:''].filter(Boolean).join(' · ')));else rows.push(`<div class="quota-item"><div class="quota-head"><strong>Codex 5h</strong><span>—</span></div><small>${c.notReported}</small></div>`);if(rl.secondaryUsedPercent!=null)rows.push(quotaItem(`Codex ${c.weekly}`,rl.secondaryUsedPercent,''));const budget=Number(config.budget5h)||0;if(budget>0)rows.push(quotaItem(c.budgetUsed,(Number(s.window5h&&s.window5h.cost)||0)/budget*100,`${fmtMoney(s.window5h&&s.window5h.cost)} / $${budget.toFixed(0)}`));else rows.push(`<div class="quota-item"><div class="quota-head"><strong>${c.budget5h}</strong><span>—</span></div><small>${c.noBudget}</small></div>`);$('usage-quotas').innerHTML=rows.join(''); }
+function renderUsageModels(byModel) { const c=copy(),entries=Object.entries(byModel).sort((a,b)=>(b[1].cost||0)-(a[1].cost||0)),totalCost=entries.reduce((n,[,row])=>n+(row.cost||0),0),totalTokens=entries.reduce((n,[,row])=>n+(row.tokens||0),0),base=usageMetric==='cost'?totalCost:totalTokens;$('usage-model-total').textContent=`${fmtMoney(totalCost)} · ${fmt(totalTokens)} ${c.tokens}`;$('model-list').innerHTML=entries.length?entries.map(([name,row])=>{const value=usageMetric==='cost'?row.cost:row.tokens,pct=base?Math.round(value/base*100):0,detail=row.agent==='codex'?`${c.input} ${fmt(row.input)} · ${c.output} ${fmt(row.output)} · ${c.cachedInput} ${fmt(row.cachedInput)} · ${c.reasoning} ${fmt(row.reasoningOutput)}`:`${c.input} ${fmt(row.input)} · ${c.output} ${fmt(row.output)} · ${c.cache5m} ${fmt(row.cacheWrite5m)} · ${c.cache1h} ${fmt(row.cacheWrite1h)} · ${c.cacheRead} ${fmt(row.cacheRead)}`;return `<div class="model-row">${providerIcon(row.agent)}<div class="model-name"><strong>${escapeHtml(shortModel(name))}</strong><small>${escapeHtml(detail)}</small></div><b>${fmtMoney(row.cost)}</b><span>${fmt(row.tokens)} · ${pct}%</span><div class="model-track"><div class="model-fill" style="width:${pct}%"></div></div></div>`;}).join(''):`<div class="empty-line">${escapeHtml(c.noModels)}</div>`; }
 
-function renderSummary() {
-  if (!loadedOnce) {
-    $('summary-total').textContent = '—';
-    $('summary-split').textContent = 'Claude — · Codex —';
-    $('summary-source').textContent = '—';
-    $('summary-source-split').textContent = `${copy().desktop} — · CLI —`;
-    $('summary-backup').textContent = '—';
-    $('summary-backup-time').textContent = copy().backupNever;
-    $('result-count').textContent = copy().scanning;
-    $('scan-time').textContent = '';
-    $('storage-size').textContent = '';
-    renderBackupSettings();
-    return;
-  }
-  const s = data.summary || {};
-  $('summary-total').textContent = s.total == null ? '—' : s.total;
-  $('summary-split').textContent = `Claude ${s.claude || 0} · Codex ${s.codex || 0}`;
-  $('summary-source').textContent = `${(s.desktop || 0) + (s.cli || 0)}`;
-  $('summary-source-split').textContent = `${copy().desktop} ${s.desktop || 0} · CLI ${s.cli || 0}`;
-  $('summary-backup').textContent = `${s.backedUp || 0}/${s.total || 0}`;
-  $('summary-backup-time').textContent = s.lastBackupAt ? fmtDate(s.lastBackupAt) : copy().backupNever;
-  $('result-count').textContent = template(copy().results, { n: data.total || 0 });
-  $('scan-time').textContent = s.lastScanAt ? fmtDate(s.lastScanAt) : '';
-  $('storage-size').textContent = s.bytes ? fmtBytes(s.bytes) : '';
-  renderBackupSettings();
-}
+function renderCompact(root,items,empty) { root.innerHTML=items.length?items.map((x)=>`<div class="compact-row">${providerIcon(x.agent,'mini-icon')}<div><strong>${escapeHtml(x.project||x.sessionId)}</strong><small>${escapeHtml(sessionSubline(x))}</small></div><span class="state-pill">${escapeHtml(x.state)}</span></div>`).join(''):`<div class="empty-line">${escapeHtml(empty)}</div>`; }
+function renderDashboardDetail(s) { const c=copy(),todos=s.todos||[],ops=s.lastOps||[];$('dashboard-todo-count').textContent=todos.length?`${todos.filter(x=>x.status==='completed').length}/${todos.length}`:'';$('dashboard-todos').innerHTML=todos.length?todos.map((x)=>`<div class="todo-row"><span class="todo-icon">${x.status==='completed'?'✓':x.status==='in_progress'?'▶':'□'}</span><strong>${escapeHtml(x.content||'')}</strong><span class="todo-state">${escapeHtml(x.status||'')}</span></div>`).join(''):`<div class="empty-line">${escapeHtml(c.noTodo)}</div>`;$('dashboard-ops').innerHTML=ops.length?ops.slice(0,30).map((x)=>`<div class="operation-row"><span class="operation-icon">${escapeHtml(x.icon||'⌁')}</span><div><strong>${escapeHtml(x.detail||x.tool||'')}</strong><small>${escapeHtml(x.project||'')}</small></div><span class="operation-time">${timeOnly(x.ts)}</span></div>`).join(''):`<div class="empty-line">${escapeHtml(c.noOps)}</div>`; }
+function ageText(sec) { const n=Number(sec)||0;return n<60?`${n}s`:n<3600?`${Math.round(n/60)}m`:n<86400?`${(n/3600).toFixed(1)}h`:`${(n/86400).toFixed(1)}d`; }
+function renderRuntime(items,bg) { const c=copy(),sorted=[...(items||[])].sort((a,b)=>(isBusy(b)-isBusy(a))||((b.updatedAt||0)-(a.updatedAt||0)));$('runtime-session-list').innerHTML=sorted.length?sorted.map((x)=>`<div class="runtime-row ${isBusy(x)?'busy':''}"><div class="provider-icon">${providerIcon(x.agent)}</div><div class="runtime-info"><strong>${escapeHtml(x.project||x.sessionId)}</strong><small>${escapeHtml(providerLabel(x.agent))} · <button class="session-id-chip" data-session-id="${escapeHtml(x.sessionId||'')}">${escapeHtml(String(x.sessionId||'').slice(0,8))}</button></small></div><div class="runtime-stat">${x.sourcePid?`${c.pid} ${x.sourcePid}`:c.noPid}<br>${x.contextPercent==null?'':`${Math.round(x.contextPercent)}% context`}</div><div class="runtime-op">${escapeHtml(x.op||x.state||'idle')}</div></div>`).join(''):`<div class="empty-line">${escapeHtml(c.noActive)}</div>`;const withBg=sorted.filter(x=>(x.backgroundTasksCount||0)+(x.sessionCronsCount||0)>0);$('runtime-session-bg-count').textContent=String(withBg.reduce((n,x)=>n+(x.backgroundTasksCount||0)+(x.sessionCronsCount||0),0));$('runtime-session-bg-list').innerHTML=withBg.length?withBg.map(x=>`<div class="runtime-row busy"><div class="provider-icon">${providerIcon(x.agent)}</div><div class="runtime-info"><strong>${escapeHtml(x.project||x.sessionId)}</strong><small>${escapeHtml(String(x.sessionId||'').slice(0,8))}</small></div><div class="runtime-stat">${x.backgroundTasksCount||0} ${c.background}<br>${x.sessionCronsCount||0} ${c.crons}</div><div class="runtime-op">${x.stopHookActive?'stop hook':escapeHtml(x.state||'idle')}</div></div>`).join(''):`<div class="empty-line">${escapeHtml(c.noSessionBg)}</div>`;const proc=(bg&&bg.items)||[];$('runtime-scan-note').textContent=bg&&bg.error?c.scanFailed:(bg&&bg.lastScanAt?timeOnly(bg.lastScanAt):c.autoRefresh);$('runtime-process-list').innerHTML=proc.length?proc.map(x=>`<div class="process-row ${x.kind==='script'?'script':''}"><span class="process-kind">${x.kind==='script'?'⌘':x.provider==='claude'?'✦':'⌁'}</span><div class="process-copy"><strong>${escapeHtml(x.label)}</strong><small>PID ${x.pid} · PPID ${x.ppid} · ${escapeHtml(x.state||'')}</small></div><span class="process-stats">${ageText(x.ageSec)}<br>CPU ${Number(x.cpu||0).toFixed(1)}% · MEM ${Number(x.memory||0).toFixed(1)}%</span></div>`).join(''):`<div class="empty-line">${escapeHtml(c.noProcesses)}</div>`;$('runtime-session-list').querySelectorAll('[data-session-id]').forEach(button=>button.addEventListener('click',async()=>{if(await window.pet.copySessionId(button.dataset.sessionId)){const before=button.textContent;button.textContent='✓';setTimeout(()=>{button.textContent=before;},900);}})); }
+function fileUrl(path) { return `file://${encodeURI(String(path||''))}`; }
+function renderPrograms() { $('nav-program-count').textContent=String(programs.length); $('program-list').innerHTML=programs.length?programs.map((x)=>`<article class="program-card"><div class="program-icon">${x.iconAvailable?`<img src="${escapeHtml(fileUrl(x.icon))}" alt="">`:(x.provider==='codex'?'🛰️':'✦')}</div><div class="program-copy"><h3>${escapeHtml(x.name)}</h3><p>${escapeHtml(x.description||'')}</p><div class="program-path">${escapeHtml(x.cwd)}</div></div><div class="program-actions"><button data-program-action="reveal" data-id="${escapeHtml(x.id)}">${escapeHtml(copy().revealProgram)}</button><button class="danger" data-program-action="remove" data-id="${escapeHtml(x.id)}">${escapeHtml(copy().remove)}</button><button class="primary" data-program-action="launch" data-id="${escapeHtml(x.id)}" ${x.available?'':'disabled'}>${escapeHtml(x.available?copy().launch:copy().unavailable)}</button></div></article>`).join(''):`<div class="panel-card empty-line">${escapeHtml(copy().noPrograms)}</div>`; $('program-list').querySelectorAll('[data-program-action]').forEach((button)=>button.addEventListener('click',()=>programAction(button.dataset.programAction,button.dataset.id))); }
+async function programAction(action,id) { if(action==='launch'){const result=await window.pet.launchGeneratedProgram(id);if(!result||!result.ok)setStatus(copy().launchFailed,'error');}else if(action==='reveal')window.pet.revealGeneratedProgram(id);else if(action==='remove'&&window.confirm(copy().removeConfirm)){await window.pet.removeGeneratedProgram(id);await loadPrograms();} }
+async function loadPrograms() { programs=await window.pet.getGeneratedPrograms(); renderWorkbench(); }
 
-function renderBackupSettings() {
-  const settings = config.sessionArchive || {};
-  $('backup-toggle').checked = settings.backupEnabled === true;
-  $('backup-interval').value = String(settings.backupIntervalHours || 24);
-  $('backup-interval').disabled = settings.backupEnabled !== true;
-}
+async function loadSessions() { $('result-count').textContent=copy().scanning; try { data=await window.pet.getSessionArchive({search,provider,origin,backup,pageSize:500});loadedOnce=true;renderSessions();renderWorkbench(); }catch(error){setStatus(error&&error.message||copy().backupFailed,'error');} }
+function renderSessions(){renderSummary();renderList();renderDetail();}
+function renderSummary(){const c=copy(),s=data.summary||{};$('summary-total').textContent=loadedOnce?s.total||0:'—';$('summary-split').textContent=`Claude ${s.claude||0} · Codex ${s.codex||0}`;$('summary-source').textContent=loadedOnce?(s.desktop||0)+(s.cli||0):'—';$('summary-source-split').textContent=`${c.desktop} ${s.desktop||0} · CLI ${s.cli||0}`;$('summary-backup').textContent=loadedOnce?`${s.backedUp||0}/${s.total||0}`:'—';$('summary-backup-time').textContent=s.lastBackupAt?fmtDate(s.lastBackupAt):c.backupNever;$('result-count').textContent=loadedOnce?template(c.results,{n:data.total||0}):c.scanning;$('scan-time').textContent=s.lastScanAt?fmtDate(s.lastScanAt):'';$('storage-size').textContent=s.bytes?fmtBytes(s.bytes):'';const settings=config.sessionArchive||{};$('backup-toggle').checked=settings.backupEnabled===true;$('backup-interval').value=String(settings.backupIntervalHours||24);$('backup-interval').disabled=settings.backupEnabled!==true;}
+function rowBadges(x){const badges=[`<span class="badge ${x.origin}">${escapeHtml(originLabel(x.origin))}</span>`];if(x.active)badges.unshift(`<span class="badge saved">${escapeHtml(copy().active)}</span>`);if(x.backupAvailable)badges.push(`<span class="badge saved">${escapeHtml(copy().saved)}</span>`);if(!x.sourceAvailable)badges.push(`<span class="badge missing">${escapeHtml(copy().missing)}</span>`);return badges.join('');}
+function renderList(){const list=$('session-list');if(!data.sessions||!data.sessions.length){list.innerHTML=`<div class="list-empty">${escapeHtml(copy().noResults)}</div>`;return;}if(!selectedKey||!data.sessions.some(x=>x.key===selectedKey))selectedKey=data.sessions[0].key;list.innerHTML=data.sessions.map(x=>`<div class="session-row ${x.key===selectedKey?'active':''}" data-key="${escapeHtml(x.key)}"><div class="provider-icon">${providerIcon(x.provider)}</div><div class="session-copy"><strong>${escapeHtml(x.title||x.project||x.id)}</strong><small>${escapeHtml(x.project||x.cwd||x.id)} · ${escapeHtml(fmtDate(x.updatedAt))}</small></div><div class="session-badges">${rowBadges(x)}</div></div>`).join('');list.querySelectorAll('.session-row').forEach(row=>row.addEventListener('click',()=>{selectedKey=row.dataset.key;renderList();renderDetail();}));}
+function renderDetail(){const x=data.sessions&&data.sessions.find(i=>i.key===selectedKey),detail=$('detail'),c=copy();if(!x){detail.className='detail empty-detail';detail.innerHTML=`<div class="empty-illustration">⌁</div><h2>${escapeHtml(c.emptyTitle)}</h2><p>${escapeHtml(c.emptyCopy)}</p>`;return;}detail.className='detail';detail.innerHTML=`<div class="detail-heading"><div><div class="detail-provider">${escapeHtml(providerLabel(x.provider))} · ${escapeHtml(originLabel(x.origin))}</div><h2>${escapeHtml(x.title||x.project||x.id)}</h2><div class="detail-project">${escapeHtml(x.project||'—')}</div></div><span class="availability ${x.sourceAvailable?'':'missing'}">${escapeHtml(x.sourceAvailable?c.available:c.missing)}</span></div><div class="meta-grid"><div class="meta-item"><span>${c.project}</span><strong>${escapeHtml(x.project||'—')}</strong></div><div class="meta-item"><span>${c.origin}</span><strong>${providerLabel(x.provider)} · ${originLabel(x.origin)}</strong></div><div class="meta-item"><span>${c.updated}</span><strong>${fmtDate(x.updatedAt)}</strong></div><div class="meta-item"><span>${c.size}</span><strong>${fmtBytes(x.size)}</strong></div><div class="meta-item"><span>${c.sessionId}</span><strong>${escapeHtml(x.id)}</strong></div><div class="meta-item"><span>${c.backup}</span><strong>${x.backupAvailable?fmtDate(x.backedUpAt):c.backupNever}</strong></div></div><div class="path-card"><span>${c.path}</span><code>${escapeHtml(x.sourcePath||'—')}</code></div><div class="detail-actions"><button class="action-button primary" data-target="claude" ${x.sourceAvailable?'':'disabled'}>${c.continueClaude}</button><button class="action-button secondary" data-target="codex" ${x.sourceAvailable?'':'disabled'}>${c.continueCodex}</button>${!x.sourceAvailable&&x.backupAvailable?`<button class="action-button primary" id="restore-session">${c.restore}</button>`:''}<button class="action-button" id="reveal-session" ${(x.sourceAvailable||x.backupAvailable)?'':'disabled'}>${c.reveal}</button></div><div class="detail-note">${escapeHtml(c.handoffNote)}</div>`;detail.querySelectorAll('[data-target]').forEach(b=>b.addEventListener('click',()=>openSession(x,b.dataset.target)));if($('reveal-session'))$('reveal-session').addEventListener('click',()=>window.pet.revealArchivedSession(x.key));if($('restore-session'))$('restore-session').addEventListener('click',()=>restoreSession(x));}
+async function openSession(x,target){setStatus(copy().opening,'busy');const result=await window.pet.resumeArchivedSession(x.key,target);setStatus(result&&result.ok?copy().indexNote:copy().openFailed,result&&result.ok?'':'error');}
+async function restoreSession(x){setStatus(copy().restoring,'busy');const result=await window.pet.restoreArchivedSession(x.key);if(result&&result.ok){setStatus(copy().restored);loadSessions();}else setStatus(copy().restoreFailed,'error');}
+function setStatus(message,cls=''){ $('status').textContent=message;$('status').className=cls; }
 
-function rowBadges(session) {
-  const badges = [`<span class="badge ${session.origin}">${escapeHtml(originLabel(session.origin))}</span>`];
-  if (session.active) badges.unshift(`<span class="badge saved">${escapeHtml(copy().active)}</span>`);
-  if (session.backupAvailable) badges.push(`<span class="badge saved">${escapeHtml(copy().saved)}</span>`);
-  if (!session.sourceAvailable) badges.push(`<span class="badge missing">${escapeHtml(copy().missing)}</span>`);
-  return badges.join('');
-}
-
-function renderList() {
-  const list = $('session-list');
-  if (!data.sessions || !data.sessions.length) {
-    list.innerHTML = `<div class="list-empty">${escapeHtml(copy().noResults)}</div>`;
-    return;
-  }
-  if (!selectedKey || !data.sessions.some((session) => session.key === selectedKey)) selectedKey = data.sessions[0].key;
-  list.innerHTML = data.sessions.map((session) => `
-    <div class="session-row ${session.key === selectedKey ? 'active' : ''}" data-key="${escapeHtml(session.key)}">
-      <div class="provider-icon ${session.provider === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(providerLabel(session.provider))}">${providerIcon(session.provider)}</div>
-      <div class="session-copy">
-        <strong>${escapeHtml(session.title || session.project || session.id)}</strong>
-        <small>${escapeHtml(session.project || session.cwd || session.id)} · ${escapeHtml(fmtDate(session.updatedAt))}</small>
-      </div>
-      <div class="session-badges">${rowBadges(session)}</div>
-    </div>`).join('');
-  list.querySelectorAll('.session-row').forEach((row) => row.addEventListener('click', () => {
-    selectedKey = row.dataset.key;
-    renderList();
-    renderDetail();
-  }));
-}
-
-function renderDetail() {
-  const session = data.sessions && data.sessions.find((item) => item.key === selectedKey);
-  const detail = $('detail');
-  if (!session) {
-    detail.className = 'detail empty-detail';
-    detail.innerHTML = `<div class="empty-illustration">⌁</div><h2>${escapeHtml(copy().emptyTitle)}</h2><p>${escapeHtml(copy().emptyCopy)}</p>`;
-    return;
-  }
-  const c = copy();
-  detail.className = 'detail';
-  detail.innerHTML = `
-    <div class="detail-heading">
-      <div><div class="detail-provider">${escapeHtml(providerLabel(session.provider))} · ${escapeHtml(originLabel(session.origin))}</div>
-      <h2>${escapeHtml(session.title || session.project || session.id)}</h2><div class="detail-project">${escapeHtml(session.project || '—')}</div></div>
-      <span class="availability ${session.sourceAvailable ? '' : 'missing'}">${escapeHtml(session.sourceAvailable ? c.available : c.missing)}</span>
-    </div>
-    <div class="meta-grid">
-      <div class="meta-item"><span>${escapeHtml(c.project)}</span><strong>${escapeHtml(session.project || '—')}</strong></div>
-      <div class="meta-item"><span>${escapeHtml(c.origin)}</span><strong>${escapeHtml(`${providerLabel(session.provider)} · ${originLabel(session.origin)}`)}</strong></div>
-      <div class="meta-item"><span>${escapeHtml(c.updated)}</span><strong>${escapeHtml(fmtDate(session.updatedAt))}</strong></div>
-      <div class="meta-item"><span>${escapeHtml(c.size)}</span><strong>${escapeHtml(fmtBytes(session.size))}</strong></div>
-      <div class="meta-item"><span>${escapeHtml(c.sessionId)}</span><strong>${escapeHtml(session.id)}</strong></div>
-      <div class="meta-item"><span>${escapeHtml(c.backup)}</span><strong>${escapeHtml(session.backupAvailable ? fmtDate(session.backedUpAt) : c.backupNever)}</strong></div>
-    </div>
-    <div class="path-card"><span>${escapeHtml(c.path)}</span><code>${escapeHtml(session.sourcePath || '—')}</code></div>
-    <div class="detail-actions">
-      <button class="action-button primary" data-target="claude" ${session.sourceAvailable ? '' : 'disabled'}>${escapeHtml(c.continueClaude)}</button>
-      <button class="action-button secondary" data-target="codex" ${session.sourceAvailable ? '' : 'disabled'}>${escapeHtml(c.continueCodex)}</button>
-      ${!session.sourceAvailable && session.backupAvailable ? `<button class="action-button primary" id="restore-session">${escapeHtml(c.restore)}</button>` : ''}
-      <button class="action-button" id="reveal-session" ${(session.sourceAvailable || session.backupAvailable) ? '' : 'disabled'}>${escapeHtml(c.reveal)}</button>
-    </div>
-    <div class="detail-note">${escapeHtml(c.handoffNote)}</div>`;
-  detail.querySelectorAll('[data-target]').forEach((button) => button.addEventListener('click', () => openSession(session, button.dataset.target)));
-  const reveal = $('reveal-session');
-  if (reveal) reveal.addEventListener('click', () => window.pet.revealArchivedSession(session.key));
-  const restore = $('restore-session');
-  if (restore) restore.addEventListener('click', () => restoreSession(session));
-}
-
-async function openSession(session, target) {
-  setStatus(copy().opening, 'busy');
-  const result = await window.pet.resumeArchivedSession(session.key, target);
-  if (!result || !result.ok) setStatus(copy().openFailed, 'error');
-  else setStatus(copy().indexNote, '');
-}
-
-async function restoreSession(session) {
-  setStatus(copy().restoring, 'busy');
-  const result = await window.pet.restoreArchivedSession(session.key);
-  if (!result || !result.ok) setStatus(copy().restoreFailed, 'error');
-  else { setStatus(copy().restored, ''); await load(); }
-}
-
-function setStatus(message, cls = '') {
-  $('status').textContent = message;
-  $('status').className = cls;
-}
-
-document.getElementById('close').addEventListener('click', () => window.pet.closeSessionArchive());
-document.getElementById('backup-folder').addEventListener('click', () => window.pet.openSessionBackupFolder());
-document.getElementById('backup-now').addEventListener('click', async () => {
-  if (!data.summary || !data.summary.backedUp) {
-    const estimate = fmtBytes(data.summary && data.summary.bytes);
-    if (!window.confirm(template(copy().localWarning, { size: estimate }))) return;
-  }
-  $('backup-now').disabled = true;
-  setStatus(template(copy().backupRunning, { done: 0, total: (data.summary && data.summary.available) || 0 }), 'busy');
-  const result = await window.pet.backupSessionsNow();
-  $('backup-now').disabled = false;
-  if (!result || !result.ok) setStatus(copy().backupFailed, 'error');
-  await load();
-});
-document.getElementById('backup-toggle').addEventListener('change', async (event) => {
-  const enabled = event.target.checked;
-  if (enabled) {
-    const estimate = fmtBytes(data.summary && data.summary.bytes);
-    if (!window.confirm(template(copy().localWarning, { size: estimate }))) { event.target.checked = false; return; }
-  }
-  config.sessionArchive = await window.pet.setSessionArchiveSettings({ backupEnabled: enabled });
-  renderSummary();
-});
-document.getElementById('backup-interval').addEventListener('change', async (event) => {
-  config.sessionArchive = await window.pet.setSessionArchiveSettings({ backupIntervalHours: Number(event.target.value) });
-  renderSummary();
-});
-document.getElementById('search').addEventListener('input', (event) => {
-  search = event.target.value;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(load, 180);
-});
-document.querySelectorAll('[data-provider]').forEach((button) => button.addEventListener('click', () => {
-  provider = button.dataset.provider;
-  document.querySelectorAll('[data-provider]').forEach((item) => item.classList.toggle('active', item === button));
-  load();
-}));
-document.querySelectorAll('[data-origin]').forEach((button) => button.addEventListener('click', () => {
-  const value = button.dataset.origin;
-  origin = value === 'desktop' || value === 'cli' ? value : 'all';
-  backup = value === 'backed-up' ? 'backed-up' : 'all';
-  document.querySelectorAll('[data-origin]').forEach((item) => item.classList.toggle('active', item === button));
-  load();
-}));
-
-window.pet.onConfig((next) => {
-  config = { ...config, ...(next || {}) };
-  lang = ['zh', 'en', 'ja'].includes(config.lang) ? config.lang : 'zh';
-  applyCopy();
-  if (loadedOnce) render();
-  else renderSummary();
-});
-window.pet.onArchiveChanged((event) => {
-  if (!event) return;
-  if (event.type === 'backup-progress') {
-    setStatus(template(copy().backupRunning, { done: event.completed, total: event.total }), 'busy');
-  } else if (event.type === 'backup-complete') {
-    setStatus(template(copy().backupDone, event), event.failed ? 'error' : '');
-    load();
-  } else if (event.type === 'scan-complete') {
-    load();
-  }
-});
-
-applyCopy();
-renderSummary();
-window.pet.getConfig().then((next) => {
-  config = { ...config, ...(next || {}) };
-  lang = ['zh', 'en', 'ja'].includes(config.lang) ? config.lang : 'zh';
-  applyCopy();
-  load();
-});
+$('close').addEventListener('click',()=>window.pet.closeSessionArchive());$('sidebar-toggle').addEventListener('click',()=>{$('app-shell').classList.toggle('sidebar-collapsed');localStorage.setItem('llmpet-sidebar-collapsed',$('app-shell').classList.contains('sidebar-collapsed')?'1':'0');applyCopy();});
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>switchPage(el.dataset.page)));document.querySelectorAll('[data-go]').forEach(el=>el.addEventListener('click',()=>switchPage(el.dataset.go)));
+document.querySelectorAll('[data-usage-metric]').forEach((button)=>button.addEventListener('click',()=>{usageMetric=button.dataset.usageMetric==='cost'?'cost':'tokens';localStorage.setItem('llmpet-usage-metric',usageMetric);if(stats)renderUsage(stats);}));document.querySelectorAll('[data-usage-view]').forEach((button)=>button.addEventListener('click',()=>{usageView=button.dataset.usageView==='calendar'?'calendar':'hours';localStorage.setItem('llmpet-usage-view',usageView);if(stats)renderUsage(stats);}));$('usage-budget').addEventListener('change',(event)=>{config.budget5h=Math.max(0,Number(event.target.value)||0);window.pet.setBudget(config.budget5h);if(stats)renderUsageQuotas(stats);});
+$('backup-folder').addEventListener('click',()=>window.pet.openSessionBackupFolder());$('backup-now').addEventListener('click',async()=>{if(!data.summary||!data.summary.backedUp){if(!window.confirm(template(copy().localWarning,{size:fmtBytes(data.summary&&data.summary.bytes)})))return;}$('backup-now').disabled=true;setStatus(template(copy().backupRunning,{done:0,total:data.summary&&data.summary.available||0}),'busy');const result=await window.pet.backupSessionsNow();$('backup-now').disabled=false;if(!result||!result.ok)setStatus(copy().backupFailed,'error');await loadSessions();});
+$('backup-toggle').addEventListener('change',async(e)=>{const enabled=e.target.checked;if(enabled&&!window.confirm(template(copy().localWarning,{size:fmtBytes(data.summary&&data.summary.bytes)}))){e.target.checked=false;return;}config.sessionArchive=await window.pet.setSessionArchiveSettings({backupEnabled:enabled});renderSummary();});$('backup-interval').addEventListener('change',async(e)=>{config.sessionArchive=await window.pet.setSessionArchiveSettings({backupIntervalHours:Number(e.target.value)});renderSummary();});
+$('search').addEventListener('input',e=>{search=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(loadSessions,180);});document.querySelectorAll('[data-provider]').forEach(b=>b.addEventListener('click',()=>{provider=b.dataset.provider;document.querySelectorAll('[data-provider]').forEach(x=>x.classList.toggle('active',x===b));loadSessions();}));document.querySelectorAll('[data-origin]').forEach(b=>b.addEventListener('click',()=>{const v=b.dataset.origin;origin=v==='desktop'||v==='cli'?v:'all';backup=v==='backed-up'?'backed-up':'all';document.querySelectorAll('[data-origin]').forEach(x=>x.classList.toggle('active',x===b));loadSessions();}));
+window.pet.onConfig(next=>{config={...config,...next};lang=['zh','en','ja'].includes(config.lang)?config.lang:'zh';applyCopy();renderSessions();renderWorkbench();});window.pet.onWorkbenchStats(next=>{stats=next;renderWorkbench();});window.pet.onWorkbenchPrice(next=>{priceInfo=next;if(stats)renderUsage(stats);});window.pet.onProgramsChanged(()=>loadPrograms());window.pet.onArchiveChanged(event=>{if(!event)return;if(event.type==='backup-progress')setStatus(template(copy().backupRunning,{done:event.completed,total:event.total}),'busy');else if(event.type==='backup-complete'){setStatus(template(copy().backupDone,event),event.failed?'error':'');loadSessions();}else if(event.type==='scan-complete')loadSessions();});
+if(localStorage.getItem('llmpet-sidebar-collapsed')==='1')$('app-shell').classList.add('sidebar-collapsed');applyCopy();renderSummary();Promise.all([window.pet.getConfig(),window.pet.getStats(),window.pet.getGeneratedPrograms()]).then(([next,nextStats,nextPrograms])=>{config={...config,...next};lang=['zh','en','ja'].includes(config.lang)?config.lang:'zh';stats=nextStats;programs=nextPrograms||[];applyCopy();loadSessions();renderWorkbench();});

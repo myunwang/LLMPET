@@ -1,97 +1,106 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="archive.css" />
-    <title>LLMPET · 会话档案馆</title>
+    <title>LLMPET · 工作台</title>
   </head>
   <body>
-    <div class="app-shell">
-      <header class="titlebar">
-        <div class="brand">
-          <div class="brand-mark">📚</div>
-          <div>
-            <h1 id="page-title">会话档案馆</h1>
-            <p id="page-subtitle">Claude Code 与 Codex 的全部本机会话</p>
-          </div>
+    <div class="app-shell" id="app-shell">
+      <aside class="sidebar">
+        <div class="side-brand">
+          <img src="../assets/mascot.png" alt="" />
+          <div><strong>LLMPET</strong><small>WORKBENCH</small></div>
+          <button id="sidebar-toggle" class="side-toggle" aria-label="收起菜单">‹</button>
         </div>
-        <button class="icon-button" id="close" aria-label="关闭">✕</button>
-      </header>
+        <nav class="side-nav">
+          <button class="nav-item active" data-page="dashboard"><span class="nav-icon">⌂</span><span class="nav-label">Dashboard</span></button>
+          <button class="nav-item" data-page="usage"><span class="nav-icon">⌁</span><span class="nav-label">用量看板</span></button>
+          <button class="nav-item" data-page="sessions"><span class="nav-icon">▤</span><span class="nav-label">Session 管理</span><span class="nav-count" id="nav-session-count">—</span></button>
+          <button class="nav-item" data-page="runtime"><span class="nav-icon">◉</span><span class="nav-label">运行情况</span><span class="nav-dot" id="runtime-dot"></span></button>
+          <button class="nav-item" data-page="programs"><span class="nav-icon">◇</span><span class="nav-label">生成程序</span><span class="nav-count" id="nav-program-count">0</span></button>
+        </nav>
+        <div class="side-foot"><span class="pulse"></span><span class="nav-label" id="side-status">本机数据已连接</span></div>
+      </aside>
 
-      <section class="summary-grid">
-        <article class="summary-card emphasis">
-          <span id="summary-total-label">全部会话</span>
-          <strong id="summary-total">—</strong>
-          <small id="summary-split">Claude — · Codex —</small>
-        </article>
-        <article class="summary-card">
-          <span id="summary-source-label">来源</span>
-          <strong id="summary-source">—</strong>
-          <small id="summary-source-split">客户端 — · CLI —</small>
-        </article>
-        <article class="summary-card">
-          <span id="summary-backup-label">本机备份</span>
-          <strong id="summary-backup">—</strong>
-          <small id="summary-backup-time">尚未备份</small>
-        </article>
-        <article class="backup-card">
-          <div class="backup-copy">
-            <strong id="backup-title">定期备份</strong>
-            <small id="backup-note">默认关闭 · 只存本机 · 不上传云端</small>
-          </div>
-          <label class="switch" title="定期备份">
-            <input id="backup-toggle" type="checkbox" />
-            <span></span>
-          </label>
-          <div class="backup-controls">
-            <select id="backup-interval" aria-label="备份周期">
-              <option value="6">每 6 小时</option>
-              <option value="12">每 12 小时</option>
-              <option value="24">每天</option>
-              <option value="72">每 3 天</option>
-              <option value="168">每周</option>
-            </select>
-            <button id="backup-now" class="soft-button">立即备份</button>
-            <button id="backup-folder" class="soft-button quiet">打开目录</button>
-          </div>
-        </article>
+      <section class="content-shell">
+        <header class="titlebar">
+          <div><h1 id="page-title">Dashboard</h1><p id="page-subtitle">你的 Agent、用量、会话和程序都在这里</p></div>
+          <button class="icon-button" id="close" aria-label="关闭">✕</button>
+        </header>
+
+        <main class="page-stack">
+          <section class="page active" data-page-view="dashboard">
+            <div class="hero-grid" id="dashboard-summary"></div>
+            <div class="two-column">
+              <article class="panel-card"><div class="section-head"><div><span class="eyebrow">LIVE</span><h2 id="dashboard-live-title">当前运行</h2></div><button class="text-button" data-go="runtime">查看全部 →</button></div><div id="dashboard-live" class="compact-list"></div></article>
+              <article class="panel-card"><div class="section-head"><div><span class="eyebrow">RECENT</span><h2 id="dashboard-recent-title">最近会话</h2></div><button class="text-button" data-go="sessions">管理会话 →</button></div><div id="dashboard-recent" class="compact-list"></div></article>
+            </div>
+            <div class="two-column dashboard-detail-grid">
+              <article class="panel-card"><div class="section-head"><div><span class="eyebrow">TODO</span><h2 id="dashboard-todo-title">待办清单</h2></div><strong id="dashboard-todo-count" class="usage-summary-text"></strong></div><div id="dashboard-todos" class="todo-list"></div></article>
+              <article class="panel-card"><div class="section-head"><div><span class="eyebrow">LIVE OPS</span><h2 id="dashboard-ops-title">实时操作</h2></div><span id="dashboard-ops-note" class="refresh-note">最近 30 条</span></div><div id="dashboard-ops" class="operation-list"></div></article>
+            </div>
+            <article class="panel-card program-strip"><div><span class="eyebrow">QUICK LAUNCH</span><h2 id="dashboard-program-title">最近生成的程序</h2></div><div id="dashboard-programs" class="quick-programs"></div><button class="text-button" data-go="programs">程序管理 →</button></article>
+          </section>
+
+          <section class="page" data-page-view="usage">
+            <div class="hero-grid" id="usage-summary"></div>
+            <div class="usage-toolbar panel-card">
+              <div><span class="eyebrow">USAGE LEDGER</span><h2 id="usage-detail-title">用量明细</h2><p id="usage-detail-note">Claude Code 与 Codex 分开计量，再汇总为本机总量</p></div>
+              <div class="usage-toolbar-actions">
+                <div class="usage-tabs" id="usage-metric-tabs"><button class="active" data-usage-metric="tokens">Token</button><button data-usage-metric="cost">费用</button></div>
+                <div class="usage-tabs" id="usage-view-tabs"><button class="active" data-usage-view="hours">24 小时</button><button data-usage-view="calendar">12 周日历</button></div>
+                <label class="usage-budget-input"><span id="usage-budget-label">5h 预算</span><b>$</b><input id="usage-budget" type="number" min="0" step="1" inputmode="decimal" /></label>
+              </div>
+            </div>
+            <div class="usage-provider-grid" id="usage-provider-grid"></div>
+            <div class="usage-main-grid">
+              <article class="panel-card usage-trend-card">
+                <div class="section-head"><div><span class="eyebrow" id="usage-trend-eyebrow">TODAY · 24 HOURS</span><h2 id="usage-trend-title">用量趋势</h2></div><strong id="usage-trend-summary" class="usage-summary-text"></strong></div>
+                <div id="usage-hours-view"><div class="hour-chart detailed" id="hour-chart"></div><div class="hour-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div></div>
+                <div id="usage-calendar-view" class="hidden"><div class="usage-calendar" id="usage-calendar"></div><div class="usage-calendar-footer"><span id="usage-calendar-summary"></span><span class="calendar-legend"><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i></span></div></div>
+              </article>
+              <article class="panel-card quota-card"><div class="section-head"><div><span class="eyebrow">LIMITS & BUDGET</span><h2 id="usage-quota-title">额度与预算</h2></div></div><div id="usage-quotas" class="usage-quotas"></div></article>
+            </div>
+            <div class="usage-detail-grid">
+              <article class="panel-card model-detail-card"><div class="section-head"><div><span class="eyebrow">BY MODEL</span><h2 id="usage-model-title">按模型明细</h2></div><strong id="usage-model-total" class="usage-summary-text"></strong></div><div id="model-list" class="model-list detailed"></div></article>
+              <div class="usage-side-stack">
+                <article class="panel-card"><div class="section-head"><div><span class="eyebrow">TOKEN CATEGORIES</span><h2 id="usage-token-title">Token 构成</h2></div></div><div id="usage-token-breakdown" class="token-breakdown"></div></article>
+                <article class="panel-card"><div class="section-head"><div><span class="eyebrow">METERING HEALTH</span><h2 id="usage-diagnostics-title">计量状态</h2></div></div><div id="usage-diagnostics" class="diagnostic-list"></div></article>
+              </div>
+            </div>
+          </section>
+
+          <section class="page session-page" data-page-view="sessions">
+            <section class="summary-grid">
+              <article class="summary-card emphasis"><span id="summary-total-label">全部会话</span><strong id="summary-total">—</strong><small id="summary-split">Claude — · Codex —</small></article>
+              <article class="summary-card"><span id="summary-source-label">来源</span><strong id="summary-source">—</strong><small id="summary-source-split">客户端 — · CLI —</small></article>
+              <article class="summary-card"><span id="summary-backup-label">本机备份</span><strong id="summary-backup">—</strong><small id="summary-backup-time">尚未备份</small></article>
+              <article class="backup-card"><div class="backup-copy"><strong id="backup-title">定期备份</strong><small id="backup-note">默认关闭 · 只存本机 · 不上传云端</small></div><label class="switch"><input id="backup-toggle" type="checkbox" /><span></span></label><div class="backup-controls"><select id="backup-interval"><option value="6">每 6 小时</option><option value="12">每 12 小时</option><option value="24">每天</option><option value="72">每 3 天</option><option value="168">每周</option></select><button id="backup-now" class="soft-button">立即备份</button><button id="backup-folder" class="soft-button quiet">打开目录</button></div></article>
+            </section>
+            <div class="workspace">
+              <aside class="library"><div class="library-tools"><input id="search" type="search" placeholder="搜索标题、项目、路径或 Session ID" autocomplete="off" /><div class="filters" id="provider-filters"><button class="active" data-provider="all">全部</button><button data-provider="claude">Claude</button><button data-provider="codex">Codex</button></div><div class="filters compact" id="origin-filters"><button class="active" data-origin="all">全来源</button><button data-origin="desktop">客户端</button><button data-origin="cli">CLI</button><button data-origin="backed-up">已备份</button></div></div><div class="library-head"><strong id="result-count">正在扫描…</strong><span id="scan-time"></span></div><div id="session-list" class="session-list"></div></aside>
+              <section id="detail" class="detail empty-detail"><div class="empty-illustration">⌁</div><h2 id="empty-title">选择一条会话</h2><p id="empty-copy">查看来源、项目、备份状态，并继续或交给另一个 Agent 接管。</p></section>
+            </div>
+          </section>
+
+          <section class="page" data-page-view="runtime">
+            <div class="runtime-head"><div class="hero-grid" id="runtime-summary"></div></div>
+            <article class="panel-card runtime-card"><div class="section-head"><div><span class="eyebrow">LIVE SESSIONS</span><h2 id="runtime-title">活跃 Session</h2></div><span class="refresh-note" id="runtime-refresh">自动刷新</span></div><div id="runtime-session-list" class="runtime-list"></div></article>
+            <div class="runtime-columns">
+              <article class="panel-card runtime-card"><div class="section-head"><div><span class="eyebrow">SESSION BACKGROUND</span><h2 id="runtime-session-bg-title">Session 内后台任务</h2></div><strong id="runtime-session-bg-count" class="usage-summary-text"></strong></div><div id="runtime-session-bg-list" class="runtime-list"></div></article>
+              <article class="panel-card runtime-card"><div class="section-head"><div><span class="eyebrow">SYSTEM PROCESSES</span><h2 id="runtime-process-title">实际运行脚本与 Agent 进程</h2></div><span id="runtime-scan-note" class="refresh-note"></span></div><div id="runtime-process-list" class="process-list"></div></article>
+            </div>
+          </section>
+
+          <section class="page" data-page-view="programs">
+            <div class="program-header"><div><span class="eyebrow">GENERATED BY YOUR AGENTS</span><h2 id="program-title">生成程序管理</h2><p id="program-subtitle">Codex 与 Claude Code 验证过的可运行项目会出现在这里。</p></div><div class="registry-hint"><code>$register-generated-program</code><span id="program-skill-note">真实运行成功后自动登记</span></div></div>
+            <div id="program-list" class="program-grid"></div>
+          </section>
+        </main>
+        <footer class="statusbar"><span id="status">LLMPET 工作台使用本机数据，不上传会话或程序。</span><span id="storage-size"></span></footer>
       </section>
-
-      <main class="workspace">
-        <aside class="library">
-          <div class="library-tools">
-            <input id="search" type="search" placeholder="搜索标题、项目、路径或 Session ID" autocomplete="off" />
-            <div class="filters" id="provider-filters">
-              <button class="active" data-provider="all">全部</button>
-              <button data-provider="claude">Claude</button>
-              <button data-provider="codex">Codex</button>
-            </div>
-            <div class="filters compact" id="origin-filters">
-              <button class="active" data-origin="all">全来源</button>
-              <button data-origin="desktop">客户端</button>
-              <button data-origin="cli">CLI</button>
-              <button data-origin="backed-up">已备份</button>
-            </div>
-          </div>
-          <div class="library-head">
-            <strong id="result-count">正在扫描…</strong>
-            <span id="scan-time"></span>
-          </div>
-          <div id="session-list" class="session-list"></div>
-        </aside>
-
-        <section id="detail" class="detail empty-detail">
-          <div class="empty-illustration">⌁</div>
-          <h2 id="empty-title">选择一条会话</h2>
-          <p id="empty-copy">查看来源、项目、备份状态，并继续或交给另一个 Agent 接管。</p>
-        </section>
-      </main>
-
-      <footer class="statusbar">
-        <span id="status">索引只保存元数据；会话正文仍由 Claude/Codex 管理。</span>
-        <span id="storage-size"></span>
-      </footer>
     </div>
     <script src="archive.js"></script>
   </body>
