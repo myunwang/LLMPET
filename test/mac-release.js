@@ -55,7 +55,7 @@ check('release packaging never falls back to ad-hoc signing', () => {
 });
 
 check('local package carries generated-program registration support', () => {
-  assert.match(packageMac, /hook \.agents/);
+  assert.match(packageMac, /hook \.agents \.claude/);
   assert.match(packageMac, /scripts\/register-generated-program\.js/);
 });
 

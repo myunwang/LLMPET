@@ -38,7 +38,7 @@ const { createCommandDispatcher, routeForSession } = require('./backend/command-
 const { createSessionTakeover } = require('./backend/session-handoff');
 const { createSessionArchive } = require('./backend/session-archive');
 const { createProgramRegistry } = require('./backend/program-registry');
-const { installProgramSkill } = require('./backend/program-skill');
+const { createProgramSkillManager } = require('./backend/program-skill');
 const { createRuntimeMonitor } = require('./backend/runtime-monitor');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
@@ -71,6 +71,7 @@ let commandDispatcher = null;
 let sessionTakeover = null;
 let sessionArchive = null;
 let programRegistry = null;
+let programSkillManager = null;
 let runtimeMonitor = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
@@ -832,12 +833,9 @@ function bootBackend() {
     onChange: (event) => sendArchive('archive:changed', event),
   });
   sessionArchive.start().catch((e) => log('archive', 'startup scan failed:', e.message));
-  try {
-    const installed = installProgramSkill();
-    log('programs', `registration skill installed for ${installed.targets.length} agents`);
-  } catch (error) {
-    log('programs', 'registration skill install failed:', error.message);
-  }
+  // Read-only until the user grants one provider from the Launcher page.
+  // Starting LLMPET must never silently write into an agent's user skill tree.
+  programSkillManager = createProgramSkillManager();
   programRegistry = createProgramRegistry({
     statePath: process.env.LLMPET_PROGRAM_REGISTRY || undefined,
     onChange: (event) => sendArchive('programs:changed', event),
@@ -1119,6 +1117,29 @@ function registerIpc() {
   });
   ipcMain.handle('generated-program-reveal', (_e, id) => programRegistry ? programRegistry.reveal(id) : false);
   ipcMain.handle('generated-program-remove', (_e, id) => programRegistry ? programRegistry.remove(id) : false);
+  ipcMain.handle('program-skills-status', () => programSkillManager ? programSkillManager.status() : []);
+  ipcMain.handle('program-skill-install', (_e, provider) => {
+    try {
+      const result = programSkillManager ? programSkillManager.install(provider) : { ok: false, code: 'not-ready' };
+      log('programs', `skill install provider=${String(provider || '')} ok=${!!result.ok} code=${result.code || '-'}`);
+      sendArchive('program-skills:changed', programSkillManager ? programSkillManager.status() : []);
+      return result;
+    } catch (error) {
+      log('programs', `skill install provider=${String(provider || '')} failed:`, error.message);
+      return { ok: false, code: 'install-failed', message: error.message };
+    }
+  });
+  ipcMain.handle('program-skill-remove', (_e, provider) => {
+    try {
+      const result = programSkillManager ? programSkillManager.remove(provider) : { ok: false, code: 'not-ready' };
+      log('programs', `skill remove provider=${String(provider || '')} ok=${!!result.ok} code=${result.code || '-'}`);
+      sendArchive('program-skills:changed', programSkillManager ? programSkillManager.status() : []);
+      return result;
+    } catch (error) {
+      log('programs', `skill remove provider=${String(provider || '')} failed:`, error.message);
+      return { ok: false, code: 'remove-failed', message: error.message };
+    }
+  });
 
   // 详情面板按内容高度自适应：clamp 到屏幕工作区，阈值防抖避免每次 stats 都抖
   ipcMain.on('set-panel-height', (_e, h) => {

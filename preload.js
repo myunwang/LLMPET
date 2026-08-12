@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('pet', {
   onWorkbenchStats: (cb) => ipcRenderer.on('workbench:stats', (_e, data) => cb(data)),
   onWorkbenchPrice: (cb) => ipcRenderer.on('workbench:price', (_e, data) => cb(data)),
   onProgramsChanged: (cb) => ipcRenderer.on('programs:changed', (_e, data) => cb(data)),
+  onProgramSkillsChanged: (cb) => ipcRenderer.on('program-skills:changed', (_e, data) => cb(data)),
   // 渲染进程 -> 主进程
   getConfig: () => ipcRenderer.invoke('get-config'),
   getStats: () => ipcRenderer.invoke('get-stats'),
@@ -38,6 +39,9 @@ contextBridge.exposeInMainWorld('pet', {
   launchGeneratedProgram: (id) => ipcRenderer.invoke('generated-program-launch', id),
   revealGeneratedProgram: (id) => ipcRenderer.invoke('generated-program-reveal', id),
   removeGeneratedProgram: (id) => ipcRenderer.invoke('generated-program-remove', id),
+  getProgramSkills: () => ipcRenderer.invoke('program-skills-status'),
+  installProgramSkill: (provider) => ipcRenderer.invoke('program-skill-install', provider),
+  removeProgramSkill: (provider) => ipcRenderer.invoke('program-skill-remove', provider),
   setMode: (m) => ipcRenderer.send('set-mode', m),
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),

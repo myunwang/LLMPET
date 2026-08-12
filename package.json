@@ -34,6 +34,7 @@
       "renderer/**",
       "assets/**",
       ".agents/skills/register-generated-program/**",
+      ".claude/skills/register-generated-program/**",
       "scripts/register-generated-program.js",
       "shared/**",
       "hook/**"

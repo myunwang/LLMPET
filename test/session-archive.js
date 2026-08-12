@@ -98,6 +98,9 @@ async function main() {
   for (const id of ['dashboard-todos', 'dashboard-ops', 'runtime-session-list', 'runtime-session-bg-list', 'runtime-process-list']) {
     assert.ok(archiveMarkup.includes(`id="${id}"`), `workbench preserves the old panel block ${id}`);
   }
+  for (const id of ['program-skill-list', 'skill-consent-title', 'skill-privacy-note', 'program-list-count']) {
+    assert.ok(archiveMarkup.includes(`id="${id}"`), `Launcher consent UI keeps ${id}`);
+  }
   for (const field of ['lastOps', 'todos', 'backgroundTasksCount', 'sessionCronsCount', 'bg.items']) {
     assert.ok(archiveRenderer.includes(field), `workbench preserves old panel data ${field}`);
   }
@@ -106,6 +109,8 @@ async function main() {
   }
   assert.ok(archiveRenderer.includes("data-usage-view"), 'usage dashboard can switch between 24h and calendar views');
   assert.ok(archiveRenderer.includes("window.pet.setBudget"), 'usage dashboard keeps the 5h budget control');
+  assert.ok(archiveRenderer.includes('window.pet.installProgramSkill'), 'Launcher installs a provider skill only after a UI action');
+  assert.ok(archiveRenderer.includes('window.pet.removeProgramSkill'), 'Launcher can remove its managed provider skill');
   for (const [provider, file, signature] of [['Claude', 'claude.webp', 'WEBP'], ['Codex', 'codex.png', 'PNG']]) {
     const assetPath = path.join(__dirname, '..', 'assets', 'agents', file);
     const asset = fs.readFileSync(assetPath);
