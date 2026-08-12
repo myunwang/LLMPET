@@ -238,6 +238,27 @@ function buildElicitationChoice(perm, entry) {
   };
 }
 
+// Codex rollout 是只读数据源：LLMPET 展示真实问题/选项，但不伪造
+// app-server 的 request_user_input 响应。点底部按钮会打开原 Codex 会话
+// 进行选择，回答写回 rollout 后 watcher 自动撤下这张卡。
+function buildCodexChoice(choice, entry) {
+  const qs = Array.isArray(choice && choice.questions) ? choice.questions : [];
+  const single = qs.length === 1 ? qs[0] : null;
+  return {
+    kind: 'codex-ask',
+    requestId: choice && choice.id ? String(choice.id) : '',
+    sessionId: entry.id,
+    project: projectName(entry),
+    header: single ? single.header : 'Needs Input',
+    question: single ? single.question : t('perm.askQuestion'),
+    questions: qs,
+    options: single ? single.options.map((o) => ({ label: o.label, desc: o.description })) : [],
+    multi: false,
+    allowInput: true,
+    externalOnly: true,
+  };
+}
+
 // "Claude asked something / wants a reply" → read-only context + 去回复 button.
 function buildContinueChoice(entry) {
   const who = agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
@@ -414,6 +435,10 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
       state = 'waiting';
       reason = 'perm';
       choice = buildPermChoice(perm, e);
+    } else if (e.state === 'notification' && e.agentId === 'codex' && e.codexChoice && !e.headless) {
+      state = 'needsinput';
+      reason = 'reply';
+      choice = buildCodexChoice(e.codexChoice, e);
     } else if (e.state === 'notification' && !e.headless) {
       state = 'needsinput';
       reason = 'reply';
@@ -434,6 +459,10 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
         ? toolLabel(e.lastEventTool || '')
         : null,
       sessionId: e.id,
+      sourcePid: e.sourcePid || null,
+      backgroundTasksCount: Number(e.backgroundTasksCount) || 0,
+      sessionCronsCount: Number(e.sessionCronsCount) || 0,
+      stopHookActive: e.stopHookActive === true,
       headless: e.headless,
       sessionRole: e.sessionRole || null,
       travelAgent: e.travelAgent || null,
@@ -482,6 +511,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 
   return {
     today: todayOut,
+    lifetime: usage.lifetime,
     todayByProvider: usage.todayByProvider,
     window5hByProvider: usage.window5hByProvider,
     window5h: usage.window5h,
@@ -506,7 +536,9 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     codexDiagnostics: (opts && opts.codexUsage && opts.codexUsage.diagnostics) || null,
     lastActivityTs: snapshot.lastActivityTs || 0,
     idleMs: snapshot.idleMs,
-    bg: { running: 0, zombie: 0, total: 0, items: [] },
+    // Old panel and the desktop workbench share the same real OS runtime
+    // inventory.  Session counters alone cannot identify independent scripts.
+    bg: (opts && opts.runtime) || { running: 0, zombie: 0, total: 0, scripts: 0, agents: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
     // Codex 套餐配额（5h/周窗口 used%）——Codex 没有逐 token 价目，配额比 $ 更真实
     codexLimits: (opts && opts.codexLimits) || null,
@@ -623,6 +655,7 @@ module.exports = {
   agentOf,
   buildPermChoice,
   buildElicitationChoice,
+  buildCodexChoice,
   buildPlanChoice,
   buildContinueChoice,
   projectName,

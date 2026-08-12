@@ -9,7 +9,9 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createCodexWatch, toContextUsage, toRateLimits, mapTool } = require('../backend/codex-watch');
+const { createCodexWatch, toContextUsage, toRateLimits, mapTool, parseRequestUserInput } = require('../backend/codex-watch');
+const { createCore } = require('../backend/core');
+const adapter = require('../backend/adapter');
 
 let failures = 0;
 function check(name, fn) {
@@ -72,6 +74,18 @@ check('mapTool：codex 工具名 → 既有词汇', () => {
   assert.strictEqual(mapTool('js'), 'Js');
   assert.strictEqual(mapTool('unknown_tool'), 'unknown_tool');
 });
+check('parseRequestUserInput：Codex function_call arguments 保留问题/选项', () => {
+  const qs = parseRequestUserInput(JSON.stringify({ questions: [{
+    header: '方案', id: 'plan', question: '选哪一个？',
+    options: [{ label: 'A', description: '保守' }, { label: 'B', description: '激进' }],
+  }] }));
+  assert.deepStrictEqual(qs, [{
+    header: '方案', id: 'plan', question: '选哪一个？',
+    options: [{ label: 'A', description: '保守' }, { label: 'B', description: '激进' }],
+    multiSelect: false,
+  }]);
+  assert.deepStrictEqual(parseRequestUserInput('{bad json'), []);
+});
 
 console.log('[C2] backfill：启动时已有的会话静默入库');
 check('meta+尾部 user_message/token_count → seedSession(不发事件)', () => {
@@ -91,6 +105,26 @@ check('meta+尾部 user_message/token_count → seedSession(不发事件)', () =
   assert.strictEqual(core.seeds[0].sessionTitle, '帮我修个 bug');
   assert.strictEqual(core.seeds[0].contextUsage.percent, 10);
   assert.strictEqual(core.updates.length, 0, 'backfill 不应发 updateSession');
+});
+check('启动时 Codex 已在等选择 → 回填真实选择卡', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-pending-choice-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp,
+    meta(UUID_A) +
+    line({ type: 'response_item', payload: {
+      type: 'function_call', name: 'request_user_input', call_id: 'call_backfill',
+      arguments: JSON.stringify({ questions: [{
+        header: '模式', id: 'mode', question: '选哪个模式？',
+        options: [{ label: '快速', description: '先出结果' }, { label: '严格', description: '先验证' }],
+      }] }),
+    } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].state, 'notification');
+  assert.strictEqual(core.seeds[0].codexChoice.id, 'call_backfill');
+  assert.strictEqual(core.seeds[0].codexChoice.questions[0].question, '选哪个模式？');
 });
 
 console.log('[C3] live：运行期间新会话的事件映射');
@@ -207,6 +241,50 @@ check('turn_aborted → TurnAborted(idle)；approval → Notification', () => {
   w.tick();
   const evs = core.updates.map((u) => `${u.event}:${u.state}`);
   assert.deepStrictEqual(evs, ['SessionStart:idle', 'Notification:notification', 'TurnAborted:idle']);
+});
+
+check('Codex request_user_input 进入 LLMPET 选择卡，原端回答后自动清掉', () => {
+  const { root, dir } = mkSessions();
+  const core = createCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-2026-07-11T05-40-00-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B));
+  w.tick();
+  fs.appendFileSync(fp, line({
+    type: 'response_item',
+    payload: {
+      type: 'function_call', name: 'request_user_input', call_id: 'call_choice_1',
+      arguments: JSON.stringify({ questions: [{
+        header: '部署', id: 'deploy', question: '先部署哪个环境？',
+        options: [{ label: '测试环境', description: '风险更低' }, { label: '生产环境', description: '立即上线' }],
+      }] }),
+    },
+  }));
+  w.tick();
+
+  let stats = adapter.buildPetStats(core.buildSnapshot(), [], null);
+  let session = stats.sessions.find((s) => s.sessionId === UUID_B);
+  assert.strictEqual(session.state, 'needsinput');
+  assert.strictEqual(session.choice.kind, 'codex-ask');
+  assert.strictEqual(session.choice.requestId, 'call_choice_1');
+  assert.strictEqual(session.choice.externalOnly, true);
+  assert.strictEqual(session.choice.question, '先部署哪个环境？');
+  assert.deepStrictEqual(session.choice.options, [
+    { label: '测试环境', desc: '风险更低' },
+    { label: '生产环境', desc: '立即上线' },
+  ]);
+
+  fs.appendFileSync(fp, line({
+    type: 'response_item',
+    payload: { type: 'function_call_output', call_id: 'call_choice_1', output: { deploy: { answers: ['测试环境'] } } },
+  }));
+  w.tick();
+  stats = adapter.buildPetStats(core.buildSnapshot(), [], null);
+  session = stats.sessions.find((s) => s.sessionId === UUID_B);
+  assert.strictEqual(session.state, 'working');
+  assert.strictEqual(session.choice, null);
+  core.stopStaleCleanup();
 });
 
 console.log('[C4] 过滤与健壮性');

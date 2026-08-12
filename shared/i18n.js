@@ -26,6 +26,7 @@
     // ── tray ────────────────────────────────────────────────────────────────
     'tray.tooltip': 'LLMPET — Claude Code / Codex 桌宠',
     'tray.panel': '📊 详情面板',
+    'tray.archive': '📚 会话档案馆',
     'tray.showPet': '🐙 显示桌宠',
     'tray.codexPet': '🛰️ Codex 桌宠',
     'tray.settings': '⚙️ 设置',
@@ -171,6 +172,10 @@
     'ask.kindChoice': '选择',
     'ask.needHandling': '需要你处理',
     'ask.goReply': '💬 去这个会话回复 →',
+    'ask.goCodex': '💬 去 Codex 选择',
+    'ask.toCodex': '💬 已带你去 Codex',
+    'ask.codexReplyHint': '在 Codex 里选择；完成后这张卡会自动关闭',
+    'ask.codexMultiple': 'Codex 有 {n} 个问题需要你选择',
 
     // ── session list HUD ────────────────────────────────────────────────────
     'sess.title': '🗂️ 会话',
@@ -184,6 +189,7 @@
     'sess.newClaude': '🚀 新开 Claude',
     'sess.newCodex': '🛰️ 新开 Codex',
     'sess.panel': '📊 详情',
+    'sess.archiveLibrary': '📚 档案',
     'sess.back': '返回会话',
     'sess.close': '关闭',
     'sess.search': '搜索项目、会话或操作…',
@@ -461,6 +467,7 @@
   const en = {
     'tray.tooltip': 'LLMPET — Claude Code / Codex desk pet',
     'tray.panel': '📊 Dashboard',
+    'tray.archive': '📚 Session archive',
     'tray.showPet': '🐙 Show pet',
     'tray.codexPet': '🛰️ Codex pet',
     'tray.settings': '⚙️ Settings',
@@ -598,6 +605,10 @@
     'ask.kindChoice': 'Choose',
     'ask.needHandling': 'Needs you',
     'ask.goReply': '💬 Reply in this session →',
+    'ask.goCodex': '💬 Choose in Codex',
+    'ask.toCodex': '💬 Opened the Codex session',
+    'ask.codexReplyHint': 'Choose in Codex. This card closes automatically when the session continues.',
+    'ask.codexMultiple': 'Codex has {n} questions for you',
 
     'sess.title': '🗂️ Sessions',
     'sess.fallbackName': 'session',
@@ -610,6 +621,7 @@
     'sess.newClaude': '🚀 New Claude',
     'sess.newCodex': '🛰️ New Codex',
     'sess.panel': '📊 Details',
+    'sess.archiveLibrary': '📚 Archive',
     'sess.back': 'Back to sessions',
     'sess.close': 'Close',
     'sess.search': 'Search projects, sessions, or actions…',
@@ -878,6 +890,7 @@
   const ja = {
     'tray.tooltip': 'LLMPET — Claude Code / Codex デスクトップペット',
     'tray.panel': '📊 ダッシュボード',
+    'tray.archive': '📚 セッション保管庫',
     'tray.showPet': '🐙 ペットを表示',
     'tray.codexPet': '🛰️ Codex ペット',
     'tray.settings': '⚙️ 設定',
@@ -1015,6 +1028,10 @@
     'ask.kindChoice': '選択',
     'ask.needHandling': '対応が必要です',
     'ask.goReply': '💬 このセッションで返信 →',
+    'ask.goCodex': '💬 Codex で選択',
+    'ask.toCodex': '💬 Codex セッションを開きました',
+    'ask.codexReplyHint': 'Codex 側で選択すると、このカードは自動的に閉じます',
+    'ask.codexMultiple': 'Codex から {n} 件の質問があります',
 
     'sess.title': '🗂️ セッション',
     'sess.fallbackName': 'セッション',
@@ -1027,6 +1044,7 @@
     'sess.newClaude': '🚀 Claude を新規',
     'sess.newCodex': '🛰️ Codex を新規',
     'sess.panel': '📊 詳細',
+    'sess.archiveLibrary': '📚 保管庫',
     'sess.back': 'セッションに戻る',
     'sess.close': '閉じる',
     'sess.search': 'プロジェクト・セッション・操作を検索…',

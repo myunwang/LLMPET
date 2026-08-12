@@ -450,6 +450,38 @@ async function main() {
     });
   }
 
+  console.log('[R14] Codex 选择对话镜像');
+  {
+    const w = world();
+    const choice = {
+      kind: 'codex-ask', requestId: 'call-r14', externalOnly: true,
+      sessionId: 'codex-session-r14', project: 'LLMPET', header: '方案',
+      question: '你要用哪一个方案？',
+      questions: [{
+        header: '方案', question: '你要用哪一个方案？',
+        options: [{ label: 'A', description: '保守' }, { label: 'B', description: '激进' }],
+      }],
+      options: [{ label: 'A', desc: '保守' }, { label: 'B', desc: '激进' }],
+      allowInput: true,
+    };
+    w.handlers.stats(baseStats({
+      needsinputCount: 1,
+      sessions: [{ sessionId: choice.sessionId, project: 'LLMPET', agent: 'codex', state: 'needsinput', choice }],
+    }));
+    check('Codex 真实问题出现在 LLMPET 问答面板', () => {
+      assert.strictEqual(w.elements('ask-q').textContent, '你要用哪一个方案？');
+      assert.strictEqual(w.elements('ask-opts').children.length, 2);
+      assert.strictEqual(w.elements('ask-term').textContent, '💬 去 Codex 选择');
+    });
+    w.elements('ask-term').dispatch('click');
+    check('点击后按 session ID 打开 Codex，不伪造 permission 回答', () => {
+      assert(w.calls.some((c) => c[0] === 'focusSession' && c[1][0] === 'codex-session-r14'));
+      assert(!w.calls.some((c) => c[0] === 'decidePermission'));
+    });
+    w.handlers.stats(baseStats({ needsinputCount: 0, sessions: [] }));
+    check('Codex 继续后选择卡从快照中消失', () => assert(w.elements('ask').classList.contains('hidden')));
+  }
+
   console.log(`\n${failures === 0 ? '✅ RENDERER ALL PASS' : '❌ ' + failures + ' FAILURE(S)'}`);
   process.exit(failures === 0 ? 0 : 1);
 }

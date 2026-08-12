@@ -23,6 +23,10 @@ assert(/function createPetWindows\(\)/.test(main) && /makePetWindow\('codex'\)/.
 assert(/petMode: 'single'/.test(config) && /skinCodex: 'cat'/.test(config), 'Codex pet settings must have safe defaults');
 assert(/launchCodex: \(\) => ipcRenderer\.send\('launch-codex'\)/.test(preload), 'renderer must be able to launch Codex');
 assert(/closePet: \(\) => ipcRenderer\.send\('close-pet'\)/.test(preload), 'a duo pet must be independently closable');
+assert(/p\.name === 'request_user_input'/.test(read('backend/codex-watch.js')), 'Codex request_user_input function calls must be intercepted before generic tools');
+assert(/function buildCodexChoice\(/.test(read('backend/adapter.js')), 'Codex choice payloads must reach the pet adapter');
+assert(/function renderCodexElicitation\(/.test(read('renderer/pet.js')), 'the pet must render mirrored Codex questions and options');
+assert(/codex:\/\/threads\//.test(main), 'the Codex choice card must deep-link to the owning desktop thread');
 assert(/Claude Code \/ Codex/.test(readme) && /Codex 后端/.test(readme), 'public documentation must describe Codex support');
 assert(pkg.scripts.test.includes('test/codex-watch.js'), 'npm test must execute Codex watcher tests');
 assert(pkg.scripts.test.includes('test/codex-integration.js'), 'npm test must execute the Codex integration contract');

@@ -151,11 +151,19 @@ assert(/else if \(!memeTarget && !takeoverTarget && !lootCapture\)/.test(js)
   && /sessListOpen && !memeTarget && !takeoverTarget && !lootCapture/.test(js),
   'ordinary stats/config refreshes must not rebuild an open sub-page or restart an active loot animation');
 assert(/lastPetSizeRequestSig/.test(js)
-  && /requestSig === lastPetSizeRequestSig/.test(js),
-  'identical popup geometry must not repaint the transparent BrowserWindow');
+  && /!options\.popup && requestSig === lastPetSizeRequestSig/.test(js),
+  'non-popup geometry may use request dedupe without swallowing a live popup repair');
 assert(/function popupFrameAlreadySettled[\s\S]*window\.innerWidth[\s\S]*window\.innerHeight[\s\S]*nextLayout\.vertical === edgeLayout\.vertical/.test(js)
+  && /windowFitsWorkArea\(frame, wa\)/.test(js)
   && /options\.popup && popupFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
-  'an already settled popup must ignore live anchor drift instead of repainting the BrowserWindow');
+  'only an on-screen settled popup may skip a resize; stale request signatures must not block repair');
+assert(/function activeSizedSurface[\s\S]*sessListOpen[\s\S]*askActive[\s\S]*todoPopOpen[\s\S]*bubble/.test(js)
+  && /function settleEdgeLayout[\s\S]*const surface = activeSizedSurface\(\)[\s\S]*if \(surface\) fitPopup\(surface\)/.test(js),
+  'drag release must refit the still-open session, choice, todo, or speech surface instead of collapsing it');
+assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
+  'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
+assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHorizontal/.test(js),
+  'wide popups must switch horizontal anchors during a drag before they leave the work area');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
   && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),

@@ -352,7 +352,7 @@ const reasonWord = (reason) => (reason ? t('reason.' + reason) : t('reason.defau
 const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // 带上 sessionId：否则同一项目下两个并行会话若问了同样的问题，会共用一个 key，
 // 答掉一个就把另一个也标记成 answered 吞掉。choice 各构造处都带 sessionId。
-const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
+const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.requestId || c.permId || '') + '|' + (c.project || '') + '|' + (c.question || '')) || '';
 
 // 动态定高：弹层贴 pet 上方(bottom:200)，把窗口高度调到刚好容纳内容，
 // 避免固定大窗口留白 / 顶屏被下移。先扩到目标宽度再量高度：如果在基础
@@ -510,8 +510,20 @@ function popupFrameAlreadySettled(width, height, nextLayout) {
   const wa = browserWorkArea();
   const targetWidth = Math.min(width, wa.width);
   const targetHeight = Math.min(height, wa.height);
+  const frame = {
+    x: Number(window.screenX) || 0,
+    y: Number(window.screenY) || 0,
+    width: targetWidth,
+    height: targetHeight,
+  };
+  const fullyVisible = window.PetGeometry && window.PetGeometry.windowFitsWorkArea
+    ? window.PetGeometry.windowFitsWorkArea(frame, wa)
+    : frame.x >= wa.x - 1 && frame.y >= wa.y - 1
+      && frame.x + frame.width <= wa.x + wa.width + 1
+      && frame.y + frame.height <= wa.y + wa.height + 1;
   return Math.abs((window.innerWidth || 0) - targetWidth) <= 1
     && Math.abs((window.innerHeight || 0) - targetHeight) <= 1
+    && fullyVisible
     && nextLayout.vertical === edgeLayout.vertical
     && nextLayout.horizontal === edgeLayout.horizontal;
 }
@@ -536,7 +548,11 @@ function setRequestedPetSize(w, h, options = {}) {
   // makes the transparent window briefly repaint even when nothing visible
   // changed, which reads as a flash around every open panel.
   const requestSig = JSON.stringify({ width, height, anchor });
-  if (requestSig === lastPetSizeRequestSig) return false;
+  // For popups the real BrowserWindow is authoritative. A drag/native clamp can
+  // leave it at 520x340 even though our last *requested* signature says
+  // 520x544. popupFrameAlreadySettled() already proved the live frame is wrong,
+  // so never let this historical signature swallow the repair request.
+  if (!options.popup && requestSig === lastPetSizeRequestSig) return false;
   try {
     window.pet.setPetSize(width, height, anchor);
     lastPetSizeRequestSig = requestSig;
@@ -603,11 +619,24 @@ function resetPetSize() {
   return true;
 }
 
+function activeSizedSurface() {
+  if (sessListOpen && !sesslist.classList.contains('hidden')) return sesslist;
+  if (askActive && !askEl.classList.contains('hidden')) return askEl;
+  if (todoPopOpen && !todopop.classList.contains('hidden')) return todopop;
+  if (!bubble.classList.contains('hidden')) return bubble;
+  return null;
+}
+
 function settleEdgeLayout() {
   // No screen coordinates in the headless renderer tests; the real Electron
   // window always has them. This also avoids inventing a desktop in Node.
   if (!petGeometrySnapshot()) return;
-  setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
+  const surface = activeSizedSurface();
+  // Dragging used to collapse the BrowserWindow back to 320x340 even while the
+  // session list / question card / speech bubble was still open. The DOM kept
+  // rendering, but Electron clipped it to that smaller transparent frame.
+  if (surface) fitPopup(surface);
+  else setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
   requestAnimationFrame(reportPetVisualBounds);
 }
 
@@ -628,6 +657,7 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const petScreenY = targetY + before.top;
   const wa = browserWorkArea();
   let nextVertical = edgeLayout.vertical;
+  let nextHorizontal = edgeLayout.horizontal;
 
   if (edgeLayout.vertical === 'above') {
     nextVertical = window.PetGeometry
@@ -654,8 +684,26 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
     }
   }
 
-  if (nextVertical !== edgeLayout.vertical) {
-    setStageEdgeLayout({ ...edgeLayout, vertical: nextVertical });
+  if (window.PetGeometry && window.PetGeometry.chooseDragHorizontalLayout) {
+    let centeredPetOffset = before.left;
+    if (edgeLayout.horizontal !== 'center') {
+      const previous = { ...edgeLayout };
+      setStageEdgeLayout({ ...previous, horizontal: 'center' });
+      centeredPetOffset = el.getBoundingClientRect().left;
+      setStageEdgeLayout(previous);
+    }
+    nextHorizontal = window.PetGeometry.chooseDragHorizontalLayout({
+      current: edgeLayout.horizontal,
+      workArea: wa,
+      targetWindowX: targetX,
+      windowWidth: Math.max(1, window.innerWidth || 320),
+      petScreenX,
+      centeredPetOffset,
+    });
+  }
+
+  if (nextVertical !== edgeLayout.vertical || nextHorizontal !== edgeLayout.horizontal) {
+    setStageEdgeLayout({ vertical: nextVertical, horizontal: nextHorizontal });
   }
   const after = el.getBoundingClientRect();
   const anchoredX = petScreenX - after.left;
@@ -734,7 +782,8 @@ function showAskPanel() {
     renderElicitation(c);
   } else {
     elic = null;
-    if (c.kind === 'perm' && c.permId) renderPerm(c);
+    if (c.kind === 'codex-ask') renderCodexElicitation(c);
+    else if (c.kind === 'perm' && c.permId) renderPerm(c);
     else if (c.kind === 'plan' && c.permId) renderPlan(c);
     else renderContinue(c);
   }
@@ -803,6 +852,43 @@ function renderElicitation(c) {
   askTerm.classList.remove('hidden');
   updateSubmitEnabled(q);
   fitPopup(askEl); // 题目切换后内容高度变了，重新定高
+}
+
+// Codex 选择对话的只读镜像。rollout watcher 能看见真实选项，
+// 但不持有 app-server 的响应通道；因此这里展示完整内容，并引导
+// 用户回到原 Codex 客户端/CLI 点选。原会话继续后快照会自动撤卡。
+function renderCodexElicitation(c) {
+  clearAskBody();
+  askLabel.textContent = t('ask.needsInput');
+  const qs = Array.isArray(c.questions) && c.questions.length
+    ? c.questions
+    : [{ header: c.header || '', question: c.question || t('ask.needAnswer'), options: c.options || [] }];
+  askQhead.textContent = qs.length === 1 ? (qs[0].header || '') : c.header || '';
+  askQ.textContent = qs.length === 1 ? (qs[0].question || c.question || '') : t('ask.codexMultiple', { n: qs.length });
+  askHint.textContent = t('ask.codexReplyHint');
+
+  for (const [index, q] of qs.entries()) {
+    if (qs.length > 1) {
+      const head = document.createElement('div');
+      head.className = 'ask-external-question';
+      head.textContent = `${index + 1}. ${q.header ? `【${q.header}】 ` : ''}${q.question || ''}`;
+      askOpts.appendChild(head);
+    }
+    for (const o of (q.options || [])) {
+      const row = document.createElement('div');
+      row.className = 'ask-opt readonly';
+      const label = typeof o === 'string' ? o : o.label;
+      const desc = typeof o === 'string' ? '' : o.description || o.desc || '';
+      row.innerHTML = '<span class="ask-radio"></span><span class="ask-ot">' +
+        `<span class="ask-ol">${esc(label)}</span>` +
+        (desc ? `<span class="ask-od">${esc(desc)}</span>` : '') + '</span>';
+      askOpts.appendChild(row);
+    }
+  }
+  askFoot.classList.add('hidden');
+  askTerm.textContent = t('ask.goCodex');
+  askTerm.classList.remove('hidden');
+  fitPopup(askEl);
 }
 
 function buildRadioCard(label, desc, value, q) {
@@ -960,6 +1046,13 @@ function submitPerm(key, choice, label) {
 function gotoSession(choice) {
   if (choice.permId) window.pet.decidePermission(choice.permId, 'deny');
   window.pet.focusSession(choice.sessionId || '');
+  // Codex 的选择卡是只读镜像，不能因“打开原会话”就当成
+  // 已回答。保留在队列里，等 rollout 真正继续后 refreshAsk 自动关闭。
+  if (choice.externalOnly) {
+    hideAsk();
+    showBubble(t('ask.toCodex'), 2600);
+    return;
+  }
   finishChoice(choice, t('ask.toTerminal'));
 }
 
@@ -2803,7 +2896,11 @@ function showBubble(text, holdMs = 3200, force = false) {
   bubble.scrollTop = 0; // 重置滚动到顶（上次长气泡可能滚到了下边）
   // 大段文字：把窗口按实际高度撑开（fitPopup 已按屏幕封顶，永远不顶出屏幕；
   // 实在超屏时由 #bubble 自身 overflow-y:auto 内滚动兜底）。
-  fitPopup(bubble);
+  // A status bubble may arrive while a session/takeover/choice panel is open.
+  // Those interactive surfaces own the transparent BrowserWindow geometry;
+  // allowing the background bubble to fit its short content would collapse a
+  // 520x544 takeover page back to 520x340 and visibly cut the page in half.
+  fitPopup(activeSizedSurface() || bubble);
   clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(hideBubble, holdMs);
 }
@@ -3538,6 +3635,11 @@ slNewBtn.addEventListener('click', (e) => {
   closeSessList();
 });
 if (slNewCodexBtn) slNewCodexBtn.addEventListener('click', (e) => { e.stopPropagation(); window.pet.launchCodex(); closeSessList(); });
+document.getElementById('sl-archive').addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.pet.openSessionArchive();
+  closeSessList();
+});
 document.getElementById('sl-panel').addEventListener('click', (e) => { e.stopPropagation(); window.pet.openPanel(); closeSessList(); });
 sesslist.addEventListener('contextmenu', (e) => e.stopPropagation());
 todopop.querySelectorAll('.tp-ops button').forEach((b) => {

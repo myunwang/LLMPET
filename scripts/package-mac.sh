@@ -34,9 +34,11 @@ mkdir -p "$RESOURCES/app"
 
 # 显式清单拷贝(而非"整仓排除法"):仓库里以后加的文档/素材目录不会被误打进 app。
 # hook/ 是安装进 ~/.claude/settings.json 的钩子脚本,shared/ 是主/渲染两端共用的状态表。
-for item in main.js preload.js package.json backend renderer assets shared hook; do
+for item in main.js preload.js package.json backend renderer assets shared hook .agents; do
   cp -R "$ROOT/$item" "$RESOURCES/app/"
 done
+mkdir -p "$RESOURCES/app/scripts"
+cp "$ROOT/scripts/register-generated-program.js" "$RESOURCES/app/scripts/"
 
 /usr/bin/swiftc -O "$ROOT/backend/drag-window.swift" \
   -F /System/Library/PrivateFrameworks \

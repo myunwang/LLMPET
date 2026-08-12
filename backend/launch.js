@@ -306,6 +306,19 @@ async function launchCli(name, opts = {}) {
   return { ok: false, message: 'could not open a terminal' };
 }
 
+async function launchExecutable(command, opts = {}) {
+  const executable = String(command || '').trim();
+  if (!executable || /[\r\n\u0000]/.test(executable)) return { ok: false, message: 'invalid executable' };
+  const workDir = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : os.homedir();
+  const args = Array.isArray(opts.args) ? opts.args.map((arg) => String(arg)) : [];
+  const launchEnv = cleanTerminalLaunchEnv();
+  for (const [bin, binArgs] of buildCandidates(executable, workDir, args, null, opts.keepOpen === true, opts.terminalTitle || '')) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await trySpawn(bin, binArgs, { cwd: workDir, env: launchEnv })) return { ok: true, terminal: bin };
+  }
+  return { ok: false, message: 'could not launch executable' };
+}
+
 const launchClaude = (opts = {}) => launchCli('claude', opts);
 const launchCodex = (opts = {}) => launchCli('codex', opts);
 
@@ -313,6 +326,7 @@ module.exports = {
   launchClaude,
   launchCodex,
   launchCli,
+  launchExecutable,
   closeCliTerminal,
   closeMacTerminalScript,
   travelCliPids,

@@ -18,7 +18,8 @@
 //   task_complete            → Stop(attention) + assistant_last_output → 庆祝+气泡
 //   turn_aborted             → TurnAborted(idle) → 「中断」徽标
 //   context_compacted        → PreCompact(sweeping)
-//   *_approval_request / request_user_input → Notification → 「等你回复」
+//   request_user_input function_call → Notification + 问题/选项 → 镜像 Codex 选择卡
+//   *_approval_request / elicitation_request → Notification → 「等你回复」
 //   token_count              → setContextUsage(上下文%) + 全局 rate_limits(5h 窗口)
 //
 // 过滤：thread_source === 'subagent'（guardian / auto-review 等内部线程）整个
@@ -107,6 +108,37 @@ function clipAssistant(s) {
   const t = String(s || '').trim();
   if (!t) return null;
   return t.length > ASSISTANT_MAX ? t.slice(0, ASSISTANT_MAX) : t;
+}
+
+// Codex 把 request_user_input 记成 response_item/function_call，arguments 是
+// JSON 字符串（而不是 event_msg/request_user_input）。只取 UI 必需的结构，
+// 避免把整个工具 payload 塞进快照。LLMPET 对 Codex rollout 仍是只读：
+// 选项会镜像展示，回答仍由 Codex 客户端/CLI 完成。
+function parseRequestUserInput(raw) {
+  let args = raw;
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args); } catch { return []; }
+  }
+  if (!args || typeof args !== 'object' || !Array.isArray(args.questions)) return [];
+  return args.questions.slice(0, 3).map((q, index) => {
+    if (!q || typeof q !== 'object') return null;
+    const question = typeof q.question === 'string' ? q.question.trim() : '';
+    if (!question) return null;
+    const options = Array.isArray(q.options) ? q.options.slice(0, 4).map((o) => {
+      if (!o || typeof o !== 'object' || typeof o.label !== 'string' || !o.label.trim()) return null;
+      return {
+        label: o.label.trim(),
+        description: typeof o.description === 'string' ? o.description.trim() : '',
+      };
+    }).filter(Boolean) : [];
+    return {
+      header: typeof q.header === 'string' ? q.header.trim() : '',
+      id: typeof q.id === 'string' && q.id ? q.id : `question_${index + 1}`,
+      question,
+      options,
+      multiSelect: q.multiSelect === true || q.multi_select === true,
+    };
+  }).filter(Boolean);
 }
 
 // token_count → core 的 contextUsage 形状。last_token_usage.total_tokens ≈ 当前
@@ -293,6 +325,19 @@ function createCodexWatch(deps) {
     if (type === 'response_item') {
       const pt = p.type;
       if (pt === 'function_call' || pt === 'custom_tool_call') {
+        // request_user_input 是 Codex 内建交互工具，不是一个“正在执行”
+        // 的普通工具。先于通用 function_call 分支截获，否则它只会
+        // 被记成 PreToolUse，问题与选项全部丢失。
+        if (p.name === 'request_user_input') {
+          const questions = parseRequestUserInput(p.arguments);
+          update(t, 'notification', 'Notification', {
+            codexChoice: {
+              id: String(p.call_id || p.id || `codex-choice-${Date.now()}`),
+              questions,
+            },
+          });
+          return;
+        }
         markWork(t);
         t.lastTool = mapTool(p.name);
         update(t, 'working', 'PreToolUse', { toolName: t.lastTool });
@@ -397,7 +442,15 @@ function createCodexWatch(deps) {
       default:
         // 授权/追问类事件（TUI 的 on-request 审批等；名字随版本演进，按后缀匹配）
         if (/approval_request$/.test(et) || et === 'request_user_input' || et === 'elicitation_request') {
-          update(t, 'notification', 'Notification');
+          const questions = et === 'request_user_input' || et === 'elicitation_request'
+            ? parseRequestUserInput(p.arguments || p)
+            : [];
+          update(t, 'notification', 'Notification', questions.length ? {
+            codexChoice: {
+              id: String(p.call_id || p.id || p.request_id || `codex-choice-${Date.now()}`),
+              questions,
+            },
+          } : undefined);
         }
         break;
     }
@@ -434,6 +487,7 @@ function createCodexWatch(deps) {
 
     let title = null;
     let contextUsage = null;
+    const pendingChoices = new Map();
     const start = Math.max(0, size - TAIL_PROBE_BYTES);
     const tail = readBytes(t.fp, start, size - start);
     if (tail) {
@@ -441,8 +495,18 @@ function createCodexWatch(deps) {
       if (start > 0) lines.shift(); // 掐头（可能是半行）
       for (const line of lines) {
         const obj = parseLine(line);
-        if (!obj || obj.type !== 'event_msg') continue;
+        if (!obj) continue;
         const p = obj.payload || {};
+        if (obj.type === 'response_item') {
+          if ((p.type === 'function_call' || p.type === 'custom_tool_call') && p.name === 'request_user_input') {
+            const questions = parseRequestUserInput(p.arguments);
+            if (questions.length) pendingChoices.set(String(p.call_id || p.id || ''), { id: String(p.call_id || p.id || ''), questions });
+          } else if ((p.type === 'function_call_output' || p.type === 'custom_tool_call_output') && p.call_id) {
+            pendingChoices.delete(String(p.call_id));
+          }
+          continue;
+        }
+        if (obj.type !== 'event_msg') continue;
         if (p.type === 'user_message' && !title) title = promptTitle(String(p.message || ''));
         if (p.type === 'token_count') {
           const cu = toContextUsage(p.info);
@@ -452,6 +516,7 @@ function createCodexWatch(deps) {
         }
       }
     }
+    const pendingChoice = [...pendingChoices.values()].pop() || null;
     core.seedSession({
       id: t.sid,
       agentId: 'codex',
@@ -462,6 +527,8 @@ function createCodexWatch(deps) {
       originator: t.originator || null,
       sourcePid: null,
       headless: false,
+      state: pendingChoice ? 'notification' : 'idle',
+      codexChoice: pendingChoice,
       createdAt: mtimeMs,
       updatedAt: mtimeMs,
     });
@@ -622,4 +689,4 @@ function createCodexWatch(deps) {
   return { start, stop, tick, seedRecent, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
 }
 
-module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool };
+module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool, parseRequestUserInput };

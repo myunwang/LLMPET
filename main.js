@@ -28,7 +28,7 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
-const { launchClaude, launchCodex, findCli } = require('./backend/launch');
+const { launchClaude, launchCodex, launchExecutable, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
@@ -36,6 +36,10 @@ const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const { createSessionTakeover } = require('./backend/session-handoff');
+const { createSessionArchive } = require('./backend/session-archive');
+const { createProgramRegistry } = require('./backend/program-registry');
+const { installProgramSkill } = require('./backend/program-skill');
+const { createRuntimeMonitor } = require('./backend/runtime-monitor');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 
@@ -50,6 +54,7 @@ const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
 let petWin = null;      // 主宠窗口：single 模式监控全部；duo 模式代表 Claude
 let petWinCodex = null; // 双宠模式里的 Codex 宠（single 模式为 null）
 let panelWin = null;
+let archiveWin = null;
 let panelH = 0; // 面板当前自适应高度（防抖用）
 let tray = null;
 let core = null;
@@ -64,6 +69,9 @@ let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watch
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
 let sessionTakeover = null;
+let sessionArchive = null;
+let programRegistry = null;
+let runtimeMonitor = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
@@ -108,6 +116,7 @@ function frontendConfig(agent = 'all') {
     archivedSessions: c.archivedSessions,
     lootCapturedSessions: (c.lootCapturedSessions || [])
       .filter((session) => session.expiresAt > Date.now()),
+    sessionArchive: c.sessionArchive,
   };
 }
 
@@ -287,6 +296,58 @@ function openPanel() {
 function closePanel() {
   if (panelWin && !panelWin.isDestroyed()) panelWin.close();
   panelWin = null;
+}
+
+// The archive renderer is now LLMPET's unified desktop workbench. Its session
+// manager keeps the archive contract; the other pages share live stats and the
+// local generated-program registry.
+function openArchive() {
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show();
+    const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.icns'));
+    if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+  }
+  if (archiveWin && !archiveWin.isDestroyed()) {
+    archiveWin.show();
+    archiveWin.focus();
+    if (sessionArchive) sessionArchive.refresh().catch((e) => log('archive', 'refresh failed:', e.message));
+    return;
+  }
+  archiveWin = new BrowserWindow({
+    width: 1220,
+    height: 790,
+    minWidth: 920,
+    minHeight: 620,
+    frame: false,
+    transparent: false,
+    resizable: true,
+    skipTaskbar: false,
+    show: false,
+    backgroundColor: '#18171d',
+    webPreferences: {
+      preload: PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  hardenWindow(archiveWin);
+  archiveWin.loadFile(path.join(__dirname, 'renderer', 'archive.html'));
+  archiveWin.webContents.on('did-finish-load', () => {
+    sendWin(archiveWin, 'archive:config', frontendConfig());
+    if (lastStats) sendWin(archiveWin, 'workbench:stats', lastStats);
+    if (metering) sendWin(archiveWin, 'workbench:price', metering.priceInfo());
+    setTimeout(() => {
+      try { if (archiveWin && !archiveWin.isDestroyed()) { archiveWin.show(); archiveWin.focus(); } } catch {}
+    }, 50);
+    if (sessionArchive) sessionArchive.refresh().catch((e) => log('archive', 'refresh failed:', e.message));
+  });
+  archiveWin.on('closed', () => { archiveWin = null; });
+}
+
+function closeArchive() {
+  if (archiveWin && !archiveWin.isDestroyed()) archiveWin.close();
+  archiveWin = null;
 }
 
 // ── 领地模式(territory) ─────────────────────────────────────────────────────
@@ -621,6 +682,7 @@ function firstAlivePetWin() {
 // sendPet = 发给主宠（领地/授权等主宠专属通道沿用它）；主宠不在则兜底
 function sendPet(channel, payload) { sendWin(firstAlivePetWin(), channel, payload); }
 function sendPanel(channel, payload) { sendWin(panelWin, channel, payload); }
+function sendArchive(channel, payload) { sendWin(archiveWin, channel, payload); }
 
 // 事件按来源 agent 分流：双宠模式 codex 事件归 Codex 宠（不在了就兜底主路），其余归主宠。
 function sendPetEvent(ev) {
@@ -676,6 +738,7 @@ function buildStats(agent = 'all', snapshot = null) {
     codexLimits,
     codexUsage,
     usageProvider: agent === 'codex' ? 'codex' : 'claude',
+    runtime: runtimeMonitor ? runtimeMonitor.snapshot() : null,
   });
   // Travel sessions are already present in the Claude/Codex ledgers, so the
   // machine total is the two provider lifetimes only—never travel + providers.
@@ -702,6 +765,7 @@ function emitStats() {
     sendWin(st.win, 'pet:stats', st.agent === 'all' ? lastStats : buildStats(st.agent, snapshot));
   }
   sendPanel('panel:stats', lastStats);
+  sendArchive('workbench:stats', lastStats);
 }
 
 function scheduleEmit() {
@@ -763,6 +827,35 @@ function bootBackend() {
     openClaudeThread: (sessionId) => shell.openExternal(`claude://claude.ai/epitaxy/${encodeURIComponent(sessionId)}`),
   });
   sessionTakeover = createSessionTakeover();
+  sessionArchive = createSessionArchive({
+    getSettings: () => config.get().sessionArchive,
+    onChange: (event) => sendArchive('archive:changed', event),
+  });
+  sessionArchive.start().catch((e) => log('archive', 'startup scan failed:', e.message));
+  try {
+    const installed = installProgramSkill();
+    log('programs', `registration skill installed for ${installed.targets.length} agents`);
+  } catch (error) {
+    log('programs', 'registration skill install failed:', error.message);
+  }
+  programRegistry = createProgramRegistry({
+    statePath: process.env.LLMPET_PROGRAM_REGISTRY || undefined,
+    onChange: (event) => sendArchive('programs:changed', event),
+    openPath: (target) => shell.openPath(target),
+    revealPath: (target) => shell.showItemInFolder(target),
+    launchCommand: (record) => launchExecutable(record.launch.command, {
+      cwd: record.cwd,
+      args: record.launch.args,
+      keepOpen: true,
+      terminalTitle: `LLMPET · ${record.name}`,
+    }),
+  });
+  programRegistry.start();
+  runtimeMonitor = createRuntimeMonitor({
+    selfPid: process.pid,
+    onChange: () => scheduleEmit(),
+  });
+  runtimeMonitor.start();
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
@@ -801,7 +894,11 @@ function bootBackend() {
         // Codex reprices from its own per-model token ledger — without this the
         // Codex half of the panel would keep the boot-time (built-in) rates.
         if (codexMetering) { try { codexMetering.reloadPricing(); } catch {} }
-        if (metering) sendPanel('panel:price', metering.priceInfo());
+        if (metering) {
+          const priceInfo = metering.priceInfo();
+          sendPanel('panel:price', priceInfo);
+          sendArchive('workbench:price', priceInfo);
+        }
         scheduleEmit();
       },
     });
@@ -940,6 +1037,88 @@ function registerIpc() {
 
   ipcMain.on('open-panel', openPanel);
   ipcMain.on('close-panel', closePanel);
+  ipcMain.on('open-session-archive', openArchive);
+  ipcMain.on('close-session-archive', closeArchive);
+  ipcMain.handle('session-archive-list', async (_e, query) => {
+    if (!sessionArchive) return { sessions: [], total: 0, page: 1, pageSize: 100, summary: null };
+    const archiveSummary = sessionArchive.summary();
+    if (!archiveSummary.lastScanAt || Date.now() - archiveSummary.lastScanAt > 30000) {
+      await sessionArchive.refresh();
+    }
+    const activeIds = core ? [...core.sessions.keys()] : [];
+    return sessionArchive.list({ ...(query || {}), activeIds });
+  });
+  ipcMain.handle('session-archive-settings', async (_e, partial) => {
+    const current = config.get().sessionArchive || {};
+    const next = {
+      backupEnabled: partial && partial.backupEnabled !== undefined
+        ? partial.backupEnabled === true : current.backupEnabled === true,
+      backupIntervalHours: partial && partial.backupIntervalHours !== undefined
+        ? Number(partial.backupIntervalHours) : current.backupIntervalHours,
+    };
+    config.save({ sessionArchive: next });
+    if (sessionArchive) {
+      if (next.backupEnabled && !current.backupEnabled) {
+        sessionArchive.backupNow()
+          .catch((e) => log('archive', 'initial backup failed:', e.message))
+          .finally(() => sessionArchive.schedule());
+      } else sessionArchive.schedule();
+    }
+    return config.get().sessionArchive;
+  });
+  ipcMain.handle('session-archive-backup-now', async () => {
+    if (!sessionArchive) return { ok: false, code: 'not-ready' };
+    return sessionArchive.backupNow();
+  });
+  ipcMain.handle('session-archive-resume', async (_e, key, targetAgent) => {
+    if (!sessionArchive || !sessionTakeover) return { ok: false, code: 'not-ready' };
+    const archived = sessionArchive.get(key);
+    const target = targetAgent === 'codex' ? 'codex' : targetAgent === 'claude' ? 'claude' : '';
+    if (!archived || !archived.sourceAvailable) return { ok: false, code: 'source-missing' };
+    if (!target) return { ok: false, code: 'invalid-provider' };
+    const session = {
+      id: archived.id,
+      agentId: archived.provider,
+      cwd: archived.cwd,
+      transcriptPath: archived.sourcePath,
+      sessionTitle: archived.title,
+      state: 'idle',
+      sourcePid: null,
+      headless: false,
+    };
+    const result = await sessionTakeover.takeOver(session, target, { locale: i18n.getLang() });
+    log('archive', `resume ${archived.key} → ${target} ok=${!!result.ok} code=${result.code || '-'}`);
+    return result;
+  });
+  ipcMain.handle('session-archive-restore', async (_e, key) => {
+    if (!sessionArchive) return { ok: false, code: 'not-ready' };
+    const result = await sessionArchive.restore(key);
+    log('archive', `restore ${String(key || '')} ok=${!!result.ok} code=${result.code || '-'}`);
+    return result;
+  });
+  ipcMain.handle('session-archive-reveal', async (_e, key) => {
+    if (!sessionArchive) return false;
+    const archived = sessionArchive.get(key);
+    const target = archived && (archived.sourceAvailable ? archived.sourcePath : archived.backupPath);
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+  ipcMain.on('session-archive-open-backup', () => {
+    if (!sessionArchive) return;
+    try { fs.mkdirSync(sessionArchive.backupRoot, { recursive: true, mode: 0o700 }); }
+    catch (e) { log('archive', 'create backup folder failed:', e.message); return; }
+    shell.openPath(sessionArchive.backupRoot)
+      .then((error) => { if (error) log('archive', 'open backup folder failed:', error); });
+  });
+  ipcMain.handle('generated-programs-list', () => programRegistry ? programRegistry.list() : []);
+  ipcMain.handle('generated-program-launch', async (_e, id) => {
+    const result = programRegistry ? await programRegistry.launch(id) : { ok: false, code: 'not-ready' };
+    log('programs', `launch ${String(id || '')} ok=${!!result.ok} code=${result.code || '-'}`);
+    return result;
+  });
+  ipcMain.handle('generated-program-reveal', (_e, id) => programRegistry ? programRegistry.reveal(id) : false);
+  ipcMain.handle('generated-program-remove', (_e, id) => programRegistry ? programRegistry.remove(id) : false);
 
   // 详情面板按内容高度自适应：clamp 到屏幕工作区，阈值防抖避免每次 stats 都抖
   ipcMain.on('set-panel-height', (_e, h) => {
@@ -994,7 +1173,16 @@ function registerIpc() {
     permissions.decide(permId, behavior);
   });
   ipcMain.on('focus-session', (_e, sessionId) => {
-    focusSession(core.getSession(sessionId));
+    const session = core.getSession(sessionId);
+    // Codex rollout 没有终端 pid；Desktop 会话必须通过官方
+    // codex:// thread deep link 定位。否则“去 Codex 选择”按钮只会
+    // 调用一个注定失败的 pid focus，看起来完全没反应。
+    if (session && session.agentId === 'codex') {
+      shell.openExternal(`codex://threads/${encodeURIComponent(session.id)}`)
+        .catch((err) => log('main', 'open Codex thread failed:', err.message));
+      return;
+    }
+    focusSession(session);
   });
   // 面板复制会话 id（跨 session 协作：把 id 贴给另一个 agent 去 resume）。
   // 只认自己列出过的会话 id，渲染进程无法借这个通道往剪贴板塞任意内容。
@@ -1310,6 +1498,7 @@ function refreshTrayMenu() {
   tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t('tray.panel'), click: openPanel },
+    { label: t('tray.archive'), click: openArchive },
     { label: t('tray.showPet'), click: () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); } },
     // 复选开关：勾上 = 双宠（Codex 分身出现），取消 = 单宠（一只盯全部后端）
     { label: t('tray.codexPet'), type: 'checkbox', checked: petMode === 'duo',
@@ -1405,9 +1594,16 @@ if (!gotTheLock) {
   log('main', 'another instance holds the lock — quitting');
   app.quit();
 } else {
-  app.on('second-instance', () => { try { for (const st of petStates()) st.win.show(); } catch {} });
+  app.on('second-instance', () => {
+    try { for (const st of petStates()) st.win.show(); } catch {}
+    openArchive();
+  });
   app.whenReady().then(async () => {
-    if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    if (process.platform === 'darwin' && app.dock) {
+      const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.icns'));
+      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+      await app.dock.show();
+    }
     const rival = await findRivalInstance();
     if (rival) {
       log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
@@ -1425,6 +1621,9 @@ if (!gotTheLock) {
     startMemeWatcher();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
+    // LLMPET now has a real desktop library. The initial launch remains pet-only,
+    // while a later Dock click always opens or focuses the archive window.
+    app.on('activate', openArchive);
     log('main', 'LLMPET ready');
   });
 }
@@ -1434,6 +1633,9 @@ app.on('window-all-closed', () => { /* tray app: stay alive */ });
 app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
   try { if (travelManager) travelManager.shutdown(); } catch {}
+  try { if (sessionArchive) sessionArchive.stop(); } catch {}
+  try { if (programRegistry) programRegistry.stop(); } catch {}
+  try { if (runtimeMonitor) runtimeMonitor.stop(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
   try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}

@@ -141,10 +141,17 @@ function createCore(options = {}) {
     setField(s, 'model', f.model);
     setField(s, 'sessionRole', f.sessionRole);
     setField(s, 'travelAgent', f.travelAgent);
+    setField(s, 'backgroundTasksCount', Number(f.backgroundTasksCount) || 0);
+    setField(s, 'sessionCronsCount', Number(f.sessionCronsCount) || 0);
+    if (typeof f.stopHookActive === 'boolean') s.stopHookActive = f.stopHookActive;
     if (typeof f.headless === 'boolean') s.headless = f.headless;
     if (f.sessionTitle != null) s.sessionTitle = f.sessionTitle;
     if (f.contextUsage) s.contextUsage = f.contextUsage;
     if (f.errorType) s.errorType = f.errorType; // last API/server error kind
+    // Codex request_user_input 的只读镜像。它必须跨过 core 进入
+    // adapter，否则 watcher 虽然看见了选择对话，前端只会得到一张
+    // 没有选项的通用“去回复”卡。
+    if (f.codexChoice && typeof f.codexChoice === 'object') s.codexChoice = f.codexChoice;
     // Pending emotion (per-event, one-shot). Adapter consumes it when it ships
     // the user-turn / say event; we clear AFTER consumption (see buildSnapshot
     // does not carry these — they live only on the freshly-updated session
@@ -215,6 +222,10 @@ function createCore(options = {}) {
     }
 
     s.state = resolvedState;
+    // Codex 端回答后，rollout 会继续写 function_call_output / 下一个
+    // 活动事件。只要状态离开 notification，就精确清掉旧卡，
+    // 让用户在 Codex 客户端或 CLI 里选完后 LLMPET 自动关闭弹窗。
+    if (resolvedState !== 'notification' && !f.codexChoice) s.codexChoice = null;
     s.sweepError = false; // 任何真实 hook 事件到达都接管状态，巡检错误标记作废
     s.lastEvent = { rawEvent: event || null, at: now };
     if (f.toolName) s.lastEventTool = f.toolName;
@@ -288,6 +299,7 @@ function createCore(options = {}) {
       contextUsage: s.contextUsage || null,
       assistantLastOutput: typeof s.assistantLastOutput === 'string' ? s.assistantLastOutput : null,
       assistantLastOutputTruncated: !!s.assistantLastOutputTruncated,
+      codexChoice: s.codexChoice || null,
       requiresCompletionAck: !!s.requiresCompletionAck,
       lastEvent: s.lastEvent || null,
       lastEventTool: s.lastEventTool || null,
@@ -303,6 +315,9 @@ function createCore(options = {}) {
       terminalTty: s.terminalTty || null,
       wtHwnd: s.wtHwnd || null,
       ghosttyTerminalId: s.ghosttyTerminalId || null,
+      backgroundTasksCount: Number(s.backgroundTasksCount) || 0,
+      sessionCronsCount: Number(s.sessionCronsCount) || 0,
+      stopHookActive: s.stopHookActive === true,
     };
   }
 

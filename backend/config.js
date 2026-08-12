@@ -28,6 +28,10 @@ const DEFAULTS = Object.freeze({
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
   archivedSessions: [],   // 会话 HUD 归档项（不影响后端任务本身）
   lootCapturedSessions: [], // 掠夺会话快照：限时留在普通会话列表，过期自动隐藏
+  sessionArchive: {       // 全量历史档案馆；备份必须由用户明确开启
+    backupEnabled: false,
+    backupIntervalHours: 24,
+  },
 });
 
 let cache = null;
@@ -104,6 +108,14 @@ function sanitize(raw) {
   out.archivedSessions = sanitizeSessionIds(raw.archivedSessions)
     .filter((id) => !out.pinnedSessions.includes(id));
   out.lootCapturedSessions = sanitizeLootCapturedSessions(raw.lootCapturedSessions);
+  if (raw.sessionArchive && typeof raw.sessionArchive === 'object') {
+    out.sessionArchive = {
+      backupEnabled: raw.sessionArchive.backupEnabled === true,
+      backupIntervalHours: [6, 12, 24, 72, 168].includes(Number(raw.sessionArchive.backupIntervalHours))
+        ? Number(raw.sessionArchive.backupIntervalHours)
+        : DEFAULTS.sessionArchive.backupIntervalHours,
+    };
+  }
   return out;
 }
 
