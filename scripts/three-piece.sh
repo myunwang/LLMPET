@@ -98,9 +98,13 @@ rmdir "$INTEGRATION_WORKTREE"
 KEEP_WORKTREE=1
 
 cleanup_success() {
-  KEEP_WORKTREE=0
+  rm -f "$INTEGRATION_WORKTREE/node_modules"
   git -C "$SOURCE_ROOT" worktree remove "$INTEGRATION_WORKTREE"
-  git -C "$SOURCE_ROOT" branch -d "$INTEGRATION_BRANCH" >/dev/null
+  # The temporary merge commit is promoted to main, not to the source branch
+  # from which this script is running, so normal `branch -d` checks the wrong
+  # HEAD. The exact temporary branch is safe to force-delete after promotion.
+  git -C "$SOURCE_ROOT" branch -D "$INTEGRATION_BRANCH" >/dev/null
+  KEEP_WORKTREE=0
 }
 
 report_failure() {
