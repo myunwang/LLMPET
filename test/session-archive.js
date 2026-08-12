@@ -91,12 +91,19 @@ async function main() {
   assert.deepStrictEqual(invalid.sessionArchive, { backupEnabled: false, backupIntervalHours: 24 });
 
   const archiveRenderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.js'), 'utf8');
-  for (const [provider, file] of [['Claude', 'claude.webp'], ['Codex', 'codex.webp']]) {
+  for (const [provider, file, signature] of [['Claude', 'claude.webp', 'WEBP'], ['Codex', 'codex.png', 'PNG']]) {
     const assetPath = path.join(__dirname, '..', 'assets', 'agents', file);
     const asset = fs.readFileSync(assetPath);
     assert.ok(archiveRenderer.includes(`../assets/agents/${file}`), `archive rows use the supplied ${provider} icon`);
-    assert.strictEqual(asset.subarray(0, 4).toString('ascii'), 'RIFF', `${provider} icon is a WebP RIFF file`);
-    assert.strictEqual(asset.subarray(8, 12).toString('ascii'), 'WEBP', `${provider} icon has a WebP signature`);
+    if (signature === 'WEBP') {
+      assert.strictEqual(asset.subarray(0, 4).toString('ascii'), 'RIFF', `${provider} icon is a WebP RIFF file`);
+      assert.strictEqual(asset.subarray(8, 12).toString('ascii'), 'WEBP', `${provider} icon has a WebP signature`);
+    } else {
+      assert.deepStrictEqual([...asset.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], `${provider} icon has a PNG signature`);
+      assert.strictEqual(asset.readUInt32BE(16), 256, `${provider} icon is tightly resized to 256px`);
+      assert.strictEqual(asset.readUInt32BE(20), 256, `${provider} icon is square`);
+      assert.strictEqual(asset[25], 6, `${provider} icon uses RGBA rather than a baked background`);
+    }
   }
   const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.ok(mainSource.includes("app.on('activate', openArchive)"), 'Dock activation opens the archive');

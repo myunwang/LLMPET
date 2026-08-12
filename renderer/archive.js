@@ -60,7 +60,7 @@ const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"'
 
 const PROVIDER_ICONS = Object.freeze({
   claude: '../assets/agents/claude.webp',
-  codex: '../assets/agents/codex.webp',
+  codex: '../assets/agents/codex.png',
 });
 const providerIcon = (value) => `<img src="${PROVIDER_ICONS[value === 'codex' ? 'codex' : 'claude']}" alt="" draggable="false">`;
 
