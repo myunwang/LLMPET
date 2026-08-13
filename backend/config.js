@@ -1,7 +1,7 @@
 'use strict';
 
 // Persisted app config. Shape matches the frontend contract (preload README §4):
-//   { mode, skin, petPosition, budget5h, muted, permHook }
+//   { mode, skin, petPosition, muted, permHook }
 // Stored atomically under ~/.octopus/config.json.
 
 const fs = require('fs');
@@ -16,7 +16,6 @@ const DEFAULTS = Object.freeze({
   mode: 'pet',            // 'pet' | 'panel' | 'menubar'
   skin: 'mascot',         // 'mascot' | 'pixel' | 'cat'
   petPosition: null,      // {x,y} | null
-  budget5h: 10,           // USD — kept for forward-compat; pricing is deferred
   muted: false,
   permHook: true,         // whether the blocking permission HTTP hook is active
   territory: false,       // 领地模式:发现别的桌宠就顶到屏幕边上(macOS,需辅助功能权限)
@@ -88,7 +87,6 @@ function sanitize(raw) {
   if (raw.petPosition && Number.isFinite(raw.petPosition.x) && Number.isFinite(raw.petPosition.y)) {
     out.petPosition = { x: Math.round(raw.petPosition.x), y: Math.round(raw.petPosition.y) };
   }
-  if (Number.isFinite(raw.budget5h) && raw.budget5h >= 0) out.budget5h = raw.budget5h;
   out.muted = !!raw.muted;
   out.permHook = raw.permHook !== false;
   out.territory = !!raw.territory;

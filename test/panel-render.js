@@ -60,10 +60,10 @@ const stats = {
 const world = createStubWorld();
 world.sandbox.window.pet = {
   onPanelStats: () => {}, onPrice: () => {}, onConfig: () => {},
-  getConfig: () => Promise.resolve({ mode: 'pet', skin: 'mascot', budget5h: 0 }),
+  getConfig: () => Promise.resolve({ mode: 'pet', skin: 'mascot' }),
   getStats: () => Promise.resolve(null),
   setPanelHeight: () => {}, closePanel: () => {},
-  setMode: () => {}, setSkin: () => {}, setBudget: () => {},
+  setMode: () => {}, setSkin: () => {},
 };
 world.sandbox.cancelAnimationFrame = () => {};
 vm.createContext(world.sandbox);
@@ -80,8 +80,8 @@ assert.strictEqual(text('today-cost'), '$61.324', 'today must be Claude + Codex'
 assert.ok(text('today-tokens').startsWith('90.80M tokens'), `got ${text('today-tokens')}`);
 assert.ok(text('today-tokens').endsWith('349 轮'), `turns must sum too: ${text('today-tokens')}`);
 assert.strictEqual(text('today-split'), 'Claude $41.26 · Codex $20.07', 'the split must be visible under the total');
-assert.strictEqual(text('win-cost'), '$89.520');
-assert.strictEqual(text('win-split'), 'Claude $52.72 · Codex $36.80');
+assert.strictEqual(text('win-cost'), '$9783.230');
+assert.strictEqual(text('win-split'), 'Claude $8392.98 · Codex $1390.25');
 
 // ── the Claude-labelled token block stays Claude's own numbers ───────────────
 assert.strictEqual(text('t-cr'), '67.50M', 'the 5m/1h cache rows are Claude semantics, not a blend');
@@ -103,6 +103,14 @@ assert.ok(byModel.includes('缓存输入'), 'Codex rows use the Codex breakdown 
 assert.ok(byModel.includes('1h写'), 'Claude rows keep the cache-TTL template');
 assert.strictEqual((byModel.match(/m-agent/g) || []).length, 3, 'every model row carries an agent badge');
 assert.strictEqual((byModel.match(/fill="#3b82f6"/g) || []).length, 2, 'both Codex rows badge as Codex');
+
+// The product must not present the old fixed 5-hour window as a Codex limit.
+{
+  const markup = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'panel.html'), 'utf8');
+  assert.ok(!markup.includes('id="codex-wrap"'), 'the Codex 5h quota card is removed');
+  assert.ok(!markup.includes('id="budget-wrap"'), 'the 5h reference budget is removed');
+  assert.ok(!markup.includes('5 小时'), 'the usage panel no longer labels a fixed 5-hour window');
+}
 
 // ── each session row carries a copyable session id ───────────────────────────
 {

@@ -52,8 +52,9 @@ assert.strictEqual(normCodexModelName(''), '');
 // ── the cost formula ─────────────────────────────────────────────────────────
 {
   const pricing = loadCodexPricing({ pricingCachePath: '/nope', pricingOverridePath: '/nope' });
-  const { price, exact } = priceForCodex(pricing, 'gpt-5.6-sol');
+  const { price, exact, source } = priceForCodex(pricing, 'gpt-5.6-sol');
   assert.strictEqual(exact, true, 'a shipped Codex model must resolve exactly, even offline');
+  assert.strictEqual(source, 'official', 'shipped model prices come from the verified official table');
 
   // 100k input of which 80k was cached, 10k output.
   const cost = codexUsageCost({ input: 100_000, cachedInput: 80_000, output: 10_000, reasoningOutput: 6_000 }, price);
@@ -79,6 +80,32 @@ assert.strictEqual(normCodexModelName(''), '');
   assert.ok(review.price.input > 0);
   assert.strictEqual(priceForCodex(pricing, 'gpt-5.9-mini').exact, false);
   assert.strictEqual(priceForCodex(pricing, 'gpt-5.9-mini').price.input, 0.75, 'unknown mini → mini tier');
+
+  // GPT-5.4+ long-context pricing is request-scoped. A request over 272K input
+  // charges all of that request's input at 2x and its output at 1.5x.
+  const longCost = codexUsageCost({ input: 300_000, cachedInput: 100_000, output: 10_000 }, price);
+  const longExpected = (200_000 * 5 * 2 + 100_000 * 0.5 * 2 + 10_000 * 30 * 1.5) / 1e6;
+  assert.ok(Math.abs(longCost - longExpected) < 1e-12, 'a >272K request uses the official long-context multiplier');
+
+  // A daily/model aggregate can mix normal and long requests. Only the split
+  // long subset is multiplied; the aggregate total itself is not a request.
+  const mixedCost = codexUsageCost({
+    input: 400_000, cachedInput: 120_000, output: 20_000,
+    longContextInput: 300_000, longContextCachedInput: 100_000, longContextOutput: 10_000,
+  }, price);
+  const mixedExpected = (
+    80_000 * 5 + 20_000 * 0.5 + 10_000 * 30
+    + 200_000 * 5 * 2 + 100_000 * 0.5 * 2 + 10_000 * 30 * 1.5
+  ) / 1e6;
+  assert.ok(Math.abs(mixedCost - mixedExpected) < 1e-12, 'aggregate repricing multiplies only explicitly marked long requests');
+
+  const largeAggregateWithoutLongRequests = codexUsageCost({
+    input: 400_000, cachedInput: 120_000, output: 20_000,
+    longContextInput: 0, longContextCachedInput: 0, longContextOutput: 0,
+  }, price);
+  const largeAggregateExpected = (280_000 * 5 + 120_000 * 0.5 + 20_000 * 30) / 1e6;
+  assert.ok(Math.abs(largeAggregateWithoutLongRequests - largeAggregateExpected) < 1e-12,
+    'a large day/model aggregate with zero long-request splits must never trigger the request threshold');
 }
 
 // ── the ledger records cost, and reprices when the table changes ─────────────
@@ -123,16 +150,26 @@ assert.strictEqual(normCodexModelName(''), '');
   assert.strictEqual(stats.hourlyTok.reduce((a, b) => a + b, 0), 110_000, 'hourlyTok stays tokens');
   assert.ok(Math.abs(stats.window5h.cost - stats.today.cost) < 1e-9, 'a fresh event lands in the 5h window');
 
-  // A synced price table must retroactively re-cost the retained days.
+  // A stale third-party sync must not overwrite a verified official row.
   fs.writeFileSync(path.join(stateDir, 'pricing-cache.json'), JSON.stringify({
     ts: Date.now(),
     openaiModels: { 'gpt-5.6-sol': { input: 10, cachedInput: 1, output: 60 } },
   }));
   meter.reloadPricing();
   const repriced = meter.getStats();
-  assert.ok(Math.abs(repriced.today.cost - expected * 2) < 1e-9, 'reloadPricing must re-cost history, not only new events');
+  assert.ok(Math.abs(repriced.today.cost - expected) < 1e-9, 'synced cache cannot replace a verified official price');
   assert.strictEqual(repriced.today.tokens, 110_000, 'repricing must not touch token counts');
   assert.ok(Math.abs(repriced.hourly.reduce((a, b) => a + b, 0) - repriced.today.cost) < 1e-9, 'hourly cost follows the reprice');
+
+  // An explicit user override is still authoritative and does re-cost retained
+  // history, unlike the third-party cache.
+  fs.writeFileSync(path.join(stateDir, 'pricing.json'), JSON.stringify({
+    codexModels: { 'gpt-5.6-sol': { input: 10, cachedInput: 1, output: 60 } },
+  }));
+  meter.reloadPricing();
+  const overridden = meter.getStats();
+  assert.ok(Math.abs(overridden.today.cost - expected * 2) < 1e-9, 'an explicit user override re-costs retained history');
+  assert.strictEqual(overridden.byModel['gpt-5.6-sol'].priceSource, 'override');
 
   meter.stop();
   fs.rmSync(root, { recursive: true, force: true });

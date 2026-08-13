@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-let config = { mode: 'pet', skin: 'mascot', budget5h: 0 };
+let config = { mode: 'pet', skin: 'mascot' };
 let lastOpKey = null;
 const t = (key, vars) => window.OctoI18n.t(key, vars);
 // Date formatting follows the UI language, not the OS locale.
@@ -40,43 +40,9 @@ function render(s) {
   $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
   $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + t('panel.rounds');
   renderSplit('today-split', s.todayByProvider);
-  $('win-cost').textContent = '$' + (s.window5h.cost || 0).toFixed(3);
-  if (s.window5h.tokens > 0 && s.window5h.resetTs) {
-    $('win-reset').textContent = fmt(s.window5h.tokens) + ' tok · ' + timeStr(s.window5h.resetTs) + t('panel.reset');
-  } else {
-    $('win-reset').textContent = t('panel.windowIdle');
-  }
-  renderSplit('win-split', s.window5hByProvider);
-
-  // 预算条
-  if (config.budget5h > 0) {
-    $('budget-wrap').classList.remove('hidden');
-    const pct = Math.min(100, (s.window5h.cost / config.budget5h) * 100);
-    $('budget-pct').textContent = pct.toFixed(0) + '%';
-    const fill = $('budget-fill');
-    fill.style.width = pct + '%';
-    fill.classList.toggle('warn', pct >= 80);
-  } else {
-    $('budget-wrap').classList.add('hidden');
-  }
-
-  // Codex 套餐额度条（rollout 的 rate_limits；没有 Codex 活动时整块隐藏）
-  const rl = s.codexLimits;
-  if (rl && rl.usedPercent != null) {
-    $('codex-wrap').classList.remove('hidden');
-    const pct = Math.max(0, Math.min(100, rl.usedPercent));
-    $('codex-pct').textContent = pct.toFixed(0) + '%';
-    const cfill = $('codex-fill');
-    cfill.style.width = pct + '%';
-    cfill.classList.toggle('warn', pct >= 80);
-    const bits = [];
-    if (rl.resetsAt) bits.push(timeStr(rl.resetsAt) + t('panel.reset'));
-    if (rl.secondaryUsedPercent != null) bits.push(t('panel.weekWindow') + Math.round(rl.secondaryUsedPercent) + '%');
-    if (rl.planType) bits.push(rl.planType + t('panel.plan'));
-    $('codex-foot').textContent = bits.join(' · ');
-  } else {
-    $('codex-wrap').classList.add('hidden');
-  }
+  $('win-cost').textContent = '$' + (s.lifetime.cost || 0).toFixed(3);
+  $('win-reset').textContent = fmt(s.lifetime.tokens) + ' tokens · ' + s.lifetime.messages + t('panel.rounds');
+  renderSplit('win-split', s.lifetimeByProvider);
 
   // token 明细：这一块的行是 Claude 的缓存 TTL 语义（5m/1h 写入），Codex 没有
   // 对应字段，所以取 Claude 那一侧而不是合计——否则标题和数字对不上。
@@ -434,8 +400,6 @@ function applyConfigUI() {
   document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     b.classList.toggle('active', b.dataset.skin === (config.skin || 'mascot'))
   );
-  const bi = $('budget'); // 预算输入已移到托盘；面板里不再有该元素
-  if (bi && document.activeElement !== bi) bi.value = config.budget5h || '';
 }
 
 // 事件
@@ -487,14 +451,6 @@ document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     window.pet.setSkin(b.dataset.skin);
   })
 );
-{ // 预算输入已移到托盘；面板存在旧元素时才接线（向后兼容）
-  const bi = $('budget');
-  if (bi) bi.addEventListener('change', (e) => {
-    config.budget5h = Number(e.target.value) || 0;
-    window.pet.setBudget(config.budget5h);
-  });
-}
-
 // 视图切换：24h / 日历
 document.querySelectorAll('.view-tabs .vt').forEach((b) =>
   b.addEventListener('click', () => {

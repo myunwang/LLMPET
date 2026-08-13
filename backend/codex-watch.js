@@ -20,7 +20,7 @@
 //   context_compacted        → PreCompact(sweeping)
 //   request_user_input function_call → Notification + 问题/选项 → 镜像 Codex 选择卡
 //   *_approval_request / elicitation_request → Notification → 「等你回复」
-//   token_count              → setContextUsage(上下文%) + 全局 rate_limits(5h 窗口)
+//   token_count              → setContextUsage(上下文%) + 原始 rate_limits 兼容解析
 //
 // 过滤：thread_source === 'subagent'（guardian / auto-review 等内部线程）整个
 // 文件跳过——它们不是用户会话，会把会话列表刷成审计日志。
@@ -157,7 +157,8 @@ function toContextUsage(info) {
   return out;
 }
 
-// rate_limits → 面板/芯片要的极简形状（Codex 的 5h/周窗口配额，比 $ 更贴近套餐现实）
+// rate_limits → 兼容旧 rollout 的极简形状。LLMPET 不再把它展示为固定
+// 5 小时限制；保留解析仅供协议兼容和独立诊断。
 function toRateLimits(rl) {
   if (!rl || typeof rl !== 'object') return null;
   const p = rl.primary || {};

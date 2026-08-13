@@ -22,6 +22,7 @@ const second = normalizeUsage({
 });
 assert.deepStrictEqual(deltaUsage(first, second), {
   tokens: 180, input: 150, output: 30, cachedInput: 90, reasoningOutput: 10, cacheWrite: 0,
+  longContextInput: 0, longContextCachedInput: 0, longContextOutput: 0,
 });
 assert.strictEqual(first.tokens, first.input + first.output);
 assert(first.cachedInput <= first.input, 'cached input is a subset, not extra total tokens');

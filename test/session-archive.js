@@ -92,7 +92,7 @@ async function main() {
 
   const archiveRenderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.js'), 'utf8');
   const archiveMarkup = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'archive.html'), 'utf8');
-  for (const id of ['usage-provider-grid', 'usage-calendar', 'usage-quotas', 'usage-token-breakdown', 'usage-diagnostics']) {
+  for (const id of ['usage-provider-grid', 'usage-calendar', 'usage-token-breakdown', 'usage-diagnostics']) {
     assert.ok(archiveMarkup.includes(`id="${id}"`), `detailed workbench usage view keeps ${id}`);
   }
   for (const id of ['dashboard-todos', 'dashboard-ops', 'runtime-session-list', 'runtime-session-bg-list', 'runtime-process-list']) {
@@ -104,11 +104,13 @@ async function main() {
   for (const field of ['lastOps', 'todos', 'backgroundTasksCount', 'sessionCronsCount', 'bg.items']) {
     assert.ok(archiveRenderer.includes(field), `workbench preserves old panel data ${field}`);
   }
-  for (const field of ['todayByProvider', 'window5hByProvider', 'codexLimits', 'cacheWrite5m', 'cachedInput', 'reasoningOutput', 'codexDiagnostics']) {
+  for (const field of ['todayByProvider', 'lifetimeByProvider', 'cacheWrite5m', 'cachedInput', 'reasoningOutput', 'codexDiagnostics']) {
     assert.ok(archiveRenderer.includes(field), `detailed usage renderer keeps ${field}`);
   }
   assert.ok(archiveRenderer.includes("data-usage-view"), 'usage dashboard can switch between 24h and calendar views');
-  assert.ok(archiveRenderer.includes("window.pet.setBudget"), 'usage dashboard keeps the 5h budget control');
+  assert.ok(!archiveMarkup.includes('id="usage-quotas"'), 'the old 5h quota block is removed from the desktop dashboard');
+  assert.ok(!archiveMarkup.includes('id="usage-budget"'), 'the old 5h budget input is removed from the desktop dashboard');
+  assert.ok(!archiveRenderer.includes('window.pet.setBudget'), 'the desktop dashboard no longer writes a 5h budget');
   assert.ok(archiveRenderer.includes('window.pet.installProgramSkill'), 'Launcher installs a provider skill only after a UI action');
   assert.ok(archiveRenderer.includes('window.pet.removeProgramSkill'), 'Launcher can remove its managed provider skill');
   for (const [provider, file, signature] of [['Claude', 'claude.webp', 'WEBP'], ['Codex', 'codex.png', 'PNG']]) {

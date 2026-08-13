@@ -362,6 +362,7 @@ function tagModels(byModel, agent) {
       agent,
       ...(row && row.unitPrice ? { unitPrice: { ...row.unitPrice } } : {}),
       ...(row && typeof row.priceExact === 'boolean' ? { priceExact: row.priceExact } : {}),
+      ...(row && row.priceSource ? { priceSource: row.priceSource } : {}),
     };
   }
   return out;
@@ -375,6 +376,8 @@ function combineUsage(claudeStats, codexStats, provider) {
 
   const claudeToday = providerDay(claude && claude.today);
   const codexToday = providerDay(codex && codex.today);
+  const claudeLifetime = providerDay(claude && claude.lifetime);
+  const codexLifetime = providerDay(codex && codex.lifetime);
   const claudeWindow = (claude && claude.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   const codexWindow = (codex && codex.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   return {
@@ -386,7 +389,8 @@ function combineUsage(claudeStats, codexStats, provider) {
     hourly: addHours(claude && claude.hourly, codex && codex.hourly),
     hourlyTok: addHours(claude && claude.hourlyTok, codex && codex.hourlyTok),
     daily: addCalendars(claude && claude.daily, codex && codex.daily),
-    lifetime: addDay(providerDay(claude && claude.lifetime), providerDay(codex && codex.lifetime)),
+    lifetime: addDay(claudeLifetime, codexLifetime),
+    lifetimeByProvider: { claude: claudeLifetime, codex: codexLifetime },
   };
 }
 
@@ -546,8 +550,6 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     // inventory.  Session counters alone cannot identify independent scripts.
     bg: (opts && opts.runtime) || { running: 0, zombie: 0, total: 0, scripts: 0, agents: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
-    // Codex 套餐配额（5h/周窗口 used%）——Codex 没有逐 token 价目，配额比 $ 更真实
-    codexLimits: (opts && opts.codexLimits) || null,
     codexUsage: (opts && opts.codexUsage) || null,
     usageProvider: (opts && opts.usageProvider) || 'claude',
     ts: snapshot.ts,

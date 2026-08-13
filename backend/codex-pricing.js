@@ -10,8 +10,10 @@
 // Adding cached input or reasoning output on top would double-bill them, which is
 // why both are tracked separately but never summed into the charged base.
 //
-// Priority, same as the Claude side: user override (~/.octopus/pricing.json,
-// "codexModels" map) > LiteLLM sync cache (openaiModels) > built-ins below.
+// Priority: user override (~/.octopus/pricing.json, "codexModels" map) >
+// official built-ins below > LiteLLM sync cache (openaiModels) > tier fallback.
+// A third-party cache is useful for unknown models, but must never silently
+// replace an official price for a model LLMPET already knows.
 
 const fs = require('fs');
 const os = require('os');
@@ -34,14 +36,14 @@ const DEFAULT_CODEX_PRICING = {
 // Built-in exact prices so a first run (or an offline machine) still bills the
 // models Codex actually ships with, instead of falling back to the tier guess.
 const BUILTIN_CODEX_MODELS = {
-  'gpt-5.6':       { input: 5,    cachedInput: 0.5,   output: 30 },
-  'gpt-5.6-sol':   { input: 5,    cachedInput: 0.5,   output: 30 },
-  'gpt-5.6-terra': { input: 2,    cachedInput: 0.2,   output: 12 },
-  'gpt-5.6-luna':  { input: 0.2,  cachedInput: 0.02,  output: 1.2 },
-  'gpt-5.5':       { input: 5,    cachedInput: 0.5,   output: 30 },
+  'gpt-5.6':       { input: 5,    cachedInput: 0.5,   output: 30,  longContextThreshold: 272_000 },
+  'gpt-5.6-sol':   { input: 5,    cachedInput: 0.5,   output: 30,  longContextThreshold: 272_000 },
+  'gpt-5.6-terra': { input: 2,    cachedInput: 0.2,   output: 12,  longContextThreshold: 272_000 },
+  'gpt-5.6-luna':  { input: 0.2,  cachedInput: 0.02,  output: 1.2, longContextThreshold: 272_000 },
+  'gpt-5.5':       { input: 5,    cachedInput: 0.5,   output: 30,  longContextThreshold: 272_000 },
   'gpt-5.5-pro':   { input: 30,   cachedInput: 30,    output: 180 },
-  'gpt-5.4':       { input: 2.5,  cachedInput: 0.25,  output: 15 },
-  'gpt-5.4-pro':   { input: 30,   cachedInput: 30,    output: 180 },
+  'gpt-5.4':       { input: 2.5,  cachedInput: 0.25,  output: 15,  longContextThreshold: 272_000 },
+  'gpt-5.4-pro':   { input: 30,   cachedInput: 30,    output: 180, longContextThreshold: 272_000 },
   'gpt-5.3-codex': { input: 1.75, cachedInput: 0.175, output: 14 },
   'gpt-5.2-codex': { input: 1.75, cachedInput: 0.175, output: 14 },
   'gpt-5.1-codex': { input: 1.25, cachedInput: 0.125, output: 10 },
@@ -75,8 +77,14 @@ function normalizeCodexRow(row, fallback = DEFAULT_CODEX_PRICING.default) {
   const cachedInput = Number.isFinite(row && row.cachedInput) ? row.cachedInput : input * 0.1;
   const output = Number.isFinite(row && row.output) ? row.output : fallback.output;
   const out = { input, cachedInput, output };
-  if (Number.isFinite(row && row.contextWindow) && row.contextWindow > 0) {
-    out.contextWindow = Math.floor(row.contextWindow);
+  const contextWindow = Number.isFinite(row && row.contextWindow) ? row.contextWindow : fallback.contextWindow;
+  if (Number.isFinite(contextWindow) && contextWindow > 0) {
+    out.contextWindow = Math.floor(contextWindow);
+  }
+  const longContextThreshold = Number.isFinite(row && row.longContextThreshold)
+    ? row.longContextThreshold : fallback.longContextThreshold;
+  if (Number.isFinite(longContextThreshold) && longContextThreshold > 0) {
+    out.longContextThreshold = Math.floor(longContextThreshold);
   }
   return out;
 }
@@ -86,21 +94,28 @@ function loadCodexPricing(options = {}) {
   const overridePath = options.pricingOverridePath || PRICING_OVERRIDE_PATH;
   const out = JSON.parse(JSON.stringify(DEFAULT_CODEX_PRICING));
   out._models = {};
-  for (const [id, row] of Object.entries(BUILTIN_CODEX_MODELS)) {
-    out._models[id] = normalizeCodexRow(row);
-  }
-  // layer 1: synced cache (openaiModels written by pricing-sync)
+  out._sources = {};
+  // layer 1: synced cache (openaiModels written by pricing-sync). This fills
+  // models not yet present in the bundled official table.
   try {
     const c = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
     if (c && c.openaiModels && typeof c.openaiModels === 'object') {
       for (const [id, row] of Object.entries(c.openaiModels)) {
         if (row && typeof row === 'object' && Number.isFinite(row.input)) {
-          out._models[normCodexModelName(id)] = normalizeCodexRow(row);
+          const key = normCodexModelName(id);
+          out._models[key] = normalizeCodexRow(row);
+          out._sources[key] = 'synced';
         }
       }
     }
   } catch {}
-  // layer 2: user override (~/.octopus/pricing.json → "codexModels") — wins.
+  // layer 2: exact prices verified against OpenAI's model pages — these beat
+  // a stale or incorrect third-party cache.
+  for (const [id, row] of Object.entries(BUILTIN_CODEX_MODELS)) {
+    out._models[id] = normalizeCodexRow(row);
+    out._sources[id] = 'official';
+  }
+  // layer 3: explicit user override — always wins.
   try {
     const raw = JSON.parse(fs.readFileSync(overridePath, 'utf8'));
     const models = raw && raw.codexModels;
@@ -109,6 +124,7 @@ function loadCodexPricing(options = {}) {
         const k = normCodexModelName(id);
         if (k && row && typeof row === 'object') {
           out._models[k] = normalizeCodexRow(row, out._models[k] || DEFAULT_CODEX_PRICING.default);
+          out._sources[k] = 'override';
         }
       }
     }
@@ -130,14 +146,22 @@ function priceForCodex(pricing, model) {
   const id = normCodexModelName(model);
   const models = (pricing && pricing._models) || {};
   if (id && models[id] && !INTERNAL_PROFILE_IDS.has(id)) {
-    return { price: normalizeCodexRow(models[id]), exact: true };
+    return {
+      price: normalizeCodexRow(models[id]),
+      exact: true,
+      source: (pricing && pricing._sources && pricing._sources[id]) || 'exact',
+    };
   }
   const tier = id.includes('-pro') ? 'pro'
     : id.includes('nano') ? 'nano'
     : id.includes('mini') ? 'mini'
     : id.includes('codex') ? 'codex'
     : 'default';
-  return { price: normalizeCodexRow((pricing && pricing[tier]) || DEFAULT_CODEX_PRICING[tier]), exact: false };
+  return {
+    price: normalizeCodexRow((pricing && pricing[tier]) || DEFAULT_CODEX_PRICING[tier]),
+    exact: false,
+    source: 'estimated',
+  };
 }
 
 // Cost of one usage delta. Cached input is discounted, not additive; reasoning
@@ -145,9 +169,38 @@ function priceForCodex(pricing, model) {
 function codexUsageCost(usage, price) {
   const u = usage || {};
   const p = normalizeCodexRow(price);
-  const cachedInput = num(u.cachedInput);
-  const freshInput = Math.max(0, num(u.input) - cachedInput);
-  return (freshInput * p.input + cachedInput * p.cachedInput + num(u.output) * p.output) / 1e6;
+  const input = num(u.input);
+  const cachedInput = Math.min(input, num(u.cachedInput));
+  const freshInput = input - cachedInput;
+  // OpenAI prices GPT-5.4+ requests above 272K input tokens at 2x input
+  // (including cached input) and 1.5x output for the full request.
+  // Aggregated ledger rows always carry these split fields, even when every
+  // request was below the threshold and all three values are zero. Checking
+  // their numeric value made a 1.8B-token day look like one giant request and
+  // incorrectly doubled the whole day. Presence, not >0, distinguishes an
+  // aggregate from the one-request objects used by callers/tests.
+  const explicitlySplit = Object.prototype.hasOwnProperty.call(u, 'longContextInput')
+    || Object.prototype.hasOwnProperty.call(u, 'longContextCachedInput')
+    || Object.prototype.hasOwnProperty.call(u, 'longContextOutput');
+  const wholeRequestIsLong = !explicitlySplit
+    && num(p.longContextThreshold) > 0
+    && input > p.longContextThreshold;
+  const longInput = explicitlySplit ? Math.min(input, num(u.longContextInput))
+    : (wholeRequestIsLong ? input : 0);
+  const longCachedInput = explicitlySplit
+    ? Math.min(longInput, cachedInput, num(u.longContextCachedInput))
+    : (wholeRequestIsLong ? cachedInput : 0);
+  const longFreshInput = Math.min(freshInput, Math.max(0, longInput - longCachedInput));
+  const longOutput = explicitlySplit ? Math.min(num(u.output), num(u.longContextOutput))
+    : (wholeRequestIsLong ? num(u.output) : 0);
+  return (
+    (freshInput - longFreshInput) * p.input
+    + longFreshInput * p.input * 2
+    + (cachedInput - longCachedInput) * p.cachedInput
+    + longCachedInput * p.cachedInput * 2
+    + (num(u.output) - longOutput) * p.output
+    + longOutput * p.output * 1.5
+  ) / 1e6;
 }
 
 module.exports = {

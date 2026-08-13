@@ -26,21 +26,11 @@
           <div class="stat-split" id="today-split"></div>
         </div>
         <div class="stat">
-          <div class="stat-label" data-i18n="panel.last5h">本地滚动 5 小时（全部）</div>
+          <div class="stat-label" data-i18n="panel.lifetimeAll">本机累计 API 等价（全部）</div>
           <div class="stat-value" id="win-cost">$0.000</div>
-          <div class="stat-foot" id="win-reset" data-i18n="panel.windowIdle">窗口空闲</div>
+          <div class="stat-foot" id="win-reset">0 tokens</div>
           <div class="stat-split" id="win-split"></div>
         </div>
-      </section>
-
-      <!-- Codex 套餐窗口用量（有 Codex 会话时显示；来自 rollout 的 rate_limits） -->
-      <section id="codex-wrap" class="budget hidden">
-        <div class="budget-head">
-          <span data-i18n="panel.codexQuota">🛰️ Codex 额度（5h 窗口）</span>
-          <span id="codex-pct">0%</span>
-        </div>
-        <div class="bar"><div id="codex-fill" class="bar-fill codex"></div></div>
-        <div class="stat-foot" id="codex-foot"></div>
       </section>
 
       <section id="codex-usage" class="grid hidden">
@@ -54,14 +44,6 @@
           <div class="stat-value" id="codex-lifetime">0</div>
           <div class="stat-foot" id="codex-lifetime-detail"></div>
         </div>
-      </section>
-
-      <section id="budget-wrap" class="budget hidden">
-        <div class="budget-head">
-          <span data-i18n="panel.budget5h">5h 预算</span>
-          <span id="budget-pct">0%</span>
-        </div>
-        <div class="bar"><div id="budget-fill" class="bar-fill"></div></div>
       </section>
 
       <section class="block" id="todo-block">

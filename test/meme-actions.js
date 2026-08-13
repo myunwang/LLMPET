@@ -408,7 +408,7 @@ async function main() {
 
   const stats = (over = {}) => ({
     today: { cost: 0 },
-    window5h: { cost: 0 },
+    lifetime: { cost: 0 },
     sessions: [],
     bg: { zombie: 0 },
     waitingCount: 0,

@@ -51,17 +51,15 @@
               <div class="usage-toolbar-actions">
                 <div class="usage-tabs" id="usage-metric-tabs"><button class="active" data-usage-metric="tokens">Token</button><button data-usage-metric="cost">费用</button></div>
                 <div class="usage-tabs" id="usage-view-tabs"><button class="active" data-usage-view="hours">24 小时</button><button data-usage-view="calendar">12 周日历</button></div>
-                <label class="usage-budget-input"><span id="usage-budget-label">5h 预算</span><b>$</b><input id="usage-budget" type="number" min="0" step="1" inputmode="decimal" /></label>
               </div>
             </div>
             <div class="usage-provider-grid" id="usage-provider-grid"></div>
-            <div class="usage-main-grid">
+            <div class="usage-main-grid single">
               <article class="panel-card usage-trend-card">
                 <div class="section-head"><div><span class="eyebrow" id="usage-trend-eyebrow">TODAY · 24 HOURS</span><h2 id="usage-trend-title">用量趋势</h2></div><strong id="usage-trend-summary" class="usage-summary-text"></strong></div>
                 <div id="usage-hours-view"><div class="hour-chart detailed" id="hour-chart"></div><div class="hour-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div></div>
                 <div id="usage-calendar-view" class="hidden"><div class="usage-calendar" id="usage-calendar"></div><div class="usage-calendar-footer"><span id="usage-calendar-summary"></span><span class="calendar-legend"><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i></span></div></div>
               </article>
-              <article class="panel-card quota-card"><div class="section-head"><div><span class="eyebrow">LIMITS & BUDGET</span><h2 id="usage-quota-title">额度与预算</h2></div></div><div id="usage-quotas" class="usage-quotas"></div></article>
             </div>
             <div class="usage-detail-grid">
               <article class="panel-card model-detail-card"><div class="section-head"><div><span class="eyebrow">BY MODEL</span><h2 id="usage-model-title">按模型明细</h2></div><strong id="usage-model-total" class="usage-summary-text"></strong></div><div id="model-list" class="model-list detailed"></div></article>

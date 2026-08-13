@@ -6,6 +6,7 @@
 // Run: node test/state-smoke.js
 
 const assert = require('assert');
+const vm = require('vm');
 const { loadRenderer } = require('./dom-stub');
 const States = require('../shared/states');
 
@@ -21,7 +22,7 @@ const STATE_WORDS = States.RENDER_STATE_WORDS;
 
 function baseStats(over = {}) {
   return {
-    today: { cost: 0 }, window5h: { cost: 0 }, sessions: [], bg: { zombie: 0 },
+    today: { cost: 0 }, lifetime: { cost: 0 }, sessions: [], bg: { zombie: 0 },
     waitingCount: 0, needsinputCount: 0, workingCount: 0, jugglingCount: 0,
     sweepingCount: 0, thinkingCount: 0, loafingCount: 0, errorCount: 0, idleMs: 1000,
     ...over,
@@ -38,6 +39,26 @@ const catSrc = (w) => w.elements('cat-img').getAttribute('src');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  console.log('[R-1] 桌宠会话板 Session ID');
+  {
+    const w = world();
+    const fullId = '019fc6b1-fd00-7a21-9c33-2b7e51aa1f04';
+    const row = vm.runInContext(`(() => {
+      const row = createSessRow();
+      updateSessRow(row, {
+        project: 'copy-session-test', agent: 'codex', state: 'idle',
+        sessionId: '${fullId}', badge: null,
+      });
+      return row;
+    })()`, w.sandbox);
+    check('会话行恢复 Session ID', () => assert.strictEqual(row._parts.sessionId.textContent, 'ID 019fc6b1…1f04 ⧉'));
+    check('悬停可看到完整 Session ID', () => assert(row._parts.sessionId.title.startsWith(fullId)));
+    row._parts.sessionId.dispatch('click');
+    await sleep(0);
+    check('点击复制的是完整 Session ID', () => assert(w.calls.some((c) => c[0] === 'copySessionId' && c[1][0] === fullId)));
+    check('复制成功有即时反馈', () => assert(row._parts.sessionId.classList.contains('copied')));
+  }
+
   console.log('[R0] 状态词表单一来源一致性');
   {
     // 后端 VALID_STATES（core 接受的状态）必须全部落在渲染端 STATE_WORDS 里，

@@ -10,9 +10,10 @@
 // Cached input and reasoning output are subsets of input/output, so they are
 // reported separately but never added on top of total_tokens.
 //
-// Every event is priced through codex-pricing.js (OpenAI rates synced from the
-// same public LiteLLM table as the Claude side). Before that this ledger counted
-// tokens and billed them at $0, so a Codex-heavy day showed no spend at all.
+// Every event is priced through codex-pricing.js. Known models use the verified
+// official table; a synced third-party row is only a fallback for unknown ids.
+// Before that this ledger counted tokens and billed them at $0, so a Codex-heavy
+// day showed no spend at all.
 
 const fs = require('fs');
 const fsp = fs.promises;
@@ -25,7 +26,7 @@ const { loadCodexPricing, priceForCodex, codexUsageCost } = require('./codex-pri
 const SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 const STATE_DIR = path.join(os.homedir(), '.octopus');
 const STATE_PATH = path.join(STATE_DIR, 'codex-usage.json');
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_KEEP_DAYS = 95;
 const WINDOW_MS = 5 * 60 * 60 * 1000;                 // matches the Claude ledger
@@ -42,6 +43,7 @@ function emptyUsage() {
   return {
     tokens: 0, input: 0, output: 0, cachedInput: 0,
     reasoningOutput: 0, cacheWrite: 0,
+    longContextInput: 0, longContextCachedInput: 0, longContextOutput: 0,
   };
 }
 
@@ -254,7 +256,13 @@ function createCodexMetering(options = {}) {
     if (num(delta.tokens) <= 0) return;
     const modelKey = model || 'unknown';
     const { price, exact } = priceForCodex(pricing, modelKey);
-    const cost = codexUsageCost(delta, price);
+    const billable = { ...delta };
+    if (num(price.longContextThreshold) > 0 && num(delta.input) > price.longContextThreshold) {
+      billable.longContextInput = num(delta.input);
+      billable.longContextCachedInput = num(delta.cachedInput);
+      billable.longContextOutput = num(delta.output);
+    }
+    const cost = codexUsageCost(billable, price);
     if (!exact) {
       const estimates = state.diagnostics.estimatedModels || (state.diagnostics.estimatedModels = {});
       estimates[modelKey] = num(estimates[modelKey]) + 1;
@@ -262,7 +270,7 @@ function createCodexMetering(options = {}) {
 
     const key = dayKey(ts);
     const day = (state.daily[key] = state.daily[key] || emptyDay());
-    addUsage(day, delta, 1, cost);
+    addUsage(day, billable, 1, cost);
     const hour = new Date(ts).getHours();
     // hourlyByDay is cost (what the panel's 24h chart plots for Claude too);
     // hourlyTokensByDay keeps the token view the chart can toggle to.
@@ -272,7 +280,7 @@ function createCodexMetering(options = {}) {
     hourTokens[hour] += delta.tokens;
     const models = (state.byModelByDay[key] = state.byModelByDay[key] || {});
     const row = (models[modelKey] = models[modelKey] || emptyDay());
-    addUsage(row, delta, 1, cost);
+    addUsage(row, billable, 1, cost);
 
     if (Date.now() - ts < RECENT_KEEP_MS) state.recent.push({ ts, cost, tokens: delta.tokens });
     changedSinceNotify = true;
@@ -426,6 +434,7 @@ function createCodexMetering(options = {}) {
           ...row,
           unitPrice: { ...resolved.price },
           priceExact: resolved.exact,
+          priceSource: resolved.source,
         }];
       })),
       diagnostics: {
@@ -490,6 +499,10 @@ function createCodexMetering(options = {}) {
 
   function start(intervalMs = 30000) {
     load();
+    // Reprice retained per-model aggregates on every launch. This repairs a
+    // stale/corrected price rule immediately instead of waiting for the next
+    // 24-hour pricing sync; token counts and transcript cursors are untouched.
+    reloadPricing();
     scan();
     timer = setInterval(scan, intervalMs);
     if (timer.unref) timer.unref();

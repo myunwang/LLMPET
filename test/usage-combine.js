@@ -6,6 +6,8 @@
 // was shown Claude's money.
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { combineUsage } = require('../backend/adapter');
 
 const claude = {
@@ -35,6 +37,8 @@ const codex = {
   assert.strictEqual(all.today.messages, 72 + 87);
   assert.strictEqual(all.todayByProvider.claude.cost, 18.07);
   assert.strictEqual(all.todayByProvider.codex.cost, 4.5);
+  assert.strictEqual(all.lifetimeByProvider.claude.cost, 8193.96);
+  assert.strictEqual(all.lifetimeByProvider.codex.cost, 900);
 
   assert.ok(Math.abs(all.window5h.cost - 32.6) < 1e-9);
   assert.strictEqual(all.window5h.startTs, 500, 'the window starts at the earliest live event of either agent');
@@ -52,6 +56,7 @@ const codex = {
   assert.ok(Math.abs(all.daily['2026-08-04'].cost - 22.57) < 1e-9, 'the calendar sums both agents');
   assert.strictEqual(all.daily['2026-08-03'].tokens, 189_800_000, 'a Codex-only day still shows up');
   assert.strictEqual(all.lifetime.tokens, 7_419_527_508 + 3_080_362_970);
+  assert.strictEqual(all.lifetime.messages, 20_143 + 22_578);
 }
 
 // ── a single-agent pet only ever sees its own numbers ────────────────────────
@@ -75,6 +80,8 @@ const codex = {
   assert.strictEqual(none.today.cost, 0);
   assert.strictEqual(none.today.tokens, 0);
   assert.strictEqual(none.window5h.resetTs, 0);
+  assert.strictEqual(none.lifetimeByProvider.claude.cost, 0);
+  assert.strictEqual(none.lifetimeByProvider.codex.cost, 0);
   assert.deepStrictEqual(none.byModel, {});
   assert.strictEqual(none.hourly.length, 24);
   assert.ok(none.hourly.every((v) => v === 0));
@@ -86,3 +93,9 @@ const codex = {
 }
 
 console.log('usage combine (Claude + Codex panel) checks passed');
+
+// Integration guard: main.js must not turn the shared `all` surface back into
+// Claude-only usage before handing it to combineUsage().
+const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+assert.ok(mainSource.includes('usageProvider: agent,'), 'shared pet/panel passes provider=all through unchanged');
+assert.ok(!mainSource.includes("usageProvider: agent === 'codex' ? 'codex' : 'claude'"), 'all must never collapse to Claude');

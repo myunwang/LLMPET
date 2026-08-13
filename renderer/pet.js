@@ -244,6 +244,7 @@ const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');
 const chipCost = document.getElementById('chip-cost');
 const chipWindow = document.getElementById('chip-window');
+const chipSep = document.getElementById('chip-sep');
 const chip = document.getElementById('chip');
 const sessionsEl = document.getElementById('sessions');
 const radial = document.getElementById('radial');
@@ -1499,7 +1500,7 @@ function createSessRow() {
   row.innerHTML =
     '<span class="sl-dot"></span>' +
     '<span class="sl-icon"></span>' +
-    '<div class="sl-main"><div class="sl-name"></div><div class="sl-meta"></div></div>' +
+    '<div class="sl-main"><div class="sl-name"></div><div class="sl-meta-line"><div class="sl-meta"></div><button class="sl-session-id"></button></div></div>' +
     '<span class="sl-ctx hidden"></span>' +
     '<button class="sl-takeover-entry"></button>' +
     '<button class="sl-meme-entry"></button>' +
@@ -1513,6 +1514,7 @@ function createSessRow() {
     icon: row.querySelector('.sl-icon'),
     name: row.querySelector('.sl-name'),
     meta: row.querySelector('.sl-meta'),
+    sessionId: row.querySelector('.sl-session-id'),
     context: row.querySelector('.sl-ctx'),
     takeover: row.querySelector('.sl-takeover-entry'),
     meme: row.querySelector('.sl-meme-entry'),
@@ -1520,6 +1522,20 @@ function createSessRow() {
     pin: row.querySelector('.sl-action.pin'),
     archive: row.querySelector('.sl-action.archive'),
   };
+  row._parts.sessionId.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const id = sessionKey(row._session);
+    if (!id || !window.pet.copySessionId) return;
+    const ok = await window.pet.copySessionId(id);
+    if (!ok) return;
+    row._parts.sessionId.classList.add('copied');
+    row._parts.sessionId.textContent = t('sess.copied');
+    clearTimeout(row._copyTimer);
+    row._copyTimer = setTimeout(() => {
+      row._parts.sessionId.classList.remove('copied');
+      updateSessionIdButton(row._parts.sessionId, id);
+    }, 1100);
+  });
   row._parts.takeover.addEventListener('click', (event) => {
     event.stopPropagation();
     openTakeoverPage(row._session);
@@ -1567,6 +1583,17 @@ function createSessRow() {
   return row;
 }
 
+function shortSessionId(id) {
+  const value = String(id || '');
+  return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+}
+
+function updateSessionIdButton(button, id) {
+  button.classList.toggle('hidden', !id);
+  button.textContent = id ? `ID ${shortSessionId(id)} ⧉` : '';
+  button.title = id ? `${id}\n${t('sess.copyId')}` : '';
+}
+
 function updateSessRow(row, session) {
   row._session = session;
   const parts = row._parts;
@@ -1595,6 +1622,7 @@ function updateSessRow(row, session) {
   parts.name.textContent = session.project || '';
   parts.meta.className = `sl-meta${attention ? ' attn' : ''}`;
   parts.meta.textContent = meta || '';
+  if (!parts.sessionId.classList.contains('copied')) updateSessionIdButton(parts.sessionId, key);
   if (typeof session.contextPercent === 'number') {
     parts.context.className = `sl-ctx ${ctxClass(session.contextPercent)}`.trim();
     parts.context.textContent = `${session.contextPercent}%`;
@@ -1641,6 +1669,7 @@ function renderSessList() {
       op: s.op,
       badge: s.badge,
       contextPercent: s.contextPercent,
+      sessionId: s.sessionId,
       pinned: pinnedSessionIds.includes(sessionKey(s)),
       archived: archivedSessionIds.includes(sessionKey(s)),
     })),
@@ -3267,20 +3296,19 @@ function applyStats(s) {
   lastStats = s;
   if (s.travel) travelData = s.travel;
   if (AGENT === 'codex') {
-    // Codex 没有逐 token 价目，额度条显示套餐窗口用量（5h 主窗口 + 周窗口）
-    const rl = s.codexLimits;
     const today = s.codexUsage && s.codexUsage.today;
     chipCost.textContent = today && today.tokens
       ? compactTokens(today.tokens) + ' tok'
-      : 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
-    chipWindow.textContent = rl && rl.usedPercent != null
-      ? t('chip.quota', { pct: Math.round(rl.usedPercent) })
-        + (rl.secondaryUsedPercent != null ? t('chip.weekly', { pct: Math.round(rl.secondaryUsedPercent) }) : '')
-      : t('chip.quotaNone');
+      : 'Codex';
+    chipWindow.textContent = today ? '$' + (today.cost || 0).toFixed(3) + ' API-eq' : '';
     chipWindow.title = t('chip.codexTitle');
+    chipSep.classList.toggle('hidden', !today);
+    chipWindow.classList.toggle('hidden', !today);
   } else {
     chipCost.textContent = '$' + (s.today.cost || 0).toFixed(3);
-    chipWindow.textContent = '5h $' + (s.window5h.cost || 0).toFixed(3);
+    chipWindow.textContent = t('chip.lifetime', { cost: (s.lifetime.cost || 0).toFixed(3) });
+    chipSep.classList.remove('hidden');
+    chipWindow.classList.remove('hidden');
   }
   lastWaiting = (s.waitingCount || 0) + (s.needsinputCount || 0); // 待处理徽标含「等你回复」
   lastBgZombie = (s.bg && s.bg.zombie) || 0;

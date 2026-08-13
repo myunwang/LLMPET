@@ -830,8 +830,18 @@ body.skin-cat .sessions { width: 120px; }
 
 .sl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .sl-name { font-size: 13px; font-weight: 600; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-meta-line { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .sl-meta { font-size: 10px; color: #8f8f96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl-meta.attn { color: #ffb84d; font-weight: 600; }
+.sl-session-id {
+  flex: 0 1 auto; min-width: 0; max-width: 136px; padding: 1px 5px; border-radius: 5px;
+  border: 1px solid rgba(114, 161, 255, 0.22); background: rgba(68, 105, 184, 0.12);
+  color: #a9c5ff; font: 600 9px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: copy;
+}
+.sl-session-id:hover { color: #e2ebff; border-color: rgba(126, 169, 255, 0.48); background: rgba(68, 105, 184, 0.23); }
+.sl-session-id.copied { color: #ffd69c; border-color: rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.18); }
+.sl-session-id.hidden { display: none; }
 
 .sl-ctx { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px;
   background: rgba(255, 255, 255, 0.1); color: #c2c2c8; }

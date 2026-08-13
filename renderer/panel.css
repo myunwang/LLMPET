@@ -171,7 +171,7 @@ html, body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .sess-id:hover { background: rgba(217,119,87,0.22); color: #ffd8bf; }
-.sess-id.copied { background: rgba(120,190,120,0.24); color: #cdf0cd; border-color: rgba(120,190,120,0.4); }
+.sess-id.copied { background: rgba(217,119,87,0.2); color: #ffd8bf; border-color: rgba(217,119,87,0.46); }
 .sess-op { color: #a9826f; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
 .badge { font-size: 10px; padding: 2px 7px; border-radius: 7px; color: #fff; flex-shrink: 0; }
 .st-working { background: #2f9e52; }

@@ -74,7 +74,6 @@ let programRegistry = null;
 let programSkillManager = null;
 let runtimeMonitor = null;
 let stopMemeWatcher = null;
-let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
 // 巡视拖拽期间主宠强制穿透，renderer 不得抢回鼠标（uiBusy / visualRect /
@@ -103,7 +102,6 @@ function frontendConfig(agent = 'all') {
     mode: c.mode,
     skin: agent === 'codex' ? c.skinCodex : c.skin,
     petPosition: agent === 'codex' ? c.petPositionCodex : c.petPosition,
-    budget5h: c.budget5h,
     muted: c.muted,
     permHook: c.permHook,
     territory: c.territory,
@@ -739,9 +737,11 @@ function buildStats(agent = 'all', snapshot = null) {
     : recentOps.filter((o) => (o.agent || 'claude') === agent)).slice(0, 30);
   const stats = adapter.buildPetStats(snap, pending, meter, {
     lastOps: ops,
-    codexLimits,
     codexUsage,
-    usageProvider: agent === 'codex' ? 'codex' : 'claude',
+    // Shared pet/panel/archive must combine both ledgers. Mapping `all` to
+    // `claude` made the headline omit Codex while the Codex detail card still
+    // showed its own cost, producing contradictory totals in the real UI.
+    usageProvider: agent,
     runtime: runtimeMonitor ? runtimeMonitor.snapshot() : null,
   });
   // Travel sessions are already present in the Claude/Codex ledgers, so the
@@ -872,7 +872,6 @@ function bootBackend() {
       core,
       // 开发/E2E 可用 LLMPET_CODEX_DIR 指到假目录，不碰真实 ~/.codex
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
-      onRateLimits: (rl) => { codexLimits = rl; scheduleEmit(); },
     });
     codexWatch.start();
   }
@@ -1161,7 +1160,6 @@ function registerIpc() {
   ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
   // Codex 宠上切形象 → 存 skinCodex；其余（主宠/面板）→ 存主形象
   ipcMain.on('set-skin', (e, skin) => applySkin(skin, senderAgent(e) === 'codex' ? 'codex' : null));
-  ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
   ipcMain.on('set-session-prefs', (_e, pinnedSessions, archivedSessions) => {
     config.save({ pinnedSessions, archivedSessions });
@@ -1212,10 +1210,11 @@ function registerIpc() {
     focusSession(session);
   });
   // 面板复制会话 id（跨 session 协作：把 id 贴给另一个 agent 去 resume）。
-  // 只认自己列出过的会话 id，渲染进程无法借这个通道往剪贴板塞任意内容。
+  // 桌宠列表会在 watcher 释放后短暂保留掠夺/最近会话，所以不再强制要求
+  // core.getSession() 当下仍然存在；只允许安全的 session-id 字符集。
   ipcMain.handle('copy-session-id', (_e, sessionId) => {
-    const id = String(sessionId || '');
-    if (!id || !core.getSession(id)) return false;
+    const id = String(sessionId || '').trim();
+    if (id.length < 8 || id.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(id)) return false;
     clipboard.writeText(id);
     return true;
   });
@@ -1479,12 +1478,6 @@ function applyPetMode(petMode) {
   refreshTrayMenu();
   log('main', `petMode → ${petMode}`);
 }
-function applyBudget(v) {
-  config.save({ budget5h: Number(v) || 0 });
-  broadcastConfig();
-  refreshTrayMenu();
-}
-
 // Language switch (tray → Settings → Language). Main-process copy is baked into
 // the strings the adapter already pushed, so a plain re-broadcast would leave
 // stale labels on screen until the next session event — force a fresh stats
@@ -1518,7 +1511,6 @@ function refreshTrayMenu() {
   const muted = cfg.muted;
   const skin = cfg.skin || 'mascot';
   const mode = cfg.mode || 'pet';
-  const budget = Number(cfg.budget5h) || 0;
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
   const lang = cfg.lang || 'zh';
@@ -1549,14 +1541,6 @@ function refreshTrayMenu() {
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
       { label: t('shape.panel'), type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
       { label: t('shape.menubar'), type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
-    ] },
-    { label: t('tray.budget'), submenu: [
-      { label: t('tray.budgetOff'), type: 'radio', checked: !budget, click: () => applyBudget(0) },
-      { label: '$10', type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
-      { label: '$20', type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
-      { label: '$30', type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
-      { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
-      { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
     ...(process.platform === 'darwin' ? [
       { label: t('tray.patrol'), type: 'checkbox', checked: !!cfg.territory,
