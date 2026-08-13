@@ -78,6 +78,28 @@ async function main() {
   assert.strictEqual(stats.lifetime.tokens, 370);
   assert.strictEqual(stats.hourlyTok.reduce((a, b) => a + b, 0), 370);
   assert.strictEqual(stats.diagnostics.resets, 1);
+  assert.deepStrictEqual(stats.byModel['gpt-5.6-codex'].unitPrice,
+    { input: 1.75, cachedInput: 0.175, output: 14 });
+  assert.strictEqual(stats.byModel['gpt-5.6-codex'].priceExact, false,
+    'an unknown rollout model must expose that its displayed rate is estimated');
+
+  // A migration scan must surface today's rollouts before a huge historical
+  // file, and prefer smaller unread files within the same priority tier.
+  const today = new Date();
+  const todayDir = path.join(root, 'priority', String(today.getFullYear()),
+    String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0'));
+  const oldDir = path.join(root, 'priority', '2020', '01', '01');
+  fs.mkdirSync(todayDir, { recursive: true });
+  fs.mkdirSync(oldDir, { recursive: true });
+  const todaySmall = path.join(todayDir, 'small.jsonl');
+  const todayLarge = path.join(todayDir, 'large.jsonl');
+  const oldSmall = path.join(oldDir, 'old.jsonl');
+  fs.writeFileSync(todaySmall, 'x');
+  fs.writeFileSync(todayLarge, 'x'.repeat(200));
+  fs.writeFileSync(oldSmall, 'x');
+  const prioritized = await meter._prioritizeFiles([oldSmall, todayLarge, todaySmall]);
+  assert.deepStrictEqual(prioritized, [todaySmall, todayLarge, oldSmall],
+    'today comes first, with the smallest unread rollout first');
 
   await meter.scan();
   stats = meter.getStats();

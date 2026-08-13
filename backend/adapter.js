@@ -356,7 +356,13 @@ function addWindows(a, b) {
 function tagModels(byModel, agent) {
   const out = {};
   for (const [model, row] of Object.entries(byModel || {})) {
-    out[model] = { ...providerDay(row), msgs: row.msgs || row.messages || 0, agent };
+    out[model] = {
+      ...providerDay(row),
+      msgs: row.msgs || row.messages || 0,
+      agent,
+      ...(row && row.unitPrice ? { unitPrice: { ...row.unitPrice } } : {}),
+      ...(row && typeof row.priceExact === 'boolean' ? { priceExact: row.priceExact } : {}),
+    };
   }
   return out;
 }

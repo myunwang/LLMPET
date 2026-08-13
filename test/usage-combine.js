@@ -20,7 +20,7 @@ const claude = {
 const codex = {
   today: { cost: 4.5, tokens: 13_687_685, msgs: 87, input: 13_365_492, output: 40_301, cachedInput: 12_340_224, reasoningOutput: 10_673 },
   window5h: { cost: 3.1, tokens: 9_000_000, startTs: 500, resetTs: 18_500 },
-  byModel: { 'gpt-5.6-sol': { cost: 4.5, tokens: 13_687_685, msgs: 87 } },
+  byModel: { 'gpt-5.6-sol': { cost: 4.5, tokens: 13_687_685, msgs: 87, unitPrice: { input: 5, cachedInput: 0.5, output: 30 }, priceExact: true } },
   hourly: new Array(24).fill(0).map((_, i) => (i === 3 ? 4.5 : 0)),
   hourlyTok: new Array(24).fill(0).map((_, i) => (i === 3 ? 13_687_685 : 0)),
   daily: { '2026-08-04': { cost: 4.5, tokens: 13_687_685, msgs: 87 }, '2026-08-03': { cost: 9, tokens: 189_800_000, msgs: 1221 } },
@@ -42,6 +42,8 @@ const codex = {
   assert.deepStrictEqual(Object.keys(all.byModel).sort(), ['claude-opus-5', 'gpt-5.6-sol']);
   assert.strictEqual(all.byModel['claude-opus-5'].agent, 'claude', 'model rows carry their agent for the badge');
   assert.strictEqual(all.byModel['gpt-5.6-sol'].agent, 'codex');
+  assert.deepStrictEqual(all.byModel['gpt-5.6-sol'].unitPrice, { input: 5, cachedInput: 0.5, output: 30 });
+  assert.strictEqual(all.byModel['gpt-5.6-sol'].priceExact, true);
 
   assert.ok(Math.abs(all.hourly[3] - 22.57) < 1e-9, 'the 24h cost chart sums both agents');
   assert.strictEqual(all.hourlyTok[3], 29_432_411 + 13_687_685);

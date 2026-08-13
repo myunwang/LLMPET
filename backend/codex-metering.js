@@ -96,6 +96,7 @@ function createCodexMetering(options = {}) {
     pricingOverridePath: options.pricingOverridePath || path.join(stateDir, 'pricing.json'),
   };
   let pricing = loadCodexPricing(pricingPaths);
+  const onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
 
   const state = {
     schemaVersion: SCHEMA_VERSION,
@@ -114,6 +115,7 @@ function createCodexMetering(options = {}) {
   let dirty = false;
   let saveTimer = null;
   let timer = null;
+  let changedSinceNotify = false;
 
   function reset() {
     state.files = {};
@@ -209,6 +211,45 @@ function createCodexMetering(options = {}) {
     return out;
   }
 
+  // A first-run/schema-rebuild scan can include very large historical rollouts.
+  // Put the current local-day folder first, then files with the least unread
+  // data. This makes today's real usage visible within the first few files
+  // instead of holding the dashboard at zero behind a multi-GB history scan.
+  async function prioritizeFiles(files) {
+    const now = new Date();
+    const todayParts = [
+      String(now.getFullYear()),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ];
+    const todayNeedle = `${path.sep}${todayParts.join(path.sep)}${path.sep}`;
+    const rows = await Promise.all(files.map(async (file) => {
+      try {
+        const stat = await fsp.stat(file);
+        const previousOffset = num(state.files[file] && state.files[file].offset);
+        return {
+          file,
+          today: file.includes(todayNeedle) ? 1 : 0,
+          unread: Math.max(0, stat.size - previousOffset),
+          mtimeMs: stat.mtimeMs,
+        };
+      } catch {
+        return { file, today: 0, unread: Number.MAX_SAFE_INTEGER, mtimeMs: 0 };
+      }
+    }));
+    rows.sort((a, b) => (b.today - a.today)
+      || (a.unread - b.unread)
+      || (b.mtimeMs - a.mtimeMs)
+      || a.file.localeCompare(b.file));
+    return rows.map((row) => row.file);
+  }
+
+  function notifyProgress() {
+    if (!changedSinceNotify) return;
+    changedSinceNotify = false;
+    try { onChange(); } catch {}
+  }
+
   function record(ts, model, delta) {
     if (num(delta.tokens) <= 0) return;
     const modelKey = model || 'unknown';
@@ -234,6 +275,7 @@ function createCodexMetering(options = {}) {
     addUsage(row, delta, 1, cost);
 
     if (Date.now() - ts < RECENT_KEEP_MS) state.recent.push({ ts, cost, tokens: delta.tokens });
+    changedSinceNotify = true;
   }
 
   function pruneRecent() {
@@ -344,15 +386,20 @@ function createCodexMetering(options = {}) {
     if (scanning) return;
     scanning = true;
     try {
-      const files = (await listFiles()).sort();
+      const files = await prioritizeFiles(await listFiles());
       for (const file of files) {
         try { await scanFile(file); } catch (error) { log('codex-meter', 'scanFile failed:', path.basename(file), error.message); }
+        // Progressive delivery matters on migration: one historical rollout on
+        // a real machine can approach 1 GB, while today's smaller files already
+        // contain enough evidence to replace the misleading zero state.
+        notifyProgress();
       }
       state.diagnostics.lastScanTs = Date.now();
       state.diagnostics.scannedFiles = files.length;
       pruneRecent();
       pruneDaily();
       scheduleSave();
+      notifyProgress();
     } catch (error) {
       log('codex-meter', 'scan failed:', error.message);
     } finally {
@@ -373,7 +420,14 @@ function createCodexMetering(options = {}) {
       daily: Object.fromEntries(Object.entries(daily).map(([key, value]) => [
         key, { cost: num(value.cost), tokens: num(value.tokens), msgs: num(value.msgs) },
       ])),
-      byModel: state.byModelByDay[todayKey] ? { ...state.byModelByDay[todayKey] } : {},
+      byModel: Object.fromEntries(Object.entries(state.byModelByDay[todayKey] || {}).map(([model, row]) => {
+        const resolved = priceForCodex(pricing, model);
+        return [model, {
+          ...row,
+          unitPrice: { ...resolved.price },
+          priceExact: resolved.exact,
+        }];
+      })),
       diagnostics: {
         ...state.diagnostics,
         sessions: Object.keys(state.sessions).length,
@@ -449,7 +503,7 @@ function createCodexMetering(options = {}) {
 
   return {
     start, stop, scan, rebuild, reloadPricing, getStats,
-    _state: state, _processObject: processObject,
+    _state: state, _processObject: processObject, _prioritizeFiles: prioritizeFiles,
   };
 }
 
