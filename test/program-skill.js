@@ -29,7 +29,12 @@ assert.strictEqual(manager.statusFor('claude').state, 'not-installed');
 assert.strictEqual(fs.readFileSync(path.join(home, '.agents', 'skills', 'register-generated-program', 'SKILL.md'), 'utf8'), codex);
 assert.ok(!fs.existsSync(path.join(home, '.claude')), 'granting Codex must not grant Claude Code');
 assert.ok(fs.existsSync(codexInstall.registrar));
-assert.strictEqual(fs.statSync(codexInstall.registrar).mode & 0o777, 0o700);
+// Windows reports synthetic POSIX mode bits (commonly 0666) even after chmod;
+// executable owner-only permissions are meaningful and observable only on
+// POSIX filesystems. The existence/content checks above still cover Windows.
+if (process.platform !== 'win32') {
+  assert.strictEqual(fs.statSync(codexInstall.registrar).mode & 0o777, 0o700);
+}
 
 const claudeInstall = manager.install('claude');
 assert.strictEqual(claudeInstall.ok, true);
