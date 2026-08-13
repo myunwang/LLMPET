@@ -51,6 +51,85 @@ function findCli(name) {
 
 function findClaude() { return findCli('claude'); }
 
+function cliInstalled(name) {
+  const cli = findCli(name);
+  if (!path.isAbsolute(cli)) return false;
+  try {
+    fs.accessSync(cli, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isInteractiveCliCommand(command, name) {
+  const text = String(command || '').trim();
+  const target = name === 'claude' ? 'claude' : name === 'codex' ? 'codex' : '';
+  if (!text || !target) return false;
+
+  // Desktop clients embed the same binaries for app-server / stream-json
+  // bridges. They are not interactive terminals and must not suppress the
+  // user's LLMPET-managed CLI session.
+  if (/\bapp-server\b/i.test(text)
+      || /--(?:input|output)-format(?:=|\s+)stream-json\b/i.test(text)
+      || /\b(?:Claude|Codex) Helper\b/i.test(text)
+      || /\b(?:grep|rg|ps|wmic)\b[^\n]*\b(?:claude|codex)\b/i.test(text)) return false;
+
+  const first = text.match(/^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
+  const executable = first ? (first[1] || first[2] || first[3] || '') : '';
+  const base = path.basename(executable).toLowerCase().replace(/\.exe$/i, '');
+  if (base === target) return true;
+
+  // npm installations can leave a node/bun launcher in the process table.
+  if (!['node', 'nodejs', 'bun'].includes(base)) return false;
+  return target === 'codex'
+    ? /(?:^|[\\/])(?:@openai[\\/])?codex(?:\.js)?(?:\s|$|[\\/])/i.test(text)
+    : /(?:^|[\\/])(?:@anthropic-ai[\\/])?claude(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+}
+
+function cliProcessPids(output, name) {
+  const seen = new Set();
+  const result = [];
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+([\s\S]+)$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || seen.has(pid)) continue;
+    if (!isInteractiveCliCommand(match[2], name)) continue;
+    seen.add(pid);
+    result.push(pid);
+  }
+  return result;
+}
+
+function isCliRunning(name) {
+  if (!['claude', 'codex'].includes(name)) return Promise.resolve(false);
+  if (process.platform === 'win32') {
+    const script = [
+      'Get-CimInstance Win32_Process',
+      'Select-Object ProcessId,CommandLine',
+      'ConvertTo-Json -Compress',
+    ].join(' | ');
+    return new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', script],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true }, (error, stdout) => {
+          if (error) { resolve(false); return; }
+          try {
+            const raw = JSON.parse(String(stdout || '[]'));
+            const rows = Array.isArray(raw) ? raw : [raw];
+            resolve(rows.some((row) => Number(row.ProcessId) !== process.pid
+              && isInteractiveCliCommand(row.CommandLine, name)));
+          } catch { resolve(false); }
+        });
+    });
+  }
+  return new Promise((resolve) => {
+    execFile('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 5000 }, (error, stdout) => {
+      resolve(!error && cliProcessPids(stdout, name).length > 0);
+    });
+  });
+}
+
 const posixQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const appleEscape = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -332,6 +411,10 @@ module.exports = {
   travelCliPids,
   findClaude,
   findCli,
+  cliInstalled,
+  isCliRunning,
+  isInteractiveCliCommand,
+  cliProcessPids,
   buildCandidates,
   cleanTerminalLaunchEnv,
 };
