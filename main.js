@@ -29,6 +29,7 @@ const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, launchExecutable, findCli } = require('./backend/launch');
+const { createAgentStartup } = require('./backend/agent-startup');
 const { createCodexWatch } = require('./backend/codex-watch');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
@@ -73,6 +74,7 @@ let sessionArchive = null;
 let programRegistry = null;
 let programSkillManager = null;
 let runtimeMonitor = null;
+let agentStartup = null;
 let stopMemeWatcher = null;
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
@@ -1527,6 +1529,14 @@ function refreshTrayMenu() {
     { label: t('tray.language'), submenu: i18n.LANGS.map((code) => ({
       label: t('lang.' + code), type: 'radio', checked: lang === code, click: () => applyLang(code),
     })) },
+    { label: t('tray.agentStartup'), submenu: [
+      { label: t('tray.agentStartupClaude'), type: 'checkbox', checked: cfg.agentStartup.claude === true,
+        click: () => setAgentStartup('claude', config.get().agentStartup.claude !== true) },
+      { label: t('tray.agentStartupCodex'), type: 'checkbox', checked: cfg.agentStartup.codex === true,
+        click: () => setAgentStartup('codex', config.get().agentStartup.codex !== true) },
+      { type: 'separator' },
+      { label: t('tray.agentStartupNow'), click: () => runAgentStartup({ agents: ['claude', 'codex'] }) },
+    ] },
     { label: petMode === 'duo' ? t('tray.skinClaude') : t('tray.skin'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
       { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
@@ -1561,6 +1571,23 @@ function refreshTrayMenu() {
     } },
     { label: t('tray.quit'), click: () => app.quit() },
   ]));
+}
+
+function setAgentStartup(agent, enabled) {
+  if (!['claude', 'codex'].includes(agent)) return;
+  const current = config.get().agentStartup;
+  config.save({ agentStartup: { ...current, [agent]: enabled === true } });
+  broadcastConfig();
+  refreshTrayMenu();
+  log('startup', `${agent} auto-start → ${enabled === true}`);
+}
+
+function runAgentStartup(options = {}) {
+  if (!agentStartup) return Promise.resolve([]);
+  return agentStartup.run(options).catch((error) => {
+    log('startup', 'unified agent startup failed:', error.message);
+    return [];
+  });
 }
 
 // Historical compatibility namespace: move the oldest ~/.llmpet data into
@@ -1628,10 +1655,17 @@ if (!gotTheLock) {
     migrateState();
     registerIpc();
     bootBackend();
+    agentStartup = createAgentStartup({
+      getSettings: () => config.get().agentStartup,
+      onResult: (result) => log('startup', `${result.agent}: ${result.status}${result.message ? ` (${result.message})` : ''}`),
+    });
     createPetWindows();
     startMemeWatcher();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
+    // Let the pet and tray become responsive first; startup failures are
+    // isolated and never block LLMPET's own ready path.
+    setTimeout(() => runAgentStartup(), 700).unref?.();
     // LLMPET now has a real desktop library. The initial launch remains pet-only,
     // while a later Dock click always opens or focuses the archive window.
     app.on('activate', openArchive);

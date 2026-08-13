@@ -31,6 +31,10 @@ const DEFAULTS = Object.freeze({
     backupEnabled: false,
     backupIntervalHours: 24,
   },
+  agentStartup: {         // LLMPET 启动时，只补拉起当前没有运行的交互式 CLI
+    claude: true,
+    codex: true,
+  },
 });
 
 let cache = null;
@@ -112,6 +116,12 @@ function sanitize(raw) {
       backupIntervalHours: [6, 12, 24, 72, 168].includes(Number(raw.sessionArchive.backupIntervalHours))
         ? Number(raw.sessionArchive.backupIntervalHours)
         : DEFAULTS.sessionArchive.backupIntervalHours,
+    };
+  }
+  if (raw.agentStartup && typeof raw.agentStartup === 'object') {
+    out.agentStartup = {
+      claude: raw.agentStartup.claude !== false,
+      codex: raw.agentStartup.codex !== false,
     };
   }
   return out;

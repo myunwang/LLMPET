@@ -418,6 +418,7 @@ function setStageEdgeLayout(next) {
   stage.classList.toggle('edge-below', edgeLayout.vertical === 'below');
   stage.classList.toggle('edge-left', edgeLayout.horizontal === 'left');
   stage.classList.toggle('edge-right', edgeLayout.horizontal === 'right');
+  if (propEl && propEl.classList.contains('on')) requestAnimationFrame(alignToolProp);
 }
 
 // Changing the flex anchor moves the pet inside the transparent BrowserWindow.
@@ -2821,6 +2822,7 @@ function playAction(toolName, icon) {
     void propEl.offsetWidth; // 重启动画
     const pm = PROP_MOTION[act];
     propEl.className = 'prop on' + (pm ? ' ' + pm : '');
+    requestAnimationFrame(alignToolProp);
   }
   if (act === 'summon') {
     sidekickEl.classList.remove('on');
@@ -2829,6 +2831,28 @@ function playAction(toolName, icon) {
   }
   clearTimeout(actTimer);
   actTimer = setTimeout(clearAction, 2200);
+}
+
+function alignToolProp() {
+  if (!propEl || !propEl.classList.contains('on')) return;
+  const petEl = curSkinEl();
+  if (!petEl) return;
+  const rect = petEl.getBoundingClientRect();
+  const viewportW = Math.max(1, window.innerWidth || 320);
+  const viewportH = Math.max(1, window.innerHeight || 340);
+  const size = Math.max(24, Number(propEl.offsetWidth) || Number(propEl.offsetHeight) || 28);
+  const preferred = edgeLayout.horizontal === 'left' ? 'right' : 'left';
+  const position = window.PetGeometry && window.PetGeometry.adornmentPosition
+    ? window.PetGeometry.adornmentPosition({
+      petRect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      viewport: { x: 0, y: 0, width: viewportW, height: viewportH },
+      preferred,
+      size,
+    })
+    : { x: rect.left - size - 5, y: rect.top + 12 };
+  propEl.style.left = `${Math.round(position.x)}px`;
+  propEl.style.top = `${Math.round(position.y)}px`;
+  propEl.dataset.side = position.side || preferred;
 }
 function clearAction() {
   for (const el of stateEls) el.classList.remove(...ACT_CLASSES);
@@ -3943,5 +3967,6 @@ setInterval(() => {
 window.addEventListener('resize', () => requestAnimationFrame(() => {
   reportPetVisualBounds();
   alignMemePlayer();
+  alignToolProp();
 }));
 setInterval(reportPetVisualBounds, 3000);
