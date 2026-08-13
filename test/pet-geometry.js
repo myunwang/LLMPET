@@ -138,6 +138,26 @@ assert.strictEqual(
   'a same-sized popup frame that moved off-screen still needs re-anchoring',
 );
 
+assert.deepStrictEqual(
+  geometry.adornmentPosition({
+    petRect: { x: 880, y: 440, width: 120, height: 120 },
+    viewport: { x: 0, y: 0, width: 1040, height: 680 },
+    preferred: 'left', size: 28,
+  }),
+  { side: 'left', x: 847, y: 461.6 },
+  'a widened transparent window must keep the tool prop beside the visible pet, not at 15% of the frame',
+);
+
+assert.deepStrictEqual(
+  geometry.adornmentPosition({
+    petRect: { x: 0, y: 140, width: 120, height: 120 },
+    viewport: { x: 0, y: 0, width: 520, height: 620 },
+    preferred: 'left', size: 28,
+  }),
+  { side: 'right', x: 125, y: 161.6 },
+  'a left-edge pet must flip the prop to its visible right side',
+);
+
 assert.strictEqual(
   geometry.choosePopupLayout({
     workArea,

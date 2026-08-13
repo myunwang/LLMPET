@@ -573,8 +573,8 @@ body.skin-cat .sessions { width: 120px; }
 /* ---- 头顶道具 emoji ---- */
 .prop {
   position: absolute;
-  bottom: 104px;
-  left: 15%;
+  top: 0;
+  left: 0;
   font-size: 21px;
   opacity: 0;
   pointer-events: none;

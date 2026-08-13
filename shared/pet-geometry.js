@@ -140,6 +140,40 @@
       && wr.right <= wa.right + s && wr.bottom <= wa.bottom + s;
   }
 
+  function adornmentPosition({
+    petRect,
+    viewport,
+    preferred = 'left',
+    size = 28,
+    gap = 5,
+    edgePad = 4,
+  }) {
+    const pet = normalizeRect(petRect);
+    const frame = normalizeRect(viewport);
+    const adornmentSize = Math.max(12, Number(size) || 28);
+    const space = Math.max(0, Number(gap) || 0);
+    const pad = Math.max(0, Number(edgePad) || 0);
+    const leftRoom = pet.x - frame.x - pad;
+    const rightRoom = frame.right - pet.right - pad;
+    let side = preferred === 'right' ? 'right' : 'left';
+    const needed = adornmentSize + space;
+    if (side === 'left' && leftRoom < needed && rightRoom > leftRoom) side = 'right';
+    if (side === 'right' && rightRoom < needed && leftRoom > rightRoom) side = 'left';
+
+    const rawX = side === 'left'
+      ? pet.x - space - adornmentSize
+      : pet.right + space;
+    // Tool props sit by the pet's temple rather than at a percentage of the
+    // transparent BrowserWindow. This remains close even when a popup widens
+    // the frame or the pet is anchored against a side edge.
+    const rawY = pet.y + Math.min(24, Math.max(5, pet.height * 0.18));
+    return {
+      side,
+      x: clamp(rawX, frame.x + pad, frame.right - adornmentSize - pad),
+      y: clamp(rawY, frame.y + pad, frame.bottom - adornmentSize - pad),
+    };
+  }
+
   const ARCS = {
     // A real 180-degree fan. The previous 156-degree arcs compressed eight
     // 46px controls until they overlapped into a heart-shaped cluster.
@@ -219,6 +253,7 @@
     chooseDragVerticalLayout,
     chooseDragHorizontalLayout,
     windowFitsWorkArea,
+    adornmentPosition,
     radialLayout,
   };
 });
