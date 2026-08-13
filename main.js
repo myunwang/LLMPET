@@ -26,7 +26,8 @@ const { createPermissions } = require('./backend/permission');
 const { createServer } = require('./backend/server');
 const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
-const { focusSession } = require('./backend/focus');
+const { focusSession, focusSessionTarget, shutdownTerminalFocusBroker } = require('./backend/focus');
+const { configureTerminalFocusBroker } = require('./backend/terminal-focus-broker-control');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
@@ -83,6 +84,7 @@ let lastStats = null;   // 全量快照（面板用；single 模式也是主宠�
 let statsTimer = null;
 let emitDebounce = null;
 const recentOps = []; // ring for the panel "操作流"; newest first, capped
+const pendingSessionFocus = new Map(); // session id → one in-flight focus/resume promise
 
 // ── frontend config shape ─────────────────────────────────────────────────────
 // agent: 'all'(单宠/面板) | 'claude' | 'codex' —— 双宠模式两只宠形象/位置各一套
@@ -844,8 +846,23 @@ function registerIpc() {
     }
     permissions.decide(permId, behavior);
   });
-  ipcMain.on('focus-session', (_e, sessionId) => {
-    focusSession(core.getSession(sessionId));
+  ipcMain.handle('focus-session', async (_e, sessionId) => {
+    if (!core || typeof sessionId !== 'string') {
+      return { ok: false, route: 'failed', reason: 'session-not-found' };
+    }
+    if (pendingSessionFocus.has(sessionId)) return pendingSessionFocus.get(sessionId);
+    const request = Promise.resolve()
+      .then(() => focusSessionTarget(core.getSession(sessionId)))
+      .catch((error) => {
+        log('focus', `focus session failed: ${error && error.message || error}`);
+        return { ok: false, route: 'failed', reason: 'focus-failed' };
+      });
+    pendingSessionFocus.set(sessionId, request);
+    try {
+      return await request;
+    } finally {
+      if (pendingSessionFocus.get(sessionId) === request) pendingSessionFocus.delete(sessionId);
+    }
   });
   ipcMain.handle('meme-catalog', () => publicCatalog(i18n.getLang()));
   ipcMain.handle('travel-get', () => (
@@ -1111,6 +1128,23 @@ function applyLang(lang) {
   log('main', `lang → ${lang}`);
 }
 
+async function applyTerminalFocusBroker(enabled) {
+  if (process.platform !== 'win32') return;
+  try {
+    if (!enabled) {
+      try { await shutdownTerminalFocusBroker(); } catch {}
+    }
+    const result = await configureTerminalFocusBroker(enabled);
+    if (!result || result.ok !== true) throw new Error(result && result.reason || 'broker-config-failed');
+    config.save({ terminalFocusBrokerEnabled: enabled });
+    log('focus', `optional terminal focus broker ${enabled ? 'enabled' : 'disabled'} task=${result.taskName || '-'}`);
+  } catch (error) {
+    log('focus', `terminal focus broker configuration failed: ${error.message}`);
+    dialog.showErrorBox(t('broker.configTitle'), enabled ? t('broker.enableFailed') : t('broker.disableFailed'));
+  }
+  refreshTrayMenu();
+}
+
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
   let img;
@@ -1169,6 +1203,12 @@ function refreshTrayMenu() {
       { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
       { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
+    ...(process.platform === 'win32' ? [{
+      label: t('tray.terminalFocusBroker'),
+      type: 'checkbox',
+      checked: cfg.terminalFocusBrokerEnabled === true,
+      click: (item) => { applyTerminalFocusBroker(item.checked).catch(() => {}); },
+    }] : []),
     ...(process.platform === 'darwin' ? [
       { label: t('tray.patrol'), type: 'checkbox', checked: !!cfg.territory,
         click: () => applyTerritory(!config.get().territory) },

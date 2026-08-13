@@ -11,7 +11,7 @@ LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認で�
 - **agent の状態をリアルタイム表示** — 思考、作業、並列 subagent、コンテキスト整理、ユーザー待ち、エラー、完了、休憩をアニメーションで表現します。
 - **Claude Code の権限確認** — 許可 / 拒否をデスクトップペットから直接選べます。
 - **Claude Code + Codex の複数セッション** — 1 匹で両方を監視することも、Claude 用と Codex 用の 2 匹に分けることもできます。
-- **セッション管理** — 検索、Claude / Codex / 要対応フィルター、ピン留め、アーカイブ、コンテキスト使用率の確認、対象ウィンドウへの移動ができます。
+- **セッション管理** — 検索、Claude / Codex / 要対応フィルター、ピン留め、アーカイブ、コンテキスト使用率の確認に加え、既に開いている対象の Windows Terminal タブへ移動できます。タブが利用できない場合はエラーを表示し、代わりのターミナルを開くことはありません。
 - **ミームアクション** — GIF と音声を再生しながら、対応する構造化 Prompt を選択中のセッションへ送れます。
 - **旅するカエル** — 選択した Claude / Codex を独立した読み取り専用の探索へ送り、帰還後にローカルの旅便りを受け取れます。
 - **利用状況パネル** — 実 token 推移、モデル別内訳、Claude の API 公開価格換算、Codex のローカル token 台帳、レート制限、診断情報、現在の操作を確認できます。
@@ -63,6 +63,10 @@ npm run package:mac:dev  # ローカル用 ad-hoc 署名 macOS パッケージ
 npm run package:win      # Windows インストーラー + ZIP
 npm run uninstall:hooks  # LLMPET の Claude hook を安全に削除
 ```
+
+Windows では、前面ウィンドウの PID、hook のプロセス祖先にある Windows Terminal の PID、そのセッションの `WT_SESSION` が一致した場合だけタブルートをキャッシュします。後から動くバックグラウンドの tool event が、別の選択中タブで上書きすることはありません。通常のタブ移動に昇格は不要です。管理者として開いた Terminal の移動はトレイで明示的に有効化でき、実際の LLMPET ユーザー用に Limited 権限のログオンタスクを登録します。UAC は有効化時またはログオン時だけで、セッションをクリックするたびには表示されず、インストーラーを強制的に端末全体向けに変更しません。
+
+`powershell -ExecutionPolicy Bypass -File scripts/validate-windows-terminal-focus.ps1` を実行すると、タスク登録、broker 再接続、ルート相関の JSONL 証跡を生成できます。`-WindowHandle`、`-RuntimeId`、`-ExpectedProcessId` を指定すれば、実在するタブへの厳密な移動も再現できます。
 
 ## 連携の仕組み
 

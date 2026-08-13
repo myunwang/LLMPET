@@ -11,7 +11,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Live agent state** — see thinking, working, parallel subagents, context cleanup, waiting, errors, completion, and idle time as pet animations.
 - **Claude Code approvals** — allow or deny a Claude Code permission request directly from the pet.
 - **Claude Code + Codex sessions** — one pet can watch both backends, or you can enable separate Claude and Codex pets with independent skins and positions.
-- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
+- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and jump to the selected existing Windows Terminal tab. If that tab is unavailable, LLMPET reports the failure and never opens a replacement terminal.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
@@ -63,6 +63,10 @@ npm run package:mac:dev  # local ad-hoc-signed macOS package
 npm run package:win      # Windows installer + portable ZIP
 npm run uninstall:hooks  # remove LLMPET's Claude hooks safely
 ```
+
+On Windows, a tab route is cached only when the foreground window PID matches the Windows Terminal PID in the hook's process ancestry and the hook supplies that session's `WT_SESSION`. Later background tool events cannot replace it with whichever tab is currently selected. Normal tabs need no elevation. Focusing an elevated Terminal is an explicit opt-in tray setting: it registers a Limited logon task for the actual LLMPET user, requests UAC only when enabled or at logon, and never prompts on a session click. It does not force a per-machine installer.
+
+Run `powershell -ExecutionPolicy Bypass -File scripts/validate-windows-terminal-focus.ps1` to produce JSONL evidence for task registration, broker reconnects, and route correlation. Supplying `-WindowHandle`, `-RuntimeId`, and `-ExpectedProcessId` also reproduces an exact live-tab focus.
 
 ## How the integrations work
 

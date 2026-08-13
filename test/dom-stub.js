@@ -146,7 +146,7 @@ function createStubWorld() {
     openLog: () => calls.push(['openLog']),
     quit: () => calls.push(['quit']),
     launchClaude: () => calls.push(['launchClaude']),
-    focusSession: (...a) => calls.push(['focusSession', a]),
+    focusSession: (...a) => { calls.push(['focusSession', a]); return Promise.resolve({ ok: true, route: 'terminal-window' }); },
     focusPet: () => calls.push(['focusPet']),
     blurPet: () => calls.push(['blurPet']),
     decidePermission: (...a) => calls.push(['decidePermission', a]),

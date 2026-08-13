@@ -267,6 +267,7 @@ let sessionFilter = 'all';
 let showArchived = false;
 let pinnedSessionIds = [];
 let archivedSessionIds = [];
+const sessionFocusState = new Map(); // session key → busy or the last failure reason
 // 面板开着、且(鼠标在面板上 / 输入框聚焦/有草稿 / 已选了选项) = 交互中：
 // 此时别重渲面板、别改小章鱼状态，免得打断你思考/选择。面板一关就自动解除。
 const isInteracting = () => askActive && (askHover || document.activeElement === askText || !!(askText && askText.value) || (elic && elic.selected != null));
@@ -886,6 +887,17 @@ function visibleSessions() {
     });
 }
 
+function focusFailureText(reason) {
+  if (reason === 'session-not-found' || reason === 'window-closed' || reason === 'tab-closed') {
+    return t('sess.focusInvalid');
+  }
+  if (reason === 'route-missing') return t('sess.focusRouteMissing');
+  if (reason === 'broker-unavailable' || reason === 'broker-timeout') {
+    return t('sess.focusBrokerUnavailable');
+  }
+  return t('sess.focusFailed');
+}
+
 function renderSessList() {
   const list = visibleSessions();
   if (slTravelInbox) {
@@ -910,8 +922,12 @@ function renderSessList() {
     return;
   }
   for (const s of list) {
+    const key = sessionKey(s);
+    const focusState = sessionFocusState.get(key) || null;
     const row = document.createElement('div');
     row.className = 'sl-row';
+    if (focusState === 'busy') row.classList.add('busy');
+    else if (focusState) row.classList.add('focus-error');
     const attn = s.state === 'waiting' || s.state === 'needsinput';
     // meta：等待类显示「等你…」；忙碌显示当前操作；其余只显示状态（不要把陈旧 op 显示成"处理中"）
     let meta;
@@ -922,10 +938,11 @@ function renderSessList() {
     else if (s.badge === 'done') meta = t('sess.justDone');
     else if (s.badge === 'interrupted') meta = t('sess.interrupted');
     else meta = sessMeta(s.state) || s.state;
+    if (focusState === 'busy') meta = t('sess.focusing');
+    else if (focusState) meta = focusFailureText(focusState);
     const dotCls = sessionDotClass(s); // 与头顶小点同一套配色
     const ctx = typeof s.contextPercent === 'number'
       ? `<span class="sl-ctx ${ctxClass(s.contextPercent)}">${s.contextPercent}%</span>` : '';
-    const key = sessionKey(s);
     const pinned = pinnedSessionIds.includes(key);
     const archived = archivedSessionIds.includes(key);
     row.innerHTML =
@@ -974,10 +991,36 @@ function renderSessList() {
       window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
       renderSessList();
     });
-    row.addEventListener('click', () => {
-      window.pet.focusSession(s.sessionId || '');
-      rlog('sesslist', 'focus ' + (s.project || ''));
-      closeSessList();
+    row.addEventListener('click', async () => {
+      if (sessionFocusState.get(key) === 'busy') return;
+      sessionFocusState.set(key, 'busy');
+      row.classList.remove('focus-error');
+      row.classList.add('busy');
+      row.setAttribute('aria-busy', 'true');
+      const metaEl = row.querySelector('.sl-meta');
+      if (metaEl) metaEl.textContent = t('sess.focusing');
+
+      let result;
+      try {
+        result = await window.pet.focusSession(s.sessionId || '');
+      } catch {
+        result = { ok: false, reason: 'focus-failed' };
+      }
+      if (result && result.ok) {
+        sessionFocusState.delete(key);
+        rlog('sesslist', `focus ${s.project || ''} via ${result.route || 'unknown'}`);
+        closeSessList();
+        return;
+      }
+
+      const reason = result && result.reason || 'focus-failed';
+      sessionFocusState.set(key, reason);
+      row.classList.remove('busy');
+      row.classList.add('focus-error');
+      row.removeAttribute('aria-busy');
+      if (metaEl) metaEl.textContent = focusFailureText(reason);
+      rlog('sesslist', `focus failed ${s.project || ''}: ${reason}`);
+      fitPopup(sesslist);
     });
     slRows.appendChild(row);
   }
