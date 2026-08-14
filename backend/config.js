@@ -23,6 +23,11 @@ const DEFAULTS = Object.freeze({
   petMode: 'single',      // 'single' 一只宠监控全部后端 | 'duo' Claude/Codex 各一只
   skinCodex: 'cat',       // 双宠模式里 Codex 宠的形象（和主形象错开才认得出谁是谁）
   petPositionCodex: null, // {x,y} | null — Codex 宠的落脚点
+  // dsh（DeepSeek Harness）宠是独立开关，不并进 petMode：Codex 宠开不开与
+  // dsh 宠开不开互不影响，四种组合都成立（主宠始终兜住没被分出去的后端）。
+  dshPet: false,
+  skinDsh: 'pixel',       // dsh 宠默认像素怪兽：和主宠(章鱼)/Codex 宠(月薪喵)三者错开
+  petPositionDsh: null,   // {x,y} | null — dsh 宠的落脚点
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
   archivedSessions: [],   // 会话 HUD 归档项（不影响后端任务本身）
@@ -34,6 +39,7 @@ const DEFAULTS = Object.freeze({
   agentStartup: {         // LLMPET 启动时，只补拉起当前没有运行的交互式 CLI
     claude: true,
     codex: true,
+    dsh: false,           // dsh 默认不自动拉起：它起的是本地 web 服务，会开浏览器
   },
 });
 
@@ -105,6 +111,11 @@ function sanitize(raw) {
   if (raw.petPositionCodex && Number.isFinite(raw.petPositionCodex.x) && Number.isFinite(raw.petPositionCodex.y)) {
     out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }
+  out.dshPet = raw.dshPet === true;
+  if (['mascot', 'pixel', 'cat'].includes(raw.skinDsh)) out.skinDsh = raw.skinDsh;
+  if (raw.petPositionDsh && Number.isFinite(raw.petPositionDsh.x) && Number.isFinite(raw.petPositionDsh.y)) {
+    out.petPositionDsh = { x: Math.round(raw.petPositionDsh.x), y: Math.round(raw.petPositionDsh.y) };
+  }
   if (['zh', 'en', 'ja'].includes(raw.lang)) out.lang = raw.lang;
   out.pinnedSessions = sanitizeSessionIds(raw.pinnedSessions);
   out.archivedSessions = sanitizeSessionIds(raw.archivedSessions)
@@ -122,6 +133,7 @@ function sanitize(raw) {
     out.agentStartup = {
       claude: raw.agentStartup.claude !== false,
       codex: raw.agentStartup.codex !== false,
+      dsh: raw.agentStartup.dsh === true,
     };
   }
   return out;

@@ -84,6 +84,20 @@ Codex 用の hook はインストールしません。次の rollout を増分�
 
 rollout イベントを共通の状態機械へ変換し、内部 subagent スレッドを除外します。長時間セッションの復帰時も過去イベントを再生せず、新しく追加された部分だけを読み取ります。各イベントの `last_token_usage` から永続的なローカル token 台帳を作り、レート制限とは分けて表示します。この台帳を OpenAI の請求履歴とは表示しません。
 
+### DeepSeek Harness (dsh)
+
+dsh 用のプラグインもインストールしません。ハーネス自身のセッションログを読み取り専用で監視します。
+
+```text
+$DSH_HOME|~/.dsh/sessions/--<プロジェクト>--/<セッション>/session.jsonl.zstd
+```
+
+このログは既定で **zstd フレームの連結**です。Electron 33 同梱の Node には zstd API が無いため、LLMPET 自身がフレーム境界を走査し、完全なフレームだけを順に展開します（内蔵の純 JS デコーダ [fzstd](https://github.com/101arrowz/fzstd)、MIT、`backend/vendor/` 参照）。末尾の不完全なフレームは次の巡回まで持ち越します。`compression: 'none'` の平文 `session.jsonl` にも対応します。
+
+`turn/start` は思考、そのターン最初の `tool/call` 以降は「作業中」を維持し、`turn/end` は理由に応じて完了祝い / 中断バッジ / エラーになります。`approval/asked` は「返事待ち」（承認は dsh 自身の画面で行います）、`session/title` はそのままセッション名に、`assistant/message.usage` と `request/context.contextWindow` からコンテキスト % を出します。subagent のログ（`origin: 'subagent'`、`delegationDepth > 0`）はファイルごと除外します。
+
+トレイの **🌊 dsh ペット** を有効にすると、見た目・位置・名札が独立した三匹目が現れます（Codex ペットの切り替えとは独立）。無効なら本体ペットが dsh も見ます。dsh のセッションには端末 PID が無いため、「返信しに行く」は `dsh web` の画面（既定 `http://127.0.0.1:3080`、`LLMPET_DSH_WEB` で上書き）を開きます。dsh のセッションは Claude / Codex へ引き継げますが、逆はできません（dsh に resume 相当の CLI が無いため）。dsh は任意のプロバイダを利用できるので、料金台帳は作らずコンテキスト % のみを表示します。
+
 ## 旅するカエル
 
 セッション右側の **🧳** を押すと、そのセッションの Claude Code / Codex が同じプロジェクトディレクトリへ別行動で出発します。「プロジェクト偵察」「バグ探し」「アイデア散歩」から選ぶか、目的を自由に入力できます。
@@ -141,6 +155,8 @@ assets/memes/<meme-id>/
 - `OCTOPUS_DEBUG=1 npm start` — ローカル `/debug` エンドポイントを有効化します。
 - `LLMPET_NO_CODEX=1 npm start` — Codex rollout の監視を無効化します。
 - `LLMPET_CODEX_DIR=<dir> npm start` — テスト用の rollout ディレクトリを指定します。
+- `LLMPET_NO_DSH=1 npm start` — DeepSeek Harness のセッション監視を無効化します。
+- `LLMPET_DSH_DIR=<dir> npm start` — テスト用の dsh セッションディレクトリを指定します。
 
 ## コントリビューター
 

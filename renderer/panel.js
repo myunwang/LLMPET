@@ -286,11 +286,13 @@ function renderCal(daily) {
   if (cr) cr.innerHTML = calSummary;
 }
 
-// 会话来源小图标：Claude 橙 burst / Codex 蓝终端块（与桌宠 HUD 同款）
+// 会话来源小图标：Claude 橙 burst / Codex 蓝终端块 / dsh 深蓝鲸波（与桌宠 HUD 同款）
 const AGENT_ICON = {
   claude: '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>',
   codex: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#3b82f6"/><path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  dsh: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#4d6bfe"/><circle cx="8.6" cy="9" r="1.5" fill="#fff"/><path d="M12 9h5.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><path d="M5 15c1.6 0 1.6-1.7 3.3-1.7S9.9 15 11.5 15s1.6-1.7 3.3-1.7S16.4 15 18 15" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>',
 };
+const AGENT_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'dsh' };
 
 function renderSessList(sessions) {
   const el = $('sess-list');
@@ -311,7 +313,7 @@ function renderSessList(sessions) {
         : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
         : escapeHtml(t(m.key));
       const icon = AGENT_ICON[s.agent] || AGENT_ICON.claude;
-      const who = s.agent === 'codex' ? 'Codex' : 'Claude';
+      const who = AGENT_NAME[s.agent] || 'Claude';
       // 会话 id 芯片：短前缀够认人，点一下复制完整 id（跨 session 协作时贴给
       // 另一个 agent 去 resume）。title 挂完整 id，不用复制也能看全。
       const id = s.sessionId ? `<button class="sess-id" data-id="${escapeHtml(s.sessionId)}" title="${escapeHtml(s.sessionId)}&#10;${escapeHtml(t('panel.copyId'))}">${escapeHtml(shortId(s.sessionId))}</button>` : '';

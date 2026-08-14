@@ -35,7 +35,16 @@ const TOOL_LABEL_KEY = {
 
 // core 的 agentId → 前端的 agent 短词（会话行图标 / 事件路由按这个分流）
 function agentOf(entry) {
-  return entry && entry.agentId === 'codex' ? 'codex' : 'claude';
+  const id = entry && entry.agentId;
+  if (id === 'codex') return 'codex';
+  if (id === 'dsh') return 'dsh';
+  return 'claude';
+}
+
+// 气泡/授权卡里的「谁在说话」。dsh = DeepSeek Harness，产品名就是小写的 dsh。
+const AGENT_NAME = { codex: 'Codex', dsh: 'dsh', claude: 'Claude' };
+function agentLabel(entry) {
+  return AGENT_NAME[agentOf(entry)] || 'Claude';
 }
 
 function toolIcon(tool) { return TOOL_ICON[tool] || '🔧'; }
@@ -74,7 +83,7 @@ function errorMessage(type) {
 
 function projectName(entry) {
   if (entry.sessionRole === 'travel') {
-    const who = agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
+    const who = agentLabel(entry);
     return t('travel.sessionName', { who });
   }
   if (entry.sessionTitle) return entry.sessionTitle;
@@ -188,7 +197,7 @@ function buildPermChoice(perm, entry) {
     label: travel ? t('travel.denyTrip') : t('perm.deny'),
     key: 'deny',
   });
-  const who = entry && agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
+  const who = entry ? agentLabel(entry) : 'Claude';
   const action = humanizeTool(perm.toolName, perm.toolInput);
   return {
     kind: 'perm',
@@ -261,7 +270,7 @@ function buildCodexChoice(choice, entry) {
 
 // "Claude asked something / wants a reply" → read-only context + 去回复 button.
 function buildContinueChoice(entry) {
-  const who = agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
+  const who = agentLabel(entry);
   return {
     kind: 'continue',
     sessionId: entry.id,
@@ -422,9 +431,10 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     //   - 文件不动才是真没动静 → 摸鱼（loafing），不硬说「思考中」。
     // 只认 PostToolUse/SubagentStop 间隙——PreToolUse 间隙是工具还在跑，仍算干活。
     // 真思考仍有渠道：UserPromptSubmit → thinking 是事件驱动的。
-    // Codex 不走这条启发式：rollout 有明确 task_complete / turn_aborted，本轮首个
-    // 工具后即使长时间无落盘也仍是 Codex UI 所说的 Working，不能误报“摸鱼”。
-    if (e.agentId !== 'codex'
+    // Codex / dsh 不走这条启发式：它们的日志里有明确的回合终止事件（task_complete /
+    // turn_aborted、turn/end），本轮首个工具之后即使长时间无落盘也仍在执行，
+    // 不能误报“摸鱼”。
+    if (e.agentId !== 'codex' && e.agentId !== 'dsh'
       && state === 'working'
       && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
       && e.idleMs > LOAF_GAP_MS) {
@@ -661,6 +671,7 @@ module.exports = {
   combineUsage,
   activityToEvents,
   agentOf,
+  agentLabel,
   buildPermChoice,
   buildElicitationChoice,
   buildCodexChoice,

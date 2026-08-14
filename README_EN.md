@@ -84,6 +84,20 @@ LLMPET does not install Codex hooks. It incrementally and read-only tails:
 
 It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
 
+### DeepSeek Harness (dsh)
+
+LLMPET installs no dsh plugins either. It read-only tails the harness's own session logs:
+
+```text
+$DSH_HOME|~/.dsh/sessions/--<project>--/<session>/session.jsonl.zstd
+```
+
+Those logs are **concatenated zstd frames** by default, and the Node runtime inside Electron 33 has no zstd API — so LLMPET scans frame boundaries itself and decodes complete frames one by one (bundled pure-JS decoder [fzstd](https://github.com/101arrowz/fzstd), MIT, see `backend/vendor/`), leaving a torn trailing frame for the next poll. Uncompressed `session.jsonl` logs (`compression: 'none'`) work too.
+
+`turn/start` means thinking; once the turn's first `tool/call` lands it stays "working"; `turn/end` maps to celebration, interruption, or error by its reason; `approval/asked` shows "waiting for you" (answer it in dsh's own UI); `session/title` supplies the session name, and `assistant/message.usage` plus `request/context.contextWindow` give the context percentage. Subagent logs (`origin: 'subagent'`, `delegationDepth > 0`) are skipped entirely.
+
+Tick **🌊 dsh pet** in the tray to give dsh its own pet with a separate skin, position, and name tag — independent of the Codex pet toggle. Without it the main pet watches dsh too. "Go reply" opens the `dsh web` UI (`http://127.0.0.1:3080` by default, override with `LLMPET_DSH_WEB`) because dsh sessions have no terminal PID. A dsh session can be handed off to Claude or Codex, but not the other way around: dsh has no resume-style CLI. No cost ledger is built for dsh — it can front any provider, so LLMPET reports context only and never pretends to be a bill.
+
 ## Travel Frog
 
 Click **🧳** beside a session to send that session's Claude Code or Codex agent on a separate expedition in the same project directory. Choose Project scout, Bug hunt, Idea trail, or write a custom mission.
@@ -141,6 +155,8 @@ Scheduled local backup is **off by default**. When the user explicitly enables i
 - `OCTOPUS_DEBUG=1 npm start` — expose the local `/debug` endpoint.
 - `LLMPET_NO_CODEX=1 npm start` — disable Codex rollout watching.
 - `LLMPET_CODEX_DIR=<dir> npm start` — use a custom rollout directory for testing.
+- `LLMPET_NO_DSH=1 npm start` — disable DeepSeek Harness session watching.
+- `LLMPET_DSH_DIR=<dir> npm start` — use a custom dsh session directory for testing.
 
 ## Contributors
 

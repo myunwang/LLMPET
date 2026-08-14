@@ -2,9 +2,12 @@
 
 // 这只宠盯谁：主进程建窗口时用 ?agent= 指派。
 //   all    单宠模式，Claude + Codex 都盯
-//   claude / codex 双宠模式里各盯一个后端
+//   claude / codex / dsh  分身模式里各盯一个后端
 const AGENT = new URLSearchParams(location.search).get('agent') || 'all';
-const AGENT_LABEL = { claude: 'Claude', codex: 'Codex' }[AGENT] || '';
+const AGENT_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'dsh' };
+const AGENT_LABEL = AGENT_NAME[AGENT] || '';
+// 会话行/名牌上的「谁」；未知后端一律按 Claude 兜底（与后端 adapter 同款）
+const agentName = (agent) => AGENT_NAME[agent] || 'Claude';
 
 const stage = document.getElementById('stage');
 const pixel = document.getElementById('pixel');
@@ -1282,7 +1285,13 @@ const CODEX_ICON =
   '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#3b82f6"/>' +
   '<path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
   '<path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>';
-const agentIcon = (s) => (s && s.agent === 'codex' ? CODEX_ICON : CLAUDE_ICON);
+// dsh（DeepSeek Harness）深蓝方块 + 鲸背波浪
+const DSH_ICON =
+  '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#4d6bfe"/>' +
+  '<circle cx="8.6" cy="9" r="1.5" fill="#fff"/><path d="M12 9h5.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>' +
+  '<path d="M5 15c1.6 0 1.6-1.7 3.3-1.7S9.9 15 11.5 15s1.6-1.7 3.3-1.7S16.4 15 18 15" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>';
+const AGENT_ICONS = { codex: CODEX_ICON, dsh: DSH_ICON, claude: CLAUDE_ICON };
+const agentIcon = (s) => AGENT_ICONS[s && s.agent] || CLAUDE_ICON;
 // State → HUD label. Resolved per call (not a frozen table) so switching the
 // language re-labels every row on the next render.
 const SESS_META_ICON = {
@@ -1365,7 +1374,7 @@ function visibleSessions() {
     .filter((s) => showArchived ? isArchivedSession(s) : !isArchivedSession(s))
     .filter((s) => {
       if (sessionFilter === 'attention') return ['waiting', 'needsinput', 'error'].includes(s.state);
-      if (sessionFilter === 'claude' || sessionFilter === 'codex') return s.agent === sessionFilter;
+      if (['claude', 'codex', 'dsh'].includes(sessionFilter)) return s.agent === sessionFilter;
       return true;
     })
     .filter((s) => {
@@ -1617,7 +1626,7 @@ function updateSessRow(row, session) {
     lootCapture && key === lootCapture.enteringSessionId ? ' loot-enter' : ''
   );
   parts.dot.className = `sl-dot ${sessionDotClass(session)}`;
-  parts.icon.title = session.agent === 'codex' ? 'Codex' : 'Claude';
+  parts.icon.title = agentName(session.agent);
   const iconMarkup = agentIcon(session);
   if (parts.icon.innerHTML !== iconMarkup) parts.icon.innerHTML = iconMarkup;
   parts.name.textContent = session.project || '';
@@ -1635,6 +1644,8 @@ function updateSessRow(row, session) {
   parts.takeover.textContent = t('takeover.entry');
   parts.meme.title = t('meme.entryTitle');
   parts.meme.textContent = t('meme.entry');
+  // 旅行只跑 Claude / Codex 的 CLI，dsh 会话没有可出发的载体 → 藏掉入口
+  parts.travel.classList.toggle('hidden', session.agent === 'dsh');
   parts.travel.title = t('travel.entryTitle');
   parts.pin.className = `sl-action pin${pinned ? ' active' : ''}`;
   parts.pin.title = t(pinned ? 'sess.unpin' : 'sess.pin');
@@ -1754,7 +1765,7 @@ function openTakeoverPage(session) {
   slBack.classList.remove('hidden');
   slTitle.textContent = t('takeover.pickTitle');
   slSub.textContent = '';
-  const source = session.agent === 'codex' ? 'Codex' : 'Claude';
+  const source = agentName(session.agent);
   slTakeoverSession.textContent = t('takeover.source', { who: source, project: session.project });
   slTakeoverClaudeMode.textContent = t(session.agent === 'claude' ? 'takeover.nativeMode' : 'takeover.handoffMode');
   slTakeoverCodexMode.textContent = t(session.agent === 'codex' ? 'takeover.nativeMode' : 'takeover.handoffMode');
@@ -1820,7 +1831,7 @@ async function openMemePage(session) {
   slBack.classList.remove('hidden');
   slTitle.textContent = t('meme.pickTitle');
   slSub.textContent = '';
-  slMemeSession.textContent = `${session.agent === 'codex' ? 'Codex' : 'Claude'} · ${session.project}`;
+  slMemeSession.textContent = `${agentName(session.agent)} · ${session.project}`;
   slMemeGrid.innerHTML = '';
   setMemeStatus(t('meme.loading'));
   await loadMemeCatalog();
@@ -1907,7 +1918,7 @@ function travelMailboxSessions() {
 function renderTravelMailboxes() {
   if (!slTravelMailboxes) return;
   const sessions = travelMailboxSessions();
-  const agents = AGENT === 'all' ? ['claude', 'codex'] : [AGENT];
+  const agents = AGENT === 'all' ? ['claude', 'codex'] : (AGENT === 'dsh' ? [] : [AGENT]);
   const active = travelData && travelData.active;
   const renderSig = JSON.stringify({
     lang: window.OctoI18n.getLang(),
@@ -2465,7 +2476,7 @@ function renderTravelPage() {
   const shownTarget = active || travelTarget;
 
   slTravelSession.textContent = shownTarget
-    ? `${shownTarget.agent === 'codex' ? 'Codex' : 'Claude'} · ${shownTarget.project || ''}`
+    ? `${agentName(shownTarget.agent)} · ${shownTarget.project || ''}`
     : t('travel.inboxIntro');
   slTravelRankIcons.textContent = tokenRankText(rank);
   const remaining = Math.max(0, (Number(rank.nextTokens) || 10000) - (Number(rank.progressTokens) || 0));
@@ -3660,7 +3671,9 @@ const slNewCodexBtn = document.getElementById('sl-new-codex');
 // Rebind the key rather than the text: applyStaticI18n() re-reads data-i18n on
 // every language switch, so the Codex pet keeps its own label.
 if (AGENT === 'codex') slNewBtn.dataset.i18n = 'sess.newCodex';
-else if (AGENT === 'all' && slNewCodexBtn) slNewCodexBtn.classList.remove('hidden'); // 单宠双后端：两个都能开
+else if (AGENT === 'dsh') slNewBtn.dataset.i18n = 'sess.newDsh';
+else if (AGENT === 'all' && slNewCodexBtn) slNewCodexBtn.classList.remove('hidden'); // 单宠多后端：两个都能开
+if (AGENT === 'dsh' && slTravelInbox) slTravelInbox.classList.add('hidden');
 if (slTravelInbox) slTravelInbox.addEventListener('click', async (e) => {
   e.stopPropagation();
   await openTravelInbox();
@@ -3683,7 +3696,9 @@ if (slWander) slWander.addEventListener('click', async (e) => {
 });
 slNewBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (AGENT === 'codex') window.pet.launchCodex(); else window.pet.launchClaude();
+  if (AGENT === 'codex') window.pet.launchCodex();
+  else if (AGENT === 'dsh') window.pet.launchDsh();
+  else window.pet.launchClaude();
   closeSessList();
 });
 if (slNewCodexBtn) slNewCodexBtn.addEventListener('click', (e) => { e.stopPropagation(); window.pet.launchCodex(); closeSessList(); });
@@ -3699,7 +3714,11 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
     e.stopPropagation();
     const op = b.dataset.op;
     if (op === 'panel') window.pet.openPanel();
-    else if (op === 'claude') { if (AGENT === 'codex') window.pet.launchCodex(); else window.pet.launchClaude(); }
+    else if (op === 'claude') {
+      if (AGENT === 'codex') window.pet.launchCodex();
+      else if (AGENT === 'dsh') window.pet.launchDsh();
+      else window.pet.launchClaude();
+    }
     else if (op === 'log') window.pet.openLog();
     closeTodoPop();
   });
@@ -3891,15 +3910,15 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   // 双宠模式：亮出名牌（谁盯 Claude、谁盯 Codex 一眼分清）
   const agentTag = document.getElementById('agent-tag');
   if (AGENT !== 'all' && agentTag) {
-    agentTag.innerHTML = `<span class="at-ic">${AGENT === 'codex' ? CODEX_ICON : CLAUDE_ICON}</span><span>${AGENT_LABEL}</span>`;
+    agentTag.innerHTML = `<span class="at-ic">${AGENT_ICONS[AGENT] || CLAUDE_ICON}</span><span>${AGENT_LABEL}</span>`;
     agentTag.classList.add(AGENT);
     agentTag.classList.remove('hidden');
   }
   // 记事本弹层的唤起按钮跟着 agent 走
-  if (AGENT === 'codex') {
+  if (AGENT === 'codex' || AGENT === 'dsh') {
     const b = todopop.querySelector('.tp-ops button[data-op="claude"]');
-    // Rebind the key so applyStaticI18n() keeps relabelling it as Codex.
-    if (b) b.dataset.i18n = 'tray.launchCodex';
+    // Rebind the key so applyStaticI18n() keeps relabelling it per backend.
+    if (b) b.dataset.i18n = AGENT === 'codex' ? 'tray.launchCodex' : 'tray.launchDsh';
   }
   const cfg = await window.pet.getConfig();
   if (cfg) {
@@ -3922,6 +3941,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   else if (!lastStats) setState('idle');
   showBubble(
     AGENT === 'codex' ? t('bub.onlineCodex')
+      : AGENT === 'dsh' ? t('bub.onlineDsh')
       : AGENT === 'claude' ? t('bub.onlineClaude')
       : t('bub.online'),
     3000,

@@ -28,9 +28,10 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
-const { launchClaude, launchCodex, launchExecutable, findCli } = require('./backend/launch');
+const { launchClaude, launchCodex, launchDsh, launchExecutable, findCli } = require('./backend/launch');
 const { createAgentStartup } = require('./backend/agent-startup');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { createDshWatch } = require('./backend/dsh-watch');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
 const { machineGrowth } = require('./backend/growth');
@@ -51,9 +52,13 @@ i18n.setLang(config.get().lang);
 
 const PRELOAD = path.join(__dirname, 'preload.js');
 const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
+// `dsh web` 的默认落点（apps/web 的 webserver 行：127.0.0.1:3080）。
+// 用户改过端口就用 LLMPET_DSH_WEB 覆盖。
+const DSH_WEB_URL = process.env.LLMPET_DSH_WEB || 'http://127.0.0.1:3080';
 
 let petWin = null;      // 主宠窗口：single 模式监控全部；duo 模式代表 Claude
 let petWinCodex = null; // 双宠模式里的 Codex 宠（single 模式为 null）
+let petWinDsh = null;   // dsh（DeepSeek Harness）宠，独立开关（关掉时为 null）
 let panelWin = null;
 let archiveWin = null;
 let panelH = 0; // 面板当前自适应高度（防抖用）
@@ -67,6 +72,7 @@ let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
+let dshWatch = null;    // DeepSeek Harness 会话日志只读监听器
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
 let sessionTakeover = null;
@@ -96,22 +102,36 @@ let statsTimer = null;
 let emitDebounce = null;
 const recentOps = []; // ring for the panel "操作流"; newest first, capped
 
+// 分身宠：被单独分出去的后端。主宠（'all'）要把它们从自己的快照里剔掉，
+// 否则同一个会话会在两只宠身上各显示一份。
+function splitAgents() {
+  const c = config.get();
+  const out = [];
+  if (c.petMode === 'duo') out.push('codex');
+  if (c.dshPet) out.push('dsh');
+  return out;
+}
+
 // ── frontend config shape ─────────────────────────────────────────────────────
-// agent: 'all'(单宠/面板) | 'claude' | 'codex' —— 双宠模式两只宠形象/位置各一套
+// agent: 'all'(单宠/面板) | 'claude' | 'codex' | 'dsh' —— 每只宠形象/位置各一套
 function frontendConfig(agent = 'all') {
   const c = config.get();
+  const skinByAgent = { codex: c.skinCodex, dsh: c.skinDsh };
+  const positionByAgent = { codex: c.petPositionCodex, dsh: c.petPositionDsh };
+  const clone = agent === 'codex' || agent === 'dsh';
   return {
     mode: c.mode,
-    skin: agent === 'codex' ? c.skinCodex : c.skin,
-    petPosition: agent === 'codex' ? c.petPositionCodex : c.petPosition,
+    skin: skinByAgent[agent] || c.skin,
+    petPosition: positionByAgent[agent] || (clone ? null : c.petPosition),
     muted: c.muted,
     permHook: c.permHook,
     territory: c.territory,
-    // 巡视（领地模式）只由主宠负责，Codex 分身菜单里不显示
-    territorySupported: process.platform === 'darwin' && agent !== 'codex',
-    lootSupported: process.platform === 'darwin' && agent !== 'codex',
+    // 巡视（领地模式）只由主宠负责，分身菜单里不显示
+    territorySupported: process.platform === 'darwin' && !clone,
+    lootSupported: process.platform === 'darwin' && !clone,
     agent,
     petMode: c.petMode,
+    dshPet: c.dshPet,
     lang: c.lang,
     pinnedSessions: c.pinnedSessions,
     archivedSessions: c.archivedSessions,
@@ -186,24 +206,30 @@ function applyPetSize(st, requestedAnchor) {
   }
 }
 
-// 双宠开关：single 一只宠盯全部后端；duo Claude/Codex 各一只（形象/位置独立）
+// 分身开关：主宠始终在（single 模式盯全部后端；有分身时盯「剩下的」），
+// Codex 宠由 petMode='duo' 决定，dsh 宠由 dshPet 决定，两者互不影响。
 function createPetWindows() {
   const duo = config.get().petMode === 'duo';
+  const dsh = config.get().dshPet === true;
   petWin = makePetWindow(duo ? 'claude' : 'all');
   petWinCodex = duo ? makePetWindow('codex') : null;
-  log('main', `pet windows: ${duo ? 'duo (claude+codex)' : 'single (all)'}`);
+  petWinDsh = dsh ? makePetWindow('dsh') : null;
+  log('main', `pet windows: ${[duo ? 'claude' : 'all', duo ? 'codex' : '', dsh ? 'dsh' : ''].filter(Boolean).join('+')}`);
 }
+
+// 分身宠默认落脚点：按出场次序依次往主宠左边错开，肩并肩不重叠
+const CLONE_SHIFT = { codex: 1, dsh: 2 };
 
 function makePetWindow(agent) {
   const c = config.get();
-  const saved = agent === 'codex' ? c.petPositionCodex : c.petPosition;
+  const savedByAgent = { codex: c.petPositionCodex, dsh: c.petPositionDsh };
+  const saved = savedByAgent[agent] || (CLONE_SHIFT[agent] ? null : c.petPosition);
   let x, y;
   if (saved) { x = saved.x; y = saved.y; }
   else {
     try {
       const wa = screen.getPrimaryDisplay().workArea;
-      // Codex 宠默认落在主宠左边，肩并肩不重叠
-      const shift = agent === 'codex' ? BASE_W + 36 : 0;
+      const shift = (CLONE_SHIFT[agent] || 0) * (BASE_W + 36);
       x = wa.x + wa.width - BASE_W - 24 - shift;
       y = wa.y + wa.height - BASE_H - 24;
     } catch {}
@@ -244,6 +270,7 @@ function makePetWindow(agent) {
     petState.delete(wcId);
     if (petWin === win) petWin = null;
     if (petWinCodex === win) petWinCodex = null;
+    if (petWinDsh === win) petWinDsh = null;
   });
 
   // 注意读 st.agent 而非闭包 agent：单宠⇄双宠切换时主宠原地重载、身份会变
@@ -252,13 +279,14 @@ function makePetWindow(agent) {
     if (win === petWin && (petGuided || petFrameGuided)) return; // 领地走位不算用户拖拽
     if (win.isDestroyed()) return;
     const b = win.getBounds();
-    config.save(st.agent === 'codex'
-      ? { petPositionCodex: { x: b.x, y: b.y } }
-      : { petPosition: { x: b.x, y: b.y } });
+    const at = { x: b.x, y: b.y };
+    if (st.agent === 'codex') config.save({ petPositionCodex: at });
+    else if (st.agent === 'dsh') config.save({ petPositionDsh: at });
+    else config.save({ petPosition: at });
   });
   win.webContents.on('did-finish-load', () => {
     sendWin(win, 'pet:config', frontendConfig(st.agent));
-    if (core) sendWin(win, 'pet:stats', buildStats(st.agent));
+    if (core) sendWin(win, 'pet:stats', petStats(st.agent));
   });
   return win;
 }
@@ -681,6 +709,7 @@ function sendWin(win, channel, payload) {
 function firstAlivePetWin() {
   if (petWin && !petWin.isDestroyed()) return petWin;
   if (petWinCodex && !petWinCodex.isDestroyed()) return petWinCodex;
+  if (petWinDsh && !petWinDsh.isDestroyed()) return petWinDsh;
   return null;
 }
 // sendPet = 发给主宠（领地/授权等主宠专属通道沿用它）；主宠不在则兜底
@@ -688,19 +717,27 @@ function sendPet(channel, payload) { sendWin(firstAlivePetWin(), channel, payloa
 function sendPanel(channel, payload) { sendWin(panelWin, channel, payload); }
 function sendArchive(channel, payload) { sendWin(archiveWin, channel, payload); }
 
-// 事件按来源 agent 分流：双宠模式 codex 事件归 Codex 宠（不在了就兜底主路），其余归主宠。
+// 事件按来源 agent 分流：分身宠在场就归它（不在了兜底主路），其余归主宠。
 function sendPetEvent(ev) {
-  if (ev && ev.agent === 'codex' && petWinCodex && !petWinCodex.isDestroyed()) {
-    sendWin(petWinCodex, 'pet:event', ev);
+  const cloneWin = ev && ev.agent === 'codex' ? petWinCodex
+    : ev && ev.agent === 'dsh' ? petWinDsh
+    : null;
+  if (cloneWin && !cloneWin.isDestroyed()) {
+    sendWin(cloneWin, 'pet:event', ev);
     return;
   }
   sendPet('pet:event', ev);
 }
 
-// 按 agent 过滤会话快照（'all' 原样透传；active/idleMs 在过滤后的集合里重算）
-function filterSnapshot(snap, agent) {
-  if (agent === 'all') return snap;
-  const sessions = (snap.sessions || []).filter((e) => adapter.agentOf(e) === agent);
+// 按 agent 过滤会话快照（active/idleMs 在过滤后的集合里重算）。
+// 'all' 是主宠/面板：面板要全量，主宠要「减去已分身出去的后端」——差别由
+// excludes 决定，避免同一个会话在两只宠身上各显示一份。
+function filterSnapshot(snap, agent, excludes = []) {
+  if (agent === 'all' && !excludes.length) return snap;
+  const sessions = (snap.sessions || []).filter((e) => {
+    const a = adapter.agentOf(e);
+    return agent === 'all' ? !excludes.includes(a) : a === agent;
+  });
   let active = null;
   for (const e of sessions) {
     if (e.headless) continue;
@@ -717,7 +754,7 @@ function filterSnapshot(snap, agent) {
   };
 }
 
-function buildStats(agent = 'all', snapshot = null) {
+function buildStats(agent = 'all', snapshot = null, excludes = []) {
   if (travelManager && core) {
     for (const session of core.sessions.values()) {
       travelManager.decorateSession(session, adapter.agentOf(session));
@@ -729,13 +766,13 @@ function buildStats(agent = 'all', snapshot = null) {
       travelManager.decorateSession(session, adapter.agentOf(session));
     }
   }
-  const snap = filterSnapshot(rawSnapshot, agent);
+  const snap = filterSnapshot(rawSnapshot, agent, excludes);
   const meter = metering ? metering.getStats() : null;
   const codexUsage = codexMetering ? codexMetering.getStats() : null;
-  // 授权（HTTP 阻塞钩子）只存在于 Claude 路径；Codex 宠不认领
-  const pending = agent === 'codex' ? [] : permissions.getPending();
+  // 授权（HTTP 阻塞钩子）只存在于 Claude 路径；Codex / dsh 宠不认领
+  const pending = agent === 'codex' || agent === 'dsh' ? [] : permissions.getPending();
   const ops = (agent === 'all'
-    ? recentOps
+    ? recentOps.filter((o) => !excludes.includes(o.agent || 'claude'))
     : recentOps.filter((o) => (o.agent || 'claude') === agent)).slice(0, 30);
   const stats = adapter.buildPetStats(snap, pending, meter, {
     lastOps: ops,
@@ -753,6 +790,12 @@ function buildStats(agent = 'all', snapshot = null) {
   return stats;
 }
 
+// 桌宠窗口要的快照：主宠（'all'）得减掉已经分身出去的后端；面板/档案馆用
+// buildStats('all') 拿全量，不走这里。
+function petStats(agent, snapshot = null) {
+  return buildStats(agent, snapshot, agent === 'all' ? splitAgents() : []);
+}
+
 // Record operation/say events into the ring the panel renders as the op stream.
 function recordOp(ev) {
   if (ev.kind === 'operation') {
@@ -766,9 +809,11 @@ function recordOp(ev) {
 function emitStats() {
   if (!core) return;
   const snapshot = core.buildSnapshot();
-  lastStats = buildStats('all', snapshot);
+  lastStats = buildStats('all', snapshot); // 面板/档案馆永远要全量
+  const splits = splitAgents();
   for (const st of petStates()) {
-    sendWin(st.win, 'pet:stats', st.agent === 'all' ? lastStats : buildStats(st.agent, snapshot));
+    const full = st.agent === 'all' && !splits.length;
+    sendWin(st.win, 'pet:stats', full ? lastStats : petStats(st.agent, snapshot));
   }
   sendPanel('panel:stats', lastStats);
   sendArchive('workbench:stats', lastStats);
@@ -876,6 +921,19 @@ function bootBackend() {
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
     });
     codexWatch.start();
+  }
+
+  // DeepSeek Harness 后端：只读监听 $DSH_HOME|~/.dsh/sessions 的会话日志
+  // （同样无钩子、零侵入；不装 dsh 的机器上 watcher 只是空转）。
+  // LLMPET_NO_DSH=1 关闭；LLMPET_DSH_DIR 可指到假目录做开发/E2E。
+  if (process.env.LLMPET_NO_DSH === '1') {
+    log('main', 'LLMPET_NO_DSH=1 — dsh watcher disabled');
+  } else {
+    dshWatch = createDshWatch({
+      core,
+      sessionsDir: process.env.LLMPET_DSH_DIR || undefined,
+    });
+    dshWatch.start();
   }
 
   metering = createMetering();
@@ -1011,11 +1069,12 @@ function registerIpc() {
 
   ipcMain.handle('get-config', (e) => frontendConfig(senderAgent(e)));
   ipcMain.handle('get-stats', (e) => {
-    const agent = senderAgent(e);
     // Do not return a stale cached price/token snapshot to a newly opened
     // dashboard. buildStats is read-only and reflects the latest ledger scan.
-    if (agent === 'all') return buildStats();
-    return buildStats(agent);
+    // 桌宠窗口（stateOfSender 有值）走 petStats：主宠要减掉已分身的后端；
+    // 面板/档案馆不是桌宠窗口，拿全量。
+    const st = stateOfSender(e.sender);
+    return st ? petStats(st.agent) : buildStats('all');
   });
   ipcMain.handle('get-win-pos', (e) => {
     const win = senderPetWin(e);
@@ -1160,8 +1219,11 @@ function registerIpc() {
   });
 
   ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
-  // Codex 宠上切形象 → 存 skinCodex；其余（主宠/面板）→ 存主形象
-  ipcMain.on('set-skin', (e, skin) => applySkin(skin, senderAgent(e) === 'codex' ? 'codex' : null));
+  // 分身宠上切形象 → 存各自的皮肤位；其余（主宠/面板）→ 存主形象
+  ipcMain.on('set-skin', (e, skin) => {
+    const agent = senderAgent(e);
+    applySkin(skin, agent === 'codex' || agent === 'dsh' ? agent : null);
+  });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
   ipcMain.on('set-session-prefs', (_e, pinnedSessions, archivedSessions) => {
     config.save({ pinnedSessions, archivedSessions });
@@ -1189,6 +1251,12 @@ function registerIpc() {
       if (!r.ok) log('main', 'launch codex failed:', r.message);
     }).catch((e) => log('main', 'launch codex error:', e.message));
   });
+  // dsh 起的是本地 web 界面（默认 127.0.0.1:3080），终端窗口留着看日志
+  ipcMain.on('launch-dsh', () => {
+    launchDsh({}).then((r) => {
+      if (!r.ok) log('main', 'launch dsh failed:', r.message);
+    }).catch((e) => log('main', 'launch dsh error:', e.message));
+  });
 
   ipcMain.on('permission-decide', (_e, permId, behavior) => {
     if (behavior === 'travel:always-web') {
@@ -1207,6 +1275,14 @@ function registerIpc() {
     if (session && session.agentId === 'codex') {
       shell.openExternal(`codex://threads/${encodeURIComponent(session.id)}`)
         .catch((err) => log('main', 'open Codex thread failed:', err.message));
+      return;
+    }
+    // dsh 同样没有终端 pid：它的会话活在本地 web 界面里（`dsh web` 默认
+    // 127.0.0.1:3080）。没有 deep link 可用，就把那个界面打开——比对着一个
+    // 注定失败的 pid focus 干等强。
+    if (session && session.agentId === 'dsh') {
+      shell.openExternal(DSH_WEB_URL)
+        .catch((err) => log('main', 'open dsh web failed:', err.message));
       return;
     }
     focusSession(session);
@@ -1351,11 +1427,19 @@ function registerIpc() {
   //   • no sessions at all → launch a fresh CLI
   ipcMain.on('primary-action', async (e) => {
     const agent = senderAgent(e);
+    const splits = splitAgents();
     const all = core
-      ? [...core.sessions.values()].filter((s) => agent === 'all' || adapter.agentOf(s) === agent)
+      ? [...core.sessions.values()].filter((s) => {
+        const a = adapter.agentOf(s);
+        return agent === 'all' ? !splits.includes(a) : a === agent;
+      })
       : [];
-    // 空场时：Codex 宠唤起 codex CLI，其余唤起 claude
-    if (!all.length) { (agent === 'codex' ? launchCodex : launchClaude)({}).catch(() => {}); return; }
+    // 空场时各唤各的：Codex 宠拉 codex，dsh 宠拉 `dsh web`，其余拉 claude
+    if (!all.length) {
+      const launcher = agent === 'codex' ? launchCodex : agent === 'dsh' ? launchDsh : launchClaude;
+      launcher({}).catch(() => {});
+      return;
+    }
     const focusables = all
       .filter((s) => !s.headless && s.sourcePid)
       .sort((a, b) => {
@@ -1440,13 +1524,15 @@ function applyMode(mode) {
   refreshTrayMenu();
 }
 function applySkin(skin, agent) {
-  config.save(agent === 'codex' ? { skinCodex: skin } : { skin });
+  if (agent === 'codex') config.save({ skinCodex: skin });
+  else if (agent === 'dsh') config.save({ skinDsh: skin });
+  else config.save({ skin });
   broadcastConfig();
   refreshTrayMenu();
 }
 
-// 补齐当前 petMode 应有的窗口（被单独收起的宠从托盘找回来）。主宠身份变化
-// (all⇄claude)时原地重载渲染器——不销毁窗口，位置不动、Codex 宠不闪。
+// 补齐当前设置应有的窗口（被单独收起的宠从托盘找回来）。主宠身份变化
+// (all⇄claude)时原地重载渲染器——不销毁窗口，位置不动、分身不闪。
 function ensurePetWindows() {
   const duo = config.get().petMode === 'duo';
   const primaryAgent = duo ? 'claude' : 'all';
@@ -1468,6 +1554,13 @@ function ensurePetWindows() {
     petWinCodex = null;
     try { if (!gone.isDestroyed()) gone.destroy(); } catch {}
   }
+  if (config.get().dshPet === true) {
+    if (!petWinDsh || petWinDsh.isDestroyed()) petWinDsh = makePetWindow('dsh');
+  } else if (petWinDsh) {
+    const gone = petWinDsh;
+    petWinDsh = null;
+    try { if (!gone.isDestroyed()) gone.destroy(); } catch {}
+  }
 }
 
 // 单宠 ⇄ 双宠切换（托盘复选「Codex 桌宠」）：勾选出现、取消隐藏
@@ -1478,7 +1571,21 @@ function applyPetMode(petMode) {
   if (config.get().mode === 'menubar') { for (const st of petStates()) st.win.hide(); }
   broadcastConfig();
   refreshTrayMenu();
+  emitStats(); // 主宠的会话集合跟着变（分出去/收回来），立刻重推一次
   log('main', `petMode → ${petMode}`);
+}
+
+// dsh 宠开关（托盘复选「dsh 桌宠」）：与 Codex 宠互不影响
+function applyDshPet(enabled) {
+  const want = enabled === true;
+  if (config.get().dshPet === want) return;
+  config.save({ dshPet: want });
+  ensurePetWindows();
+  if (config.get().mode === 'menubar') { for (const st of petStates()) st.win.hide(); }
+  broadcastConfig();
+  refreshTrayMenu();
+  emitStats();
+  log('main', `dshPet → ${want}`);
 }
 // Language switch (tray → Settings → Language). Main-process copy is baked into
 // the strings the adapter already pushed, so a plain re-broadcast would leave
@@ -1515,6 +1622,8 @@ function refreshTrayMenu() {
   const mode = cfg.mode || 'pet';
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
+  const dshPet = cfg.dshPet === true;
+  const skinDsh = cfg.skinDsh || 'pixel';
   const lang = cfg.lang || 'zh';
   tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -1524,6 +1633,9 @@ function refreshTrayMenu() {
     // 复选开关：勾上 = 双宠（Codex 分身出现），取消 = 单宠（一只盯全部后端）
     { label: t('tray.codexPet'), type: 'checkbox', checked: petMode === 'duo',
       click: () => applyPetMode(config.get().petMode === 'duo' ? 'single' : 'duo') },
+    // dsh（DeepSeek Harness）宠：独立开关，和 Codex 宠可同开
+    { label: t('tray.dshPet'), type: 'checkbox', checked: dshPet,
+      click: () => applyDshPet(config.get().dshPet !== true) },
     { type: 'separator' },
     { label: t('tray.settings'), enabled: false },
     { label: t('tray.language'), submenu: i18n.LANGS.map((code) => ({
@@ -1534,10 +1646,12 @@ function refreshTrayMenu() {
         click: () => setAgentStartup('claude', config.get().agentStartup.claude !== true) },
       { label: t('tray.agentStartupCodex'), type: 'checkbox', checked: cfg.agentStartup.codex === true,
         click: () => setAgentStartup('codex', config.get().agentStartup.codex !== true) },
+      { label: t('tray.agentStartupDsh'), type: 'checkbox', checked: cfg.agentStartup.dsh === true,
+        click: () => setAgentStartup('dsh', config.get().agentStartup.dsh !== true) },
       { type: 'separator' },
-      { label: t('tray.agentStartupNow'), click: () => runAgentStartup({ agents: ['claude', 'codex'] }) },
+      { label: t('tray.agentStartupNow'), click: () => runAgentStartup({ agents: ['claude', 'codex', 'dsh'] }) },
     ] },
-    { label: petMode === 'duo' ? t('tray.skinClaude') : t('tray.skin'), submenu: [
+    { label: petMode === 'duo' || dshPet ? t('tray.skinClaude') : t('tray.skin'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
       { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
       { label: t('skin.cat'), type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
@@ -1546,6 +1660,11 @@ function refreshTrayMenu() {
       { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
       { label: t('skin.pixel'), type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
       { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
+    ] }] : []),
+    ...(dshPet ? [{ label: t('tray.skinDsh'), submenu: [
+      { label: t('skin.mascot'), type: 'radio', checked: skinDsh === 'mascot', click: () => applySkin('mascot', 'dsh') },
+      { label: t('skin.pixel'), type: 'radio', checked: skinDsh === 'pixel', click: () => applySkin('pixel', 'dsh') },
+      { label: t('skin.cat'), type: 'radio', checked: skinDsh === 'cat', click: () => applySkin('cat', 'dsh') },
     ] }] : []),
     { label: t('tray.shape'), submenu: [
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
@@ -1561,6 +1680,7 @@ function refreshTrayMenu() {
     { type: 'separator' },
     { label: t('tray.launchClaude'), click: () => launchClaude({}).catch(() => {}) },
     { label: t('tray.launchCodex'), click: () => launchCodex({}).catch(() => {}) },
+    { label: t('tray.launchDsh'), click: () => launchDsh({}).catch(() => {}) },
     { label: t('tray.openLog'), click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
     { label: t('tray.uninstallHook'), click: () => {
@@ -1682,6 +1802,7 @@ app.on('before-quit', () => {
   try { if (programRegistry) programRegistry.stop(); } catch {}
   try { if (runtimeMonitor) runtimeMonitor.stop(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
+  try { if (dshWatch) dshWatch.stop(); } catch {}
   try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}

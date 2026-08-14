@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// CLI 名 → 各平台常见安装位置（PATH 探测兜底）。codex 与 claude 同一套逻辑。
+// CLI 名 → 各平台常见安装位置（PATH 探测兜底）。codex / dsh 与 claude 同一套逻辑。
 const CLI_DIRS = {
   claude: (home) => [
     path.join(home, '.local', 'bin', 'claude'),
@@ -25,6 +25,12 @@ const CLI_DIRS = {
     path.join(home, '.local', 'bin', 'codex'),
     '/opt/homebrew/bin/codex',
     '/usr/local/bin/codex',
+  ],
+  // DeepSeek Harness：npm 包 @deepseek-ai/dsh 装出来的可执行名就是 dsh
+  dsh: (home) => [
+    path.join(home, '.local', 'bin', 'dsh'),
+    '/opt/homebrew/bin/dsh',
+    '/usr/local/bin/dsh',
   ],
 };
 
@@ -64,7 +70,7 @@ function cliInstalled(name) {
 
 function isInteractiveCliCommand(command, name) {
   const text = String(command || '').trim();
-  const target = name === 'claude' ? 'claude' : name === 'codex' ? 'codex' : '';
+  const target = ['claude', 'codex', 'dsh'].includes(name) ? name : '';
   if (!text || !target) return false;
 
   // Desktop clients embed the same binaries for app-server / stream-json
@@ -73,7 +79,7 @@ function isInteractiveCliCommand(command, name) {
   if (/\bapp-server\b/i.test(text)
       || /--(?:input|output)-format(?:=|\s+)stream-json\b/i.test(text)
       || /\b(?:Claude|Codex) Helper\b/i.test(text)
-      || /\b(?:grep|rg|ps|wmic)\b[^\n]*\b(?:claude|codex)\b/i.test(text)) return false;
+      || /\b(?:grep|rg|ps|wmic)\b[^\n]*\b(?:claude|codex|dsh)\b/i.test(text)) return false;
 
   const first = text.match(/^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
   const executable = first ? (first[1] || first[2] || first[3] || '') : '';
@@ -82,9 +88,10 @@ function isInteractiveCliCommand(command, name) {
 
   // npm installations can leave a node/bun launcher in the process table.
   if (!['node', 'nodejs', 'bun'].includes(base)) return false;
-  return target === 'codex'
-    ? /(?:^|[\\/])(?:@openai[\\/])?codex(?:\.js)?(?:\s|$|[\\/])/i.test(text)
-    : /(?:^|[\\/])(?:@anthropic-ai[\\/])?claude(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  if (target === 'codex') return /(?:^|[\\/])(?:@openai[\\/])?codex(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  // dsh 是 npm 包 @deepseek-ai/dsh，装出来的 bin 常见形态是 node .../dsh/bin.js
+  if (target === 'dsh') return /(?:^|[\\/])(?:@deepseek-ai[\\/])?dsh(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  return /(?:^|[\\/])(?:@anthropic-ai[\\/])?claude(?:\.js)?(?:\s|$|[\\/])/i.test(text);
 }
 
 function cliProcessPids(output, name) {
@@ -103,7 +110,7 @@ function cliProcessPids(output, name) {
 }
 
 function isCliRunning(name) {
-  if (!['claude', 'codex'].includes(name)) return Promise.resolve(false);
+  if (!['claude', 'codex', 'dsh'].includes(name)) return Promise.resolve(false);
   if (process.platform === 'win32') {
     const script = [
       'Get-CimInstance Win32_Process',
@@ -400,10 +407,17 @@ async function launchExecutable(command, opts = {}) {
 
 const launchClaude = (opts = {}) => launchCli('claude', opts);
 const launchCodex = (opts = {}) => launchCli('codex', opts);
+// dsh 没有交互式 TUI：默认起 `dsh web`（本地 127.0.0.1:3080 的界面），
+// 调用方显式给 args 时以调用方为准。
+const launchDsh = (opts = {}) => launchCli('dsh', {
+  ...opts,
+  args: Array.isArray(opts.args) && opts.args.length ? opts.args : ['web'],
+});
 
 module.exports = {
   launchClaude,
   launchCodex,
+  launchDsh,
   launchCli,
   launchExecutable,
   closeCliTerminal,

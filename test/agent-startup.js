@@ -72,12 +72,15 @@ async function main() {
   console.log('  ✓ 启动阶段重复触发不会开出双窗口');
 
   console.log('[AS4] 配置默认统一入口开启且可分别关闭');
-  assert.deepStrictEqual(config.DEFAULTS.agentStartup, { claude: true, codex: true });
+  // dsh 起的是本地 web 服务（会开浏览器），默认不自动补开——只有用户显式勾选才拉起
+  assert.deepStrictEqual(config.DEFAULTS.agentStartup, { claude: true, codex: true, dsh: false });
   assert.deepStrictEqual(config.sanitize({ agentStartup: { claude: false, codex: true } }).agentStartup,
-    { claude: false, codex: true });
+    { claude: false, codex: true, dsh: false });
+  assert.deepStrictEqual(config.sanitize({ agentStartup: { dsh: true } }).agentStartup,
+    { claude: true, codex: true, dsh: true });
   assert.deepStrictEqual(config.sanitize({ agentStartup: {} }).agentStartup,
-    { claude: true, codex: true });
-  console.log('  ✓ 旧配置自动获得默认值，两个 Agent 可独立控制');
+    { claude: true, codex: true, dsh: false });
+  console.log('  ✓ 旧配置自动获得默认值，三个 Agent 可独立控制');
 
   console.log('agent startup checks passed');
 }

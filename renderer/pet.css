@@ -269,6 +269,7 @@ html, body {
 .agent-tag .at-ic svg { width: 100%; height: 100%; }
 .agent-tag.claude { background: rgba(217, 119, 87, 0.22); color: #ffb495; border: 1px solid rgba(217, 119, 87, 0.45); }
 .agent-tag.codex { background: rgba(59, 130, 246, 0.2); color: #9cc4ff; border: 1px solid rgba(59, 130, 246, 0.45); }
+.agent-tag.dsh { background: rgba(77, 107, 254, 0.2); color: #aab8ff; border: 1px solid rgba(77, 107, 254, 0.45); }
 
 /* ---------- 皮肤切换：默认图标款章鱼（mascot），可切像素怪兽（pixel）/ 月薪喵（cat） ---------- */
 #pixel { display: none; }

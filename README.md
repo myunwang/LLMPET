@@ -82,6 +82,25 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
   - **双宠**：Claude / Codex 各一只，形象、位置独立可拖，各自戴名牌，事件各归各的宠。
 - `LLMPET_NO_CODEX=1` 关闭 Codex 监听；`LLMPET_CODEX_DIR=<dir>` 指向假目录做开发验证。
 
+### 🌊 dsh / DeepSeek Harness 后端（零配置、只读）
+
+第三个能盯的后端是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（CLI 名 `dsh`，`dsh web` 起本地界面）：
+
+```
+dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项目--/<会话>/session.jsonl.zstd
+                                                │ (dsh-watch 增量 tail，只读)
+                                                ▼
+                        同一个会话状态机 (core, agentId: 'dsh') ──► 桌宠/面板
+```
+
+- **不装任何插件**：dsh 自带 Claude Code / Codex 两种 hook 桥接插件，但都得用户往自己的 profile 里装插件、改 `cordis.patch.yml`。为一只桌宠去改你的 agent 组合不值当——所以照 Codex 的路子读它自己的会话日志，零配置、卸载无残留。
+- **压缩日志也读得动**：dsh 的日志默认是 **zstd 分帧**（`session.jsonl.zstd`，一次落盘一帧），而 Electron 33 自带的 Node 20 没有 zstd API。桌宠自己扫帧边界、逐帧解压（内置纯 JS 解码器 [fzstd](https://github.com/101arrowz/fzstd)，MIT，见 `backend/vendor/`），末尾半帧留到下一轮，边写边读不丢不重。`compression: 'none'` 的纯文本 `session.jsonl` 同样支持。
+- 事件映射：`turn/start→思考`；首个 `tool/call` 之后整轮保持“干活中”；`turn/end completed→完成庆祝 + 💬`，`aborted/blocked→中断徽标`，`error→出错`；`approval/asked→等你回复`（授权仍在 dsh 自己的界面里答）；`compaction→打扫`；`session/title` 直接用它自己起的标题；`assistant/message.usage` 配 `request/context.contextWindow` 算上下文 %。`origin: 'subagent'` 与 `delegationDepth > 0` 的子 agent 线程整份跳过。
+- **第三只宠**（托盘 → **🌊 dsh 桌宠**）：勾上就多一只独立的 dsh 宠，形象 / 位置 / 名牌各一套，dsh 的事件只进它；不勾则由主宠一起盯。它和「🛰️ Codex 桌宠」是两个独立开关，四种组合都成立。
+- 会话列表里 dsh 会话的「去回复」会打开 `dsh web` 的界面（默认 `http://127.0.0.1:3080`，改过端口用 `LLMPET_DSH_WEB` 覆盖）——它没有终端 pid 可聚焦。dsh 会话也能**交接**给 Claude / Codex（生成本地交接单），反向不行：dsh 没有 resume 语义的 CLI。
+- **不做用量 / 计费**：dsh 可接任意模型供应商，本地日志里没有可信的单价口径，所以只报上下文 %，不冒充账单。
+- `LLMPET_NO_DSH=1` 关闭 dsh 监听；`LLMPET_DSH_DIR=<dir>` 指向假目录做开发验证；日志根目录跟随 `$DSH_HOME`（默认 `~/.dsh`）。
+
 ### 🧳 青蛙旅行（只读探索）
 
 在会话列表点该会话右侧的 **🧳**，可让对应的 Claude Code / Codex 独自出去探索。它使用该会话的项目目录，但不会续写或污染原会话；可选择「项目侦察」「捉虫寻迹」「灵感散步」，也能写自定义任务。
@@ -184,6 +203,9 @@ backend/
   hookinstall.js        merge-safe 钩子安装器（合并不覆盖 / 原子写 / 卸载备份）
   launch.js             开终端跑 claude
   core.js               会话存储 + 状态机 + 快照 + 陈旧清理
+  dsh-watch.js          DeepSeek Harness 会话日志监听（只读 tail，agentId: 'dsh'）
+  zstd.js               zstd 分帧扫描 + 逐帧解压（原生优先，回落 vendor/fzstd）
+  vendor/fzstd.js       内置纯 JS zstd 解码器（MIT，见同目录 LICENSE-fzstd）
   server.js             本地 HTTP server（/state /permission /health）
   permission.js         授权持开/决策（字节级 CC 响应）
   adapter.js            内部模型 → 前端契约（事件 + 统计 + choice）
@@ -197,6 +219,8 @@ shared/
   i18n.js               全部界面文案的单一来源（zh / en / ja，主进程与渲染端共用）
 test/smoke.js           端到端冒烟测试
 test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗真的本地化了）
+test/dsh-watch.js       dsh 会话日志监听（事件映射 / 子 agent 过滤 / zstd 增量）
+test/zstd.js            zstd 分帧读取（完整帧 / 半帧 / 坏数据）
 ```
 
 ---
