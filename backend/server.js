@@ -83,7 +83,7 @@ function normContext(v) {
   const percent = Number(v.percent);
   if (Number.isFinite(percent)) out.percent = Math.max(0, Math.min(100, Math.round(percent)));
   else if (out.limit) out.percent = Math.max(0, Math.min(100, Math.round((used / out.limit) * 100)));
-  if (v.source === 'claude' || v.source === 'codex') out.source = v.source;
+  if (v.source === 'claude' || v.source === 'codex' || v.source === 'dsh') out.source = v.source;
   return out;
 }
 

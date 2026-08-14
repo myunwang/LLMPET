@@ -10,6 +10,7 @@ const {
   codexMessages,
   createSessionTakeover,
   nativeArgs,
+  providerOf,
   redactSecrets,
 } = require('../backend/session-handoff');
 
@@ -56,6 +57,11 @@ const {
   assert(packet.includes('不要把源代理声称的“已完成”当成事实'));
   assert(packet.includes('M renderer/pet.js'));
   assert(!packet.includes('super-secret-value'));
+  assert.strictEqual(providerOf({}), 'claude', 'missing agentId keeps the legacy Claude default');
+  assert.strictEqual(providerOf({ agentId: 'claude-code' }), 'claude');
+  assert.strictEqual(providerOf({ agentId: 'codex' }), 'codex');
+  assert.strictEqual(providerOf({ agentId: 'dsh' }), 'dsh');
+  assert.strictEqual(providerOf({ agentId: 'future-agent' }), 'unknown');
   console.log('  ✓ packet identifies provenance, current worktree, and verification boundaries');
 
   console.log('[HO3] official native resume/fork argument routing');
@@ -96,6 +102,20 @@ const {
     },
   });
 
+  const rejectedUnknown = await takeover.takeOver({
+    id: claudeId,
+    agentId: 'future-agent',
+    state: 'idle',
+    cwd: root,
+  }, 'claude');
+  assert.deepStrictEqual(rejectedUnknown, {
+    ok: false,
+    code: 'invalid-source-provider',
+    source: 'unknown',
+  });
+  assert.strictEqual(launches.length, 0, 'unknown provider must be rejected before any native launch');
+  assert.strictEqual(cleanupCallbacks.length, 0, 'unknown provider must not create a handoff temp file');
+
   const resumed = await takeover.takeOver({
     id: claudeId, agentId: 'codex', state: 'sleeping', cwd: root,
   }, 'codex');
@@ -127,8 +147,54 @@ const {
   assert.strictEqual(cleanupCallbacks[0].ms, 2 * 60 * 1000);
   cleanupCallbacks[0].callback();
   assert(!fs.existsSync(path.dirname(launches[2].options.promptFile)));
+
+  const dshTranscriptPath = path.join(root, 'dsh.jsonl');
+  const dshRows = [
+    { type: 'session', version: 0, id: 'dsh-source-session', cwd: root },
+    {
+      type: 'user/message',
+      data: {
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'DSH user request' }],
+      },
+    },
+    {
+      type: 'assistant/message',
+      data: {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'DSH assistant answer' }],
+        },
+      },
+    },
+  ];
+  fs.writeFileSync(dshTranscriptPath, dshRows.map((row) => JSON.stringify(row)).join('\n'));
+  const dshSession = {
+    id: 'dsh-source-session',
+    agentId: 'dsh',
+    state: 'idle',
+    cwd: root,
+    transcriptPath: dshTranscriptPath,
+    sessionTitle: 'dsh source',
+  };
+  const dshHandoff = await takeover.takeOver(dshSession, 'claude', { locale: 'en' });
+  assert.strictEqual(dshHandoff.code, 'handoff-launched');
+  assert.strictEqual(dshHandoff.source, 'dsh');
+  assert.strictEqual(dshHandoff.target, 'claude');
+  assert.strictEqual(launches[3].name, 'claude');
+  assert(launches[3].prompt.includes('Provider: dsh'));
+  assert(launches[3].prompt.includes('DSH user request'));
+  assert(launches[3].prompt.includes('DSH assistant answer'));
+  assert.strictEqual(cleanupCallbacks.length, 2);
+  cleanupCallbacks[1].callback();
+  assert(!fs.existsSync(path.dirname(launches[3].options.promptFile)));
+
+  const rejectedDshTarget = await takeover.takeOver(dshSession, 'dsh');
+  assert.deepStrictEqual(rejectedDshTarget, { ok: false, code: 'invalid-provider' });
+  assert.strictEqual(launches.length, 4, 'dsh remains a source, never a takeover target');
   fs.rmSync(root, { recursive: true, force: true });
-  console.log('  ✓ live native sessions fork safely; cross-provider sessions receive a visible handoff prompt');
+  console.log('  ✓ native sessions fork safely; dsh is a handoff source; unknown and dsh targets fail closed');
 
   console.log('session handoff checks passed');
 })().catch((error) => {

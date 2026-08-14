@@ -52,6 +52,27 @@ function sessionPath(root, id, { project = '--tmp-dproj--', zstd = false } = {})
   return path.join(dir, zstd ? 'session.jsonl.zstd' : 'session.jsonl');
 }
 
+// 生成不压缩（raw blocks）的合法 zstd frame，避免测试依赖 Node 版本是否内置
+// zstd compressor。单块按规范限制为 128KiB。
+function rawZstdFrame(payload) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload));
+  const parts = [];
+  const headerBuf = Buffer.alloc(9);
+  headerBuf.writeUInt32LE(0xFD2FB528, 0);
+  headerBuf[4] = 0xA0; // single segment + 4-byte frame content size
+  headerBuf.writeUInt32LE(body.length, 5);
+  parts.push(headerBuf);
+  let offset = 0;
+  while (offset < body.length) {
+    const n = Math.min(128 * 1024, body.length - offset);
+    const blockHeader = Buffer.alloc(3);
+    blockHeader.writeUIntLE((n << 3) | (offset + n === body.length ? 1 : 0), 0, 3);
+    parts.push(blockHeader, body.subarray(offset, offset + n));
+    offset += n;
+  }
+  return Buffer.concat(parts);
+}
+
 const ID_A = 'ses_01JABCDEF0123456789';
 const ID_B = 'ses_01JZZZZZZ9876543210';
 
@@ -129,6 +150,26 @@ check('未答复的 approval → 入库即「等你回复」', () => {
   createDshWatch({ core, sessionsDir: root, pollMs: 999999 }).tick();
   assert.strictEqual(core.seeds[0].state, 'notification');
 });
+check('backfill 停在 tool/call → 恢复为 working，不误报空闲', () => {
+  const root = mkRoot();
+  fs.writeFileSync(sessionPath(root, ID_A),
+    header(ID_A)
+    + L({ type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } })
+    + L({ type: 'tool/call', seq: 2, time: Date.now(), data: { turn: 1, step: 1, callId: 'c1', name: 'bash' } }));
+  const core = fakeCore();
+  createDshWatch({ core, sessionsDir: root, pollMs: 999999 }).tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].state, 'working');
+  assert.strictEqual(core.updates.length, 0, 'backfill 仍需保持静默');
+});
+check('未知 session 日志版本 fail closed，不猜测解析', () => {
+  const root = mkRoot();
+  fs.writeFileSync(sessionPath(root, ID_A), header(ID_A, { version: 99 }) + userMsg('未来协议'));
+  const core = fakeCore();
+  createDshWatch({ core, sessionsDir: root, pollMs: 999999 }).tick();
+  assert.strictEqual(core.seeds.length, 0);
+  assert.strictEqual(core.updates.length, 0);
+});
 
 console.log('[D3] live：运行期间新会话的事件映射');
 check('turn/start → prompt → 工具 → 完成 全链路', () => {
@@ -197,10 +238,14 @@ check('工具失败 → PostToolUseFailure(error)', () => {
   assert.strictEqual(last.fields.toolName, 'Edit');
 });
 
-check('turn/end 的三种收场：aborted / error / completed', () => {
+check('turn/end 只有 completed 庆祝，其他已知/未知原因都不误报完成', () => {
   const cases = [
     [{ kind: 'aborted', reason: { kind: 'legacy' } }, 'TurnAborted', 'idle'],
     [{ kind: 'blocked' }, 'TurnAborted', 'idle'],
+    [{ kind: 'interrupted' }, 'TurnAborted', 'idle'],
+    [{ kind: 'max-tokens' }, 'TurnAborted', 'idle'],
+    [{ kind: 'future-reason' }, 'TurnAborted', 'idle'],
+    [null, 'TurnAborted', 'idle'],
     [{ kind: 'error', error: { message: 'boom', code: 'UNKNOWN' } }, 'ApiError', 'error'],
     [{ kind: 'completed' }, 'Stop', 'attention'],
   ];
@@ -214,7 +259,7 @@ check('turn/end 的三种收场：aborted / error / completed', () => {
     fs.appendFileSync(fp, L({ type: 'turn/end', seq: 1, time: Date.now(), data: { turn: 1, reason } }));
     w.tick();
     const last = core.updates[core.updates.length - 1];
-    assert.strictEqual(last.event, event, `${reason.kind} → ${event}`);
+    assert.strictEqual(last.event, event, `${reason && reason.kind || 'missing'} → ${event}`);
     assert.strictEqual(last.state, state);
   }
 });
@@ -375,6 +420,77 @@ check('运行中新增帧：整帧才处理，半帧等下一轮', () => {
     'SessionStart', 'TaskStarted', 'UserPromptSubmit', 'PreToolUse', 'Stop',
   ]);
   assert.strictEqual(core.updates[core.updates.length - 1].fields.assistantLastOutput, '读到了 ✅');
+});
+
+check('启动时撞上 zstd 半帧：补齐后从完整帧边界继续，不永久丢事件', () => {
+  const root = mkRoot();
+  const core = fakeCore();
+  const w = createDshWatch({ core, sessionsDir: root, pollMs: 999999 });
+  const fp = sessionPath(root, ZSTD_ID, { zstd: true });
+  const { scanFrames } = require('../backend/zstd');
+  const frames = scanFrames(ZSTD_FIXTURE).frames;
+  const half = frames[1].start + Math.floor((frames[1].end - frames[1].start) / 2);
+
+  // 首轮 backfill 时：header 完整，第二帧只写了一半。
+  fs.writeFileSync(fp, ZSTD_FIXTURE.subarray(0, half));
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.updates.length, 0);
+
+  // dsh 补完同一个帧并继续写。游标必须还在第一帧末尾，而不是半帧 EOF。
+  fs.appendFileSync(fp, ZSTD_FIXTURE.subarray(half));
+  w.tick();
+  assert.deepStrictEqual(core.events(), [
+    'TaskStarted', 'UserPromptSubmit', 'PreToolUse', 'Stop',
+  ]);
+  assert.strictEqual(core.updates[core.updates.length - 1].fields.assistantLastOutput, '读到了 ✅');
+});
+
+check('沉睡旧会话的初始 cursor 也停在完整帧边界', () => {
+  const root = mkRoot();
+  const core = fakeCore();
+  const fp = sessionPath(root, ZSTD_ID, { zstd: true });
+  const { scanFrames } = require('../backend/zstd');
+  const frames = scanFrames(ZSTD_FIXTURE).frames;
+  const half = frames[1].start + Math.floor((frames[1].end - frames[1].start) / 2);
+  fs.writeFileSync(fp, ZSTD_FIXTURE.subarray(0, half));
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(fp, old, old);
+
+  const w = createDshWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 0, '旧会话不应进入活跃列表');
+  assert.strictEqual(w._cursors.get(fp).offset, frames[0].end, 'cursor 不能落在半帧 EOF');
+});
+
+check('>16MiB 日志撞上 >8MiB 半写帧：补齐后不 broken，继续消费后续事件', () => {
+  const root = mkRoot();
+  const core = fakeCore();
+  const fp = sessionPath(root, ZSTD_ID, { zstd: true });
+  const { scanFrames } = require('../backend/zstd');
+  const first = scanFrames(ZSTD_FIXTURE).frames[0];
+  const headerFrame = ZSTD_FIXTURE.subarray(first.start, first.end);
+  const hugePayload = Buffer.alloc(17 * 1024 * 1024, 0x78); // 一整行无意义增量
+  hugePayload[hugePayload.length - 1] = 0x0A; // 换行，不能污染下一帧的 JSON 行
+  const hugeFrame = rawZstdFrame(hugePayload);
+  const tailFrame = rawZstdFrame(Buffer.from(
+    L({ type: 'turn/start', seq: 90, time: Date.now(), data: { turn: 9 } })
+    + userMsg('大帧之后仍然要收到我', 91),
+  ));
+  const cut = hugeFrame.length - 100;
+  fs.writeFileSync(fp, Buffer.concat([headerFrame, hugeFrame.subarray(0, cut)]));
+
+  const w = createDshWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(w._trackers.get(fp).offset, headerFrame.length,
+    '超大半帧的启动 cursor 必须停在 header 完整帧末尾');
+
+  fs.appendFileSync(fp, Buffer.concat([hugeFrame.subarray(cut), tailFrame]));
+  for (let i = 0; i < 5; i++) w.tick(); // 512KiB → 2MiB → 8MiB → 整帧 → tail
+  assert.deepStrictEqual(core.events(), ['TaskStarted', 'UserPromptSubmit']);
+  assert.strictEqual(w._trackers.get(fp).broken, false);
+  assert.strictEqual(w._trackers.get(fp).offset, fs.statSync(fp).size);
 });
 
 console.log('[D7] 会话交接读取：readLogEntries 两种形态都能拿到对话');

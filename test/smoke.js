@@ -77,6 +77,12 @@ function check(name, fn) {
 }
 
 async function main() {
+  console.log('[0] provider identity：未知来源绝不伪装成 Claude');
+  check('缺省 hook 仍兼容 Claude', () => assert.strictEqual(adapter.agentOf({}), 'claude'));
+  check('DeepSeek Harness 映射为 dsh', () => assert.strictEqual(adapter.agentOf({ agentId: 'dsh' }), 'dsh'));
+  check('未知 provider 保持 unknown', () => assert.strictEqual(adapter.agentOf({ agentId: 'future-agent' }), 'unknown'));
+  check('未知 provider 使用中性名称', () => assert.strictEqual(adapter.agentLabel({ agentId: 'future-agent' }), 'Agent'));
+
   server.start();
   for (let i = 0; i < 50 && !server.getPort(); i++) await sleep(20);
   assert(server.getPort(), 'server failed to bind a port');

@@ -28,7 +28,7 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
-const { launchClaude, launchCodex, launchDsh, launchExecutable, findCli } = require('./backend/launch');
+const { launchClaude, launchCodex, launchDsh, ensureDshWeb, launchExecutable, findCli } = require('./backend/launch');
 const { createAgentStartup } = require('./backend/agent-startup');
 const { createCodexWatch } = require('./backend/codex-watch');
 const { createDshWatch } = require('./backend/dsh-watch');
@@ -881,6 +881,9 @@ function bootBackend() {
   sessionArchive = createSessionArchive({
     getSettings: () => config.get().sessionArchive,
     onChange: (event) => sendArchive('archive:changed', event),
+    // Keep archive discovery on the same injected root as the live watcher in
+    // development/E2E; production still defaults to $DSH_HOME|~/.dsh/sessions.
+    dshRoot: process.env.LLMPET_DSH_DIR || undefined,
   });
   sessionArchive.start().catch((e) => log('archive', 'startup scan failed:', e.message));
   // Read-only until the user grants one provider from the Launcher page.
@@ -1277,12 +1280,18 @@ function registerIpc() {
         .catch((err) => log('main', 'open Codex thread failed:', err.message));
       return;
     }
-    // dsh 同样没有终端 pid：它的会话活在本地 web 界面里（`dsh web` 默认
-    // 127.0.0.1:3080）。没有 deep link 可用，就把那个界面打开——比对着一个
-    // 注定失败的 pid focus 干等强。
+    // dsh 同样没有可依赖的终端 pid。这里只能打开通用 Web 界面，不能精确
+    // focus 某条历史会话；而 headless/TUI 进程也不等于 Web 已启动，所以先
+    // 确认/补开 `dsh web` 并等 HTTP 就绪，再交给系统浏览器。
     if (session && session.agentId === 'dsh') {
-      shell.openExternal(DSH_WEB_URL)
-        .catch((err) => log('main', 'open dsh web failed:', err.message));
+      ensureDshWeb({ url: DSH_WEB_URL, terminalTitle: 'LLMPET · dsh' }).then((result) => {
+        if (!result.ok) {
+          log('main', `open dsh web failed: ${result.status || '-'} ${result.message || ''}`);
+          return;
+        }
+        shell.openExternal(DSH_WEB_URL)
+          .catch((err) => log('main', 'open dsh web failed:', err.message));
+      }).catch((err) => log('main', 'ensure dsh web failed:', err.message));
       return;
     }
     focusSession(session);
@@ -1329,6 +1338,9 @@ function registerIpc() {
     }
     const senderState = stateOfSender(e.sender);
     const agent = adapter.agentOf(session);
+    if (agent !== 'claude' && agent !== 'codex') {
+      return { ok: false, code: 'invalid-target', state: travelManager.publicState(i18n.getLang()) };
+    }
     if (!senderState || (senderState.agent !== 'all' && senderState.agent !== agent)) {
       return { ok: false, code: 'foreign-target', state: travelManager.publicState(i18n.getLang()) };
     }
@@ -1649,7 +1661,7 @@ function refreshTrayMenu() {
       { label: t('tray.agentStartupDsh'), type: 'checkbox', checked: cfg.agentStartup.dsh === true,
         click: () => setAgentStartup('dsh', config.get().agentStartup.dsh !== true) },
       { type: 'separator' },
-      { label: t('tray.agentStartupNow'), click: () => runAgentStartup({ agents: ['claude', 'codex', 'dsh'] }) },
+      { label: t('tray.agentStartupNow'), click: () => runAgentStartup() },
     ] },
     { label: petMode === 'duo' || dshPet ? t('tray.skinClaude') : t('tray.skin'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
@@ -1694,7 +1706,7 @@ function refreshTrayMenu() {
 }
 
 function setAgentStartup(agent, enabled) {
-  if (!['claude', 'codex'].includes(agent)) return;
+  if (!['claude', 'codex', 'dsh'].includes(agent)) return;
   const current = config.get().agentStartup;
   config.save({ agentStartup: { ...current, [agent]: enabled === true } });
   broadcastConfig();

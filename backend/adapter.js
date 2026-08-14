@@ -38,13 +38,17 @@ function agentOf(entry) {
   const id = entry && entry.agentId;
   if (id === 'codex') return 'codex';
   if (id === 'dsh') return 'dsh';
-  return 'claude';
+  // Claude hooks historically omitted agentId, so preserve that compatible
+  // default. A non-empty unknown id must remain unknown instead of being
+  // painted as Claude throughout the UI.
+  if (!id || id === 'claude' || id === 'claude-code') return 'claude';
+  return 'unknown';
 }
 
-// 气泡/授权卡里的「谁在说话」。dsh = DeepSeek Harness，产品名就是小写的 dsh。
-const AGENT_NAME = { codex: 'Codex', dsh: 'dsh', claude: 'Claude' };
+// 气泡/授权卡里的「谁在说话」。
+const AGENT_NAME = { codex: 'Codex', dsh: 'DeepSeek Harness', claude: 'Claude', unknown: 'Agent' };
 function agentLabel(entry) {
-  return AGENT_NAME[agentOf(entry)] || 'Claude';
+  return AGENT_NAME[agentOf(entry)] || 'Agent';
 }
 
 function toolIcon(tool) { return TOOL_ICON[tool] || '🔧'; }
@@ -378,8 +382,13 @@ function tagModels(byModel, agent) {
 }
 
 function combineUsage(claudeStats, codexStats, provider) {
-  const useClaude = provider !== 'codex';
-  const useCodex = provider !== 'claude';
+  // Only the two providers with a local, attributable price ledger may select
+  // one. `all` is the shared machine view. dsh can front arbitrary model
+  // providers, and an unknown future agent has no trusted pricing contract, so
+  // both must remain explicitly unavailable instead of inheriting both ledgers.
+  const scope = provider || 'all';
+  const useClaude = scope === 'all' || scope === 'claude';
+  const useCodex = scope === 'all' || scope === 'codex';
   const claude = useClaude && claudeStats ? claudeStats : null;
   const codex = useCodex && codexStats ? codexStats : null;
 
@@ -390,6 +399,7 @@ function combineUsage(claudeStats, codexStats, provider) {
   const claudeWindow = (claude && claude.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   const codexWindow = (codex && codex.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   return {
+    billingAvailable: useClaude || useCodex,
     today: addDay(claudeToday, codexToday),
     todayByProvider: { claude: claudeToday, codex: codexToday },
     window5h: addWindows(claudeWindow, codexWindow),
@@ -434,7 +444,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     // Codex / dsh 不走这条启发式：它们的日志里有明确的回合终止事件（task_complete /
     // turn_aborted、turn/end），本轮首个工具之后即使长时间无落盘也仍在执行，
     // 不能误报“摸鱼”。
-    if (e.agentId !== 'codex' && e.agentId !== 'dsh'
+    if (agentOf(e) === 'claude'
       && state === 'working'
       && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
       && e.idleMs > LOAF_GAP_MS) {
@@ -561,6 +571,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     bg: (opts && opts.runtime) || { running: 0, zombie: 0, total: 0, scripts: 0, agents: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
     codexUsage: (opts && opts.codexUsage) || null,
+    billingAvailable: usage.billingAvailable,
     usageProvider: (opts && opts.usageProvider) || 'claude',
     ts: snapshot.ts,
   };

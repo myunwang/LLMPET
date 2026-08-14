@@ -15,9 +15,12 @@ const { execFileSync } = require('child_process');
 const transcript = require('./transcript');
 const { launchCli, findCli } = require('./launch');
 const { readLogEntries, messageText } = require('./dsh-watch');
+const { agentOf } = require('./adapter');
 
-// 能被「接手」的目标：dsh 不在其中——它没有 resume 语义的 CLI（起的是 web 界面）。
-// 但 dsh 的会话可以作为**来源**交接给 Claude / Codex（走跨代理交接单那条路）。
+// dsh may provide TUI resume through an installed profile, but a machine can
+// legitimately have only the built-in web/headless profiles. LLMPET therefore
+// does not offer dsh as a takeover target; dsh sessions remain readable sources
+// for a local handoff packet to Claude or Codex.
 const PROVIDERS = new Set(['claude', 'codex']);
 const MESSAGE_LIMIT = 14;
 const MESSAGE_CHARS = 3600;
@@ -30,9 +33,7 @@ const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+\/-]{12,}/gi;
 const TOKEN_RE = /\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g;
 
 function providerOf(session) {
-  if (session && session.agentId === 'codex') return 'codex';
-  if (session && session.agentId === 'dsh') return 'dsh';
-  return 'claude';
+  return agentOf(session);
 }
 
 function contentText(content) {
@@ -119,7 +120,8 @@ function providerMessages(session, entries) {
   const provider = providerOf(session);
   if (provider === 'codex') return codexMessages(entries);
   if (provider === 'dsh') return dshMessages(entries);
-  return claudeMessages(entries, session && session.id);
+  if (provider === 'claude') return claudeMessages(entries, session && session.id);
+  return [];
 }
 
 function recentConversation(session, entries) {
@@ -261,6 +263,12 @@ function createSessionTakeover(deps = {}) {
     if (!session || session.headless || !session.id) return { ok: false, code: 'invalid-target' };
     if (!PROVIDERS.has(target)) return { ok: false, code: 'invalid-provider' };
     const source = providerOf(session);
+    // A non-empty, unrecognised agentId must never become a Claude native
+    // resume or a cross-provider packet that falsely claims Claude provenance.
+    // dsh remains an allowed source below, while still not being a target.
+    if (!['claude', 'codex', 'dsh'].includes(source)) {
+      return { ok: false, code: 'invalid-source-provider', source };
+    }
     const cwd = session.cwd && fsImpl.existsSync(session.cwd) ? session.cwd : os.homedir();
     const cli = find(target);
     if (path.isAbsolute(cli) && !fsImpl.existsSync(cli)) return { ok: false, code: 'cli-missing', target };

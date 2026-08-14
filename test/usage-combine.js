@@ -8,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { combineUsage } = require('../backend/adapter');
+const { buildPetStats, combineUsage } = require('../backend/adapter');
 
 const claude = {
   today: { cost: 18.07, tokens: 29_432_411, msgs: 72, input: 10_242, output: 57_662, cacheWrite5m: 0, cacheWrite1h: 199_974, cacheRead: 29_164_533 },
@@ -72,6 +72,29 @@ const codex = {
   assert.strictEqual(onlyCodex.todayByProvider.claude.cost, 0);
   assert.deepStrictEqual(Object.keys(onlyCodex.byModel), ['gpt-5.6-sol']);
   assert.strictEqual(onlyCodex.window5h.cost, 3.1);
+
+  for (const provider of ['dsh', 'future-agent']) {
+    const unavailable = combineUsage(claude, codex, provider);
+    assert.strictEqual(unavailable.billingAvailable, false, `${provider} has no attributable billing ledger`);
+    assert.strictEqual(unavailable.today.cost, 0);
+    assert.strictEqual(unavailable.today.tokens, 0);
+    assert.strictEqual(unavailable.lifetime.cost, 0);
+    assert.strictEqual(unavailable.todayByProvider.claude.cost, 0);
+    assert.strictEqual(unavailable.todayByProvider.codex.cost, 0);
+    assert.deepStrictEqual(unavailable.byModel, {});
+    assert.ok(unavailable.hourly.every((value) => value === 0));
+    assert.deepStrictEqual(unavailable.daily, {});
+  }
+
+  const dshStats = buildPetStats(
+    { sessions: [], active: null, ts: 1 },
+    [],
+    claude,
+    { codexUsage: codex, usageProvider: 'dsh' },
+  );
+  assert.strictEqual(dshStats.billingAvailable, false);
+  assert.strictEqual(dshStats.usageProvider, 'dsh');
+  assert.strictEqual(dshStats.today.cost, 0, 'a DSH pet snapshot must not contain Claude/Codex spend');
 }
 
 // ── missing ledgers degrade to zeros, never to NaN ───────────────────────────

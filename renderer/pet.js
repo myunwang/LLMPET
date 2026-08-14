@@ -4,10 +4,22 @@
 //   all    单宠模式，Claude + Codex 都盯
 //   claude / codex / dsh  分身模式里各盯一个后端
 const AGENT = new URLSearchParams(location.search).get('agent') || 'all';
-const AGENT_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'dsh' };
+const AGENT_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', unknown: 'Agent' };
 const AGENT_LABEL = AGENT_NAME[AGENT] || '';
-// 会话行/名牌上的「谁」；未知后端一律按 Claude 兜底（与后端 adapter 同款）
-const agentName = (agent) => AGENT_NAME[agent] || 'Claude';
+// 会话行/名牌上的「谁」；未知后端保持中性，绝不误标 Claude。
+const agentName = (agent) => AGENT_NAME[agent] || 'Agent';
+// Capabilities are provider-owned, never inferred from a UUID, terminal, or
+// future provider name. dsh may be handed off as a readable source, but meme
+// dispatch and travel are only implemented for Claude/Codex. Unknown providers
+// fail closed on every mutating/session-launch action.
+const SESSION_ACTIONS = {
+  claude: { takeover: true, meme: true, travel: true },
+  codex: { takeover: true, meme: true, travel: true },
+  dsh: { takeover: true, meme: false, travel: false },
+};
+const sessionActionAllowed = (session, action) => !!(
+  session && SESSION_ACTIONS[session.agent] && SESSION_ACTIONS[session.agent][action]
+);
 
 const stage = document.getElementById('stage');
 const pixel = document.getElementById('pixel');
@@ -1290,8 +1302,11 @@ const DSH_ICON =
   '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#4d6bfe"/>' +
   '<circle cx="8.6" cy="9" r="1.5" fill="#fff"/><path d="M12 9h5.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>' +
   '<path d="M5 15c1.6 0 1.6-1.7 3.3-1.7S9.9 15 11.5 15s1.6-1.7 3.3-1.7S16.4 15 18 15" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>';
-const AGENT_ICONS = { codex: CODEX_ICON, dsh: DSH_ICON, claude: CLAUDE_ICON };
-const agentIcon = (s) => AGENT_ICONS[s && s.agent] || CLAUDE_ICON;
+const UNKNOWN_AGENT_ICON =
+  '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#777582"/>' +
+  '<text x="12" y="17" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">?</text></svg>';
+const AGENT_ICONS = { codex: CODEX_ICON, dsh: DSH_ICON, claude: CLAUDE_ICON, unknown: UNKNOWN_AGENT_ICON };
+const agentIcon = (s) => AGENT_ICONS[s && s.agent] || UNKNOWN_AGENT_ICON;
 // State → HUD label. Resolved per call (not a frozen table) so switching the
 // language re-labels every row on the next render.
 const SESS_META_ICON = {
@@ -1644,8 +1659,9 @@ function updateSessRow(row, session) {
   parts.takeover.textContent = t('takeover.entry');
   parts.meme.title = t('meme.entryTitle');
   parts.meme.textContent = t('meme.entry');
-  // 旅行只跑 Claude / Codex 的 CLI，dsh 会话没有可出发的载体 → 藏掉入口
-  parts.travel.classList.toggle('hidden', session.agent === 'dsh');
+  parts.takeover.classList.toggle('hidden', !sessionActionAllowed(session, 'takeover'));
+  parts.meme.classList.toggle('hidden', !sessionActionAllowed(session, 'meme'));
+  parts.travel.classList.toggle('hidden', !sessionActionAllowed(session, 'travel'));
   parts.travel.title = t('travel.entryTitle');
   parts.pin.className = `sl-action pin${pinned ? ' active' : ''}`;
   parts.pin.title = t(pinned ? 'sess.unpin' : 'sess.pin');
@@ -1753,6 +1769,7 @@ function takeoverResultText(result, target) {
 }
 
 function openTakeoverPage(session) {
+  if (!sessionActionAllowed(session, 'takeover')) return false;
   memeTarget = null;
   travelTarget = null;
   takeoverTarget = session;
@@ -1773,11 +1790,12 @@ function openTakeoverPage(session) {
   slTakeoverCodex.disabled = false;
   setTakeoverStatus('');
   fitPopup(sesslist);
+  return true;
 }
 
 async function runTakeover(target) {
   const source = takeoverTarget;
-  if (!source) return;
+  if (!sessionActionAllowed(source, 'takeover') || !['claude', 'codex'].includes(target)) return false;
   slTakeoverClaude.disabled = true;
   slTakeoverCodex.disabled = true;
   setTakeoverStatus(t('takeover.starting'), 'warn');
@@ -1797,6 +1815,7 @@ async function runTakeover(target) {
       `ok=${!!(result && result.ok)} code=${result && result.code || '-'}`,
   );
   fitPopup(sesslist);
+  return true;
 }
 
 async function loadMemeCatalog() {
@@ -1821,6 +1840,7 @@ function setMemeStatus(text, kind = '') {
 }
 
 async function openMemePage(session) {
+  if (!sessionActionAllowed(session, 'meme')) return false;
   memeTarget = session;
   takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
@@ -1875,6 +1895,7 @@ async function openMemePage(session) {
   }
   setMemeStatus(memeCatalog.items.length ? t('meme.hint') : t('meme.none'));
   fitPopup(sesslist);
+  return true;
 }
 
 function travelBelongsToThisPet(trip) {
@@ -2540,6 +2561,9 @@ function renderTravelPage() {
 }
 
 async function openTravelPage(session) {
+  // A null session opens the provider-neutral mailbox. A concrete unsupported
+  // provider must not reach travel setup or the startTravel IPC.
+  if (session && !sessionActionAllowed(session, 'travel')) return false;
   travelTarget = session || null;
   takeoverTarget = null;
   sesslist.classList.remove('session-list-mode');
@@ -2582,6 +2606,7 @@ async function openTravelPage(session) {
     setTravelStatus(t('travel.notReady'), 'error');
   }
   renderTravelPage();
+  return true;
 }
 
 function openTravelInbox() {
@@ -3330,7 +3355,13 @@ function applyStats(s) {
   if (!s) return;
   lastStats = s;
   if (s.travel) travelData = s.travel;
-  if (AGENT === 'codex') {
+  if (s.billingAvailable === false || AGENT === 'dsh') {
+    chipCost.textContent = AGENT === 'dsh' ? 'DeepSeek Harness' : '—';
+    chipWindow.textContent = '';
+    chipWindow.title = '';
+    chipSep.classList.add('hidden');
+    chipWindow.classList.add('hidden');
+  } else if (AGENT === 'codex') {
     const today = s.codexUsage && s.codexUsage.today;
     chipCost.textContent = today && today.tokens
       ? compactTokens(today.tokens) + ' tok'
@@ -3592,7 +3623,7 @@ slTravelMission.addEventListener('focus', () => window.pet.focusPet());
 slTravelMission.addEventListener('blur', () => window.pet.blurPet());
 slTravelStart.addEventListener('click', async (e) => {
   e.stopPropagation();
-  if (!travelTarget) {
+  if (!sessionActionAllowed(travelTarget, 'travel')) {
     setTravelStatus(t('travel.invalid'), 'error');
     return;
   }
@@ -3668,11 +3699,15 @@ slFilters.addEventListener('click', (e) => {
 });
 const slNewBtn = document.getElementById('sl-new');
 const slNewCodexBtn = document.getElementById('sl-new-codex');
+const slNewDshBtn = document.getElementById('sl-new-dsh');
 // Rebind the key rather than the text: applyStaticI18n() re-reads data-i18n on
 // every language switch, so the Codex pet keeps its own label.
 if (AGENT === 'codex') slNewBtn.dataset.i18n = 'sess.newCodex';
 else if (AGENT === 'dsh') slNewBtn.dataset.i18n = 'sess.newDsh';
-else if (AGENT === 'all' && slNewCodexBtn) slNewCodexBtn.classList.remove('hidden'); // 单宠多后端：两个都能开
+else if (AGENT === 'all') {
+  if (slNewCodexBtn) slNewCodexBtn.classList.remove('hidden');
+  if (slNewDshBtn) slNewDshBtn.classList.remove('hidden');
+} // 单宠多后端：三个入口都能开
 if (AGENT === 'dsh' && slTravelInbox) slTravelInbox.classList.add('hidden');
 if (slTravelInbox) slTravelInbox.addEventListener('click', async (e) => {
   e.stopPropagation();
@@ -3702,6 +3737,7 @@ slNewBtn.addEventListener('click', (e) => {
   closeSessList();
 });
 if (slNewCodexBtn) slNewCodexBtn.addEventListener('click', (e) => { e.stopPropagation(); window.pet.launchCodex(); closeSessList(); });
+if (slNewDshBtn) slNewDshBtn.addEventListener('click', (e) => { e.stopPropagation(); window.pet.launchDsh(); closeSessList(); });
 document.getElementById('sl-archive').addEventListener('click', (e) => {
   e.stopPropagation();
   window.pet.openSessionArchive();

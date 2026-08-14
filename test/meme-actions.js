@@ -168,6 +168,28 @@ async function main() {
     'codex-desktop',
   );
   assert.strictEqual(
+    routeForSession({ id: claudeId, agentId: 'dsh' }, 'darwin').kind,
+    'unavailable',
+    'dsh must never inherit Claude resume from a UUID-shaped session id',
+  );
+  assert.strictEqual(
+    routeForSession({ id: claudeId, agentId: 'future-agent' }, 'darwin').kind,
+    'unavailable',
+    'unknown providers must never inherit Claude resume',
+  );
+  assert.strictEqual(
+    routeForSession({
+      id: claudeId,
+      agentId: 'future-agent',
+      tmuxSocket: '/tmp/tmux',
+      tmuxClient: '%3',
+      terminalApp: 'terminal',
+      terminalTty: 'ttys004',
+    }, 'darwin').kind,
+    'unavailable',
+    'terminal metadata must not bypass provider capabilities',
+  );
+  assert.strictEqual(
     transcriptHasPrompt(
       JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: meme.prompt.text + '\n' } }),
       meme.prompt.text,
@@ -191,6 +213,51 @@ async function main() {
     JSON.stringify({ sessionId: claudeDesktopId, cliSessionId: claudeId }),
   );
   assert.strictEqual(resolveClaudeDesktopSessionId(claudeId, claudeDesktopRoot), claudeDesktopId);
+
+  const blockedCalls = [];
+  const blockedDispatcher = createCommandDispatcher({
+    platform: 'darwin',
+    resolveClaudeDesktopSession: () => claudeDesktopId,
+    findCli: (name) => { blockedCalls.push(['find', name]); return `/fake/${name}`; },
+    execFile: (file, args, _opts, cb) => {
+      blockedCalls.push(['exec', file, args]);
+      cb(null, 'ok\n', '');
+    },
+    spawn: (file, args) => {
+      blockedCalls.push(['spawn', file, args]);
+      throw new Error('unsupported providers must not spawn a provider CLI');
+    },
+    copyText: (text) => blockedCalls.push(['copy', text]),
+    focusSession: async () => { blockedCalls.push(['focus']); return true; },
+    openClaudeThread: async (id) => { blockedCalls.push(['open-claude', id]); return true; },
+    openCodexThread: async (id) => { blockedCalls.push(['open-codex', id]); return true; },
+    getNativeHelper: async () => { blockedCalls.push(['native-helper']); return '/fake/helper'; },
+  });
+  for (const blockedSession of [
+    {
+      id: claudeId,
+      agentId: 'future-agent',
+      originator: 'Claude Desktop',
+      tmuxSocket: '/tmp/tmux',
+      tmuxClient: '%3',
+      terminalApp: 'terminal',
+      terminalTty: 'ttys004',
+    },
+    { id: claudeId, agentId: 'dsh', originator: 'Claude Desktop' },
+  ]) {
+    const blocked = await blockedDispatcher.dispatch(blockedSession, meme.prompt.text);
+    assert.strictEqual(blocked.ok, false);
+    assert.strictEqual(blocked.submitted, false);
+    assert.strictEqual(blocked.inputSent, false);
+    assert.strictEqual(blocked.copied, false);
+    assert.strictEqual(blocked.focused, false);
+    assert.strictEqual(blocked.route, 'unavailable');
+  }
+  assert.deepStrictEqual(
+    blockedCalls,
+    [],
+    'unsupported providers must fail before copy, focus, deep-link, helper, exec, or spawn side effects',
+  );
 
   const calls = [];
   const dispatcher = createCommandDispatcher({
