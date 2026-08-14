@@ -136,6 +136,103 @@ async function main() {
     });
   }
 
+  console.log('[R0.1] 透明窗拖拽失败路径');
+  {
+    const w = world();
+    w.handlers.config({ skin: 'mascot', muted: true });
+    const mascot = w.elements('mascot');
+    mascot.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 41, screenX: 100, screenY: 100,
+    });
+    await sleep(0);
+    mascot.dispatch('pointermove', {
+      buttons: 0, pointerId: 41, screenX: 145, screenY: 145,
+    });
+    check('漏掉 pointerup 后的纯 hover 不再移动窗口', () => {
+      assert(!w.calls.some((c) => c[0] === 'setWinPos'));
+      assert(!mascot.classList.contains('dragging'));
+    });
+
+    mascot.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 42, screenX: 200, screenY: 200,
+    });
+    await sleep(0);
+    mascot.dispatch('lostpointercapture', { pointerId: 42 });
+    mascot.dispatch('pointermove', {
+      buttons: 1, pointerId: 42, screenX: 250, screenY: 250,
+    });
+    check('pointer capture 丢失后不会继续拖动', () => {
+      assert(!w.calls.some((c) => c[0] === 'setWinPos'));
+      assert(!mascot.classList.contains('dragging'));
+    });
+  }
+
+  {
+    const w = world();
+    const cat = w.elements('cat');
+    const pendingOrigins = [];
+    w.window.pet.getWinPos = () => new Promise((resolve) => pendingOrigins.push(resolve));
+
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 51, screenX: 10, screenY: 10,
+    });
+    cat.dispatch('pointerup', { pointerId: 51 });
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 52, screenX: 100, screenY: 100,
+    });
+    pendingOrigins[0]([900, 700]);
+    await sleep(0);
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 52, screenX: 130, screenY: 130,
+    });
+    check('旧手势的异步窗口坐标不会污染新手势', () => {
+      assert(!w.calls.some((c) => c[0] === 'setWinPos'));
+    });
+    pendingOrigins[1]([20, 30]);
+    await sleep(0);
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 52, screenX: 135, screenY: 135,
+    });
+    check('新手势自己的窗口坐标到达后仍可正常拖动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'));
+    });
+    cat.dispatch('pointercancel', { pointerId: 52 });
+  }
+
+  console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
+  {
+    const w = world();
+    w.handlers.config({ skin: 'mascot', muted: false });
+    const choice = {
+      kind: 'perm', sessionId: 'permission-resize', permId: 'perm-resize',
+      project: 'LLMPET', question: '允许执行命令吗？',
+      options: [
+        { label: '允许', key: 'allow' },
+        { label: '拒绝', key: 'deny' },
+      ],
+    };
+    w.handlers.stats(baseStats({
+      waitingCount: 1,
+      sessions: [{
+        sessionId: choice.sessionId, project: choice.project, agent: 'claude',
+        state: 'waiting', choice,
+      }],
+    }));
+    await sleep(20);
+    const callsBeforeAllow = w.calls.length;
+    w.elements('ask-opts').children[0].dispatch('click');
+    await sleep(20);
+    const transitionSizes = w.calls.slice(callsBeforeAllow)
+      .filter((c) => c[0] === 'setPetSize')
+      .map((c) => c[1].slice(0, 2));
+    check('点击允许不会先收成基础窗再展开确认气泡', () => {
+      assert(!transitionSizes.some(([width, height]) => width === 0 && height === 0),
+        'unexpected intermediate collapse: ' + JSON.stringify(transitionSizes));
+      assert(w.calls.slice(callsBeforeAllow).some((c) => c[0] === 'decidePermission'));
+      assert(!w.elements('bubble').classList.contains('hidden'));
+    });
+  }
+
   console.log('[R1] 聚合梯子优先级（对齐 STATES.md）');
   {
     const w = world();

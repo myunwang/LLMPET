@@ -36,6 +36,15 @@ assert(/class="ask-scroll"[^>]*>[\s\S]*class="ask-card"[\s\S]*class="ask-toolbar
 assert(/id="ask-back"[\s\S]*id="ask-submit"[\s\S]*id="ask-term"/s.test(html), 'footer actions should use back, submit, terminal order');
 assert(/const POPUP_W = 520;/.test(js), 'popup window should provide more horizontal room');
 assert(/const ASK_VIEWPORT_MAX_H = 520;/.test(js), 'ask measurement must use the same vertical cap');
+assert(/#mascot\.idle #mascot-img\s*\{[^}]*animation\s*:\s*bob/s.test(css),
+  'mascot idle motion must animate the artwork inside a stationary hit/anchor box');
+assert(!/#(?:mascot|pixel|cat)(?:\.[\w-]+)+\s*\{[^}]*animation\s*:/s.test(css),
+  'skin state animations must not move the outer geometry used for popup anchoring and hit testing');
+assert(/#mascot\.act-work #mascot-img/.test(css),
+  'mascot work motion must also keep the outer geometry stationary');
+assert(/#pixel\.waiting \.pixel-sprite\s*\{[^}]*animation\s*:\s*attn/s.test(css)
+  && /#pixel\.error \.pixel-sprite\s*\{[^}]*animation\s*:\s*errShake/s.test(css),
+  'pixel attention/error motion must animate only its inner artwork');
 assert(/const SESSION_PANEL_H = 310;/.test(js),
   'ordinary and streaming session panels must share one fixed three-row height');
 assert(/const TAKEOVER_PANEL_H = 320;/.test(js),
@@ -181,8 +190,16 @@ assert(/function activeSizedSurface[\s\S]*sessListOpen[\s\S]*askActive[\s\S]*tod
   'drag release must refit the still-open session, choice, todo, or speech surface instead of collapsing it');
 assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
   'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
+assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubbleMsg, 2600\)\) resetPetSize\(\)/.test(js),
+  'permission confirmation must inherit the expanded window without a base-frame resize in between');
 assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHorizontal/.test(js),
   'wide popups must switch horizontal anchors during a drag before they leave the work area');
+assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture\)/.test(js)
+  && /lostpointercapture/.test(js)
+  && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
+  'a released or lost pointer must not leave hover events owning a stale drag');
+assert(/if \(g === gesture\) gesture\.win/.test(js),
+  'an old getWinPos response must not overwrite the origin of a newer drag');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
   && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),
