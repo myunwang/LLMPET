@@ -1034,9 +1034,12 @@ function finishChoice(choice, bubbleMsg) {
     // 还有下一题：直接展示，不弹确认气泡盖住选项面板
     askIdx = 0; showAskPanel();
   } else {
-    // 先关面板（置 askActive=false），确认气泡才不会被 showBubble 的 askActive 早退拦掉
-    hideAsk();
-    showBubble(bubbleMsg, 2600);
+    // The confirmation bubble takes ownership of the same expanded window.
+    // Do not collapse ask -> 320x340 and immediately expand again: the two
+    // one-way IPC resizes can be calculated from different renderer frames and
+    // persist a small anchor error as a visible pet jump.
+    hideAsk(true);
+    if (!showBubble(bubbleMsg, 2600)) resetPetSize();
   }
 }
 function submitPerm(key, choice, label) {
@@ -1051,8 +1054,8 @@ function gotoSession(choice) {
   // Codex 的选择卡是只读镜像，不能因“打开原会话”就当成
   // 已回答。保留在队列里，等 rollout 真正继续后 refreshAsk 自动关闭。
   if (choice.externalOnly) {
-    hideAsk();
-    showBubble(t('ask.toCodex'), 2600);
+    hideAsk(true);
+    if (!showBubble(t('ask.toCodex'), 2600)) resetPetSize();
     return;
   }
   finishChoice(choice, t('ask.toTerminal'));
@@ -2938,7 +2941,7 @@ function confetti() {
 }
 
 function showBubble(text, holdMs = 3200, force = false) {
-  if (!force && (muted || radialOpen || askActive)) return; // 选项面板开着时不弹气泡盖住它(force=重要提示强制显示)
+  if (!force && (muted || radialOpen || askActive)) return false; // 选项面板开着时不弹气泡盖住它(force=重要提示强制显示)
   // emoji → 内联 SVG（OctoIcons 在 emoji 字符与 SVG 之间做安全替换；不可识别字符原样保留）
   if (window.OctoIcons && window.OctoIcons.hasMappedEmoji(text)) {
     window.OctoIcons.setTextWithIcons(bubbleText, text);
@@ -2956,6 +2959,7 @@ function showBubble(text, holdMs = 3200, force = false) {
   fitPopup(activeSizedSurface() || bubble);
   clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(hideBubble, holdMs);
+  return true;
 }
 function hideBubble() {
   bubble.classList.add('hidden');
@@ -3502,34 +3506,65 @@ function reportPetVisualBounds() {
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
 let g = null; // 当前手势（同步建立，保证快速点击也能识别）
+function clearDragGesture(gesture, settle = true) {
+  if (!gesture || g !== gesture) return false;
+  // Clear the global owner before releasePointerCapture(): Chromium may emit
+  // lostpointercapture synchronously, and that event must not finish a newer
+  // gesture or run the cleanup twice.
+  g = null;
+  try { gesture.el.releasePointerCapture(gesture.pid); } catch {}
+  gesture.el.classList.remove('dragging');
+  if (settle) setTimeout(settleEdgeLayout, 0);
+  return true;
+}
+
+function cancelActiveDrag(settle = true) {
+  const gesture = g;
+  if (gesture) clearDragGesture(gesture, settle);
+}
+
 function attachDrag(el) {
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    // A missed pointerup/lost-capture must never leak ownership into the next
+    // press. This is especially important for a moving transparent window.
+    cancelActiveDrag(false);
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
-    g = { el, pid: e.pointerId, sx: e.screenX, sy: e.screenY, moved: false, win: null };
-    window.pet.getWinPos().then(([wx, wy]) => { if (g) g.win = [wx, wy]; });
+    const gesture = { el, pid: e.pointerId, sx: e.screenX, sy: e.screenY, moved: false, win: null };
+    g = gesture;
+    window.pet.getWinPos().then(([wx, wy]) => {
+      // IPC from an earlier click may resolve after a new pointerdown. Binding
+      // that stale window origin to the new gesture produces a large jump.
+      if (g === gesture) gesture.win = [wx, wy];
+    }).catch(() => {});
   });
   el.addEventListener('pointermove', (e) => {
-    if (!g) return;
-    const dx = e.screenX - g.sx;
-    const dy = e.screenY - g.sy;
-    if (!g.moved && Math.abs(dx) + Math.abs(dy) > 4) g.moved = true;
-    if (g.moved && g.win) {
+    const gesture = g;
+    if (!gesture) return;
+    if (e.pointerId != null && e.pointerId !== gesture.pid) return;
+    // Transparent BrowserWindows can lose pointerup while they move. A later
+    // hover has buttons=0; treat it as stale-capture cleanup, never as a drag.
+    if (Number.isFinite(e.buttons) && (e.buttons & 1) === 0) {
+      clearDragGesture(gesture);
+      return;
+    }
+    const dx = e.screenX - gesture.sx;
+    const dy = e.screenY - gesture.sy;
+    if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) gesture.moved = true;
+    if (gesture.moved && gesture.win) {
       if (radialOpen) closeRadial();
-      movePetDuringDrag(g, e, g.win[0] + dx, g.win[1] + dy);
+      movePetDuringDrag(gesture, e, gesture.win[0] + dx, gesture.win[1] + dy);
     }
   });
-  el.addEventListener('pointerup', () => {
-    if (!g) return;
-    const wasMove = g.moved;
-    try { el.releasePointerCapture(g.pid); } catch {}
-    el.classList.remove('dragging');
-    g = null;
+  el.addEventListener('pointerup', (e) => {
+    const gesture = g;
+    if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
+    const wasMove = gesture.moved;
+    if (!clearDragGesture(gesture, wasMove)) return;
     if (wasMove) {
-      // Let the final setBounds land, then exchange the internal top/bottom or
-      // left/right anchor without moving the visible pet.
-      setTimeout(settleEdgeLayout, 0);
+      // clearDragGesture schedules the final top/bottom or left/right anchor
+      // exchange after the last setBounds has landed.
     } else {
       // 左键短按 = 会话列表 HUD（状态/会话名/上下文用量一览，点行聚焦该会话）。
       // 权限的允许/拒绝仍由 waiting 事件自动弹气泡，不走这里。
@@ -3537,10 +3572,15 @@ function attachDrag(el) {
       else toggleSessList();
     }
   });
-  el.addEventListener('pointercancel', () => {
-    if (g) el.classList.remove('dragging');
-    g = null;
-    setTimeout(settleEdgeLayout, 0);
+  el.addEventListener('pointercancel', (e) => {
+    const gesture = g;
+    if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
+    clearDragGesture(gesture);
+  });
+  el.addEventListener('lostpointercapture', (e) => {
+    const gesture = g;
+    if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
+    clearDragGesture(gesture);
   });
   // 右键 = 泡泡菜单
   el.addEventListener('contextmenu', (e) => {
@@ -3549,6 +3589,7 @@ function attachDrag(el) {
   });
 }
 stateEls.forEach(attachDrag);
+window.addEventListener('blur', cancelActiveDrag);
 
 // 卡片按钮：Submit/Next、Back、Go to Terminal、Other 输入
 askSubmit.addEventListener('click', () => { const c = askQueue[askIdx]; if (c && c.kind === 'ask') elicNextOrSubmit(c); });
@@ -3941,6 +3982,10 @@ function setMouseIgnore(on) {
   try { window.pet.setIgnoreMouse(on); } catch {}
 }
 window.addEventListener('mousemove', (e) => {
+  // A stale gesture may currently own the whole transparent BrowserWindow, so
+  // the hover can land outside the original pet element and never reach its
+  // pointermove handler. Clean it up at window scope as well.
+  if (g && Number.isFinite(e.buttons) && (e.buttons & 1) === 0) cancelActiveDrag();
   if (g) { setMouseIgnore(false); return; } // 拖动中保持可点
   const el = document.elementFromPoint(e.clientX, e.clientY);
   // 命中测试权威同步悬停态：穿透切换时 pointerleave 可能漏发，会把 askHover 卡在 true，
