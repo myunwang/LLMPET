@@ -320,8 +320,10 @@ body.skin-cat #cat { display: flex; }
 /* ====================================================================
    等你处理（waiting）：抖动 + 发光，强提示
    ==================================================================== */
-#pixel.waiting { animation: attn 0.55s ease-in-out infinite; }
-#pixel.waiting .pixel-sprite { filter: drop-shadow(0 0 9px rgba(255, 190, 80, 0.95)); animation: none; }
+#pixel.waiting .pixel-sprite {
+  animation: attn 0.55s ease-in-out infinite;
+  filter: drop-shadow(0 0 9px rgba(255, 190, 80, 0.95));
+}
 @keyframes attn {
   0%, 100% { transform: translateX(0) rotate(0); }
   20% { transform: translateX(-4px) rotate(-4deg); }
@@ -491,7 +493,7 @@ body.skin-cat .sessions { width: 120px; }
 /* ====================================================================
    出错（error）：抖一下 + 泛红，短暂
    ==================================================================== */
-#pixel.error { animation: errShake 0.42s ease-in-out 3; }
+#pixel.error .pixel-sprite { animation: errShake 0.42s ease-in-out 3; }
 @keyframes errShake {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-5px) rotate(-2deg); }
@@ -626,29 +628,30 @@ body.skin-cat .sessions { width: 120px; }
 }
 #mascot img { width: 100%; height: 100%; object-fit: contain; -webkit-user-drag: none; }
 
-#mascot.idle { animation: bob 3.4s ease-in-out infinite; }
-#mascot.working { animation: bob 1.9s ease-in-out infinite; }
-#mascot.roam { animation: travelWalk 1.3s ease-in-out infinite; }
-#mascot.thinking { animation: ponder 2.6s ease-in-out infinite; }
+#mascot.idle #mascot-img { animation: bob 3.4s ease-in-out infinite; }
+#mascot.working #mascot-img { animation: bob 1.9s ease-in-out infinite; }
+#mascot.roam #mascot-img { animation: travelWalk 1.3s ease-in-out infinite; }
+#mascot.thinking #mascot-img { animation: ponder 2.6s ease-in-out infinite; }
 #mascot.thinking #teyes { transform: translateY(-3px); }
-#mascot.happy { animation: happyJump 0.55s ease-in-out 3; }
-#mascot.sleeping { animation: breathe 4.5s ease-in-out infinite; }
+#mascot.happy #mascot-img { animation: happyJump 0.55s ease-in-out 3; }
+#mascot.sleeping #mascot-img { animation: breathe 4.5s ease-in-out infinite; }
 #mascot.sleeping #teyes { transform: scaleY(0.12); transform-origin: center 84px; }
-#mascot.waiting { animation: attn 0.55s ease-in-out infinite; filter: drop-shadow(0 0 10px rgba(255,190,80,0.95)) drop-shadow(0 6px 10px rgba(150,70,40,0.3)); }
-#mascot.error { animation: errShake 0.42s ease-in-out 3; }
+#mascot.waiting { filter: drop-shadow(0 0 10px rgba(255,190,80,0.95)) drop-shadow(0 6px 10px rgba(150,70,40,0.3)); }
+#mascot.waiting #mascot-img { animation: attn 0.55s ease-in-out infinite; }
+#mascot.error #mascot-img { animation: errShake 0.42s ease-in-out 3; }
 #mascot.error #mascot-body { fill: #c9381a; }
-#mascot.greet { animation: greetWave 0.5s ease-in-out 4; transform-origin: bottom center; }
-#mascot.dragging { animation: grabbed 0.45s ease-in-out infinite; }
+#mascot.greet #mascot-img { animation: greetWave 0.5s ease-in-out 4; transform-origin: bottom center; }
+#mascot.dragging #mascot-img { animation: grabbed 0.45s ease-in-out infinite; }
 #mascot.blink #teyes { transform: scaleY(0.12); transform-origin: center 84px; }
 #mascot.glance #teyes { animation: glance 1.6s ease-in-out; }
-#mascot.act-type { animation: actType 0.22s ease-in-out infinite; }
-#mascot.act-read { animation: actRead 1.2s ease-in-out infinite; }
+#mascot.act-type #mascot-img { animation: actType 0.22s ease-in-out infinite; }
+#mascot.act-read #mascot-img { animation: actRead 1.2s ease-in-out infinite; }
 #mascot.act-read #teyes { animation: actScan 1.2s ease-in-out infinite; }
-#mascot.act-search { animation: actSearch 0.55s ease-in-out infinite; }
-#mascot.act-crank { animation: actCrank 0.14s linear infinite; }
-#mascot.act-web { animation: actWeb 1s ease-in-out infinite; }
-#mascot.act-summon { animation: actSummon 0.5s ease-in-out; }
-#mascot.act-check { animation: actNod 0.4s ease-in-out 2; }
+#mascot.act-search #mascot-img { animation: actSearch 0.55s ease-in-out infinite; }
+#mascot.act-crank #mascot-img { animation: actCrank 0.14s linear infinite; }
+#mascot.act-web #mascot-img { animation: actWeb 1s ease-in-out infinite; }
+#mascot.act-summon #mascot-img { animation: actSummon 0.5s ease-in-out; }
+#mascot.act-check #mascot-img { animation: actNod 0.4s ease-in-out 2; }
 
 /* ====================================================================
    月薪喵（cat）—— 猫 meme 表情包皮肤
@@ -1475,7 +1478,7 @@ body.skin-cat .sessions { width: 120px; }
    持续「忙碌基线」act-work —— 进入 working 即挂、贯穿整段干活，
    mascot / pixel 都显得在埋头苦干；具体 tool 动作在其上叠加。
    ==================================================================== */
-#mascot.act-work, #pixel.act-work .pixel-sprite {
+#mascot.act-work #mascot-img, #pixel.act-work .pixel-sprite {
   animation: busyBob 0.85s ease-in-out infinite !important;
 }
 @keyframes busyBob {
