@@ -1,4 +1,4 @@
-# 🐙 LLMPET — Claude Code / Codex 桌面宠物
+# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness 桌面宠物
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -7,9 +7,9 @@
   <a href="https://github.com/myunwang/LLMPET/forks"><img src="https://img.shields.io/github/forks/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Forks&amp;labelColor=2d2735&amp;color=8a5b88" alt="GitHub Forks"></a>
 </p>
 
-一个实时盯着 **Claude Code 和 OpenAI Codex** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
+一个实时盯着 **Claude Code、OpenAI Codex 和 DeepSeek Harness** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
-共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 只读监听本机 rollout 文件，不修改 Codex 配置。
+共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 与 DeepSeek Harness 都只读监听各自的本机会话文件，不修改 Agent 配置。
 
 **贡献者**
 
@@ -77,10 +77,27 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 - **不装任何钩子**：Codex 只有一个全局 `notify` 配置位（常被 ChatGPT 桌面 App 占用），所以走「监听 rollout 文件」——增量 tail、零配置、卸载无残留。
 - 事件映射：`user_message→思考`；首个 `exec_command/apply_patch` 后整轮保持“干活中”（工具结果和中间 reasoning 不会误降成思考），直到 `task_complete→完成庆祝+💬` 或 `turn_aborted→中断徽标`；`token_count→上下文%`。guardian / auto-review 等 subagent 内部线程自动过滤，长会话恢复时只读取新增事件、不重放历史。
 - **用量与额度分开**：按 rollout 每条 `last_token_usage` 建立去重台账，显示今日 / 本机留存历史 token；套餐 5h 主窗口与周窗口仍单独读取 `rate_limits`。本地 token 台账不冒充 OpenAI 账单或账号全生命周期统计。
-- **两种形态**（托盘 → 设置 → 分身）：
-  - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 蓝终端块）；
-  - **双宠**：Claude / Codex 各一只，形象、位置独立可拖，各自戴名牌，事件各归各的宠。
+- **组合形态**（托盘 → 设置 → 分身）：主宠默认同时盯 Claude、Codex 与已安装的 dsh；Codex 宠和 dsh 宠可分别开启，形象、位置、名牌与事件路由彼此独立。
 - `LLMPET_NO_CODEX=1` 关闭 Codex 监听；`LLMPET_CODEX_DIR=<dir>` 指向假目录做开发验证。
+
+### 🌊 dsh / DeepSeek Harness 后端（零配置、只读）
+
+第三个能盯的后端是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（CLI 名 `dsh`）。它仍处于 **developer preview**，上游明确提示会有破坏兼容的变更；LLMPET 对未知日志版本采取 fail-closed：不解析、不展示为正常会话，等待适配后再支持。
+
+```
+dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项目--/<会话>/session.jsonl.zstd
+                                                │ (dsh-watch 增量 tail，只读)
+                                                ▼
+                        同一个会话状态机 (core, agentId: 'dsh') ──► 桌宠/面板
+```
+
+- **不装任何插件**：dsh 自带 Claude Code / Codex 两种 hook 桥接插件，但都得用户往自己的 profile 里装插件、改 `cordis.patch.yml`。为一只桌宠去改你的 agent 组合不值当——所以照 Codex 的路子读它自己的会话日志，零配置、卸载无残留。
+- **压缩日志也读得动**：dsh 的日志默认是 **zstd 分帧**（`session.jsonl.zstd`，一次落盘一帧），而 Electron 33 自带的 Node 20 没有 zstd API。桌宠自己扫帧边界、逐帧解压（内置纯 JS 解码器 [fzstd](https://github.com/101arrowz/fzstd)，MIT，见 `backend/vendor/`），末尾半帧留到下一轮。单个压缩帧有 32 MiB 的解码安全上限；超过时会记录并跳过该帧、继续后续日志，避免监听永久卡死。`compression: 'none'` 的纯文本 `session.jsonl` 同样支持。
+- 事件映射：`turn/start→思考`；首个 `tool/call` 之后整轮保持“干活中”；`turn/end completed→完成庆祝 + 💬`，`aborted/blocked→中断徽标`，`error→出错`；`approval/asked→等你回复`（授权仍在 dsh 自己的界面里答）；`compaction→打扫`；`session/title` 直接用它自己起的标题；`assistant/message.usage` 配 `request/context.contextWindow` 算上下文 %。`origin: 'subagent'` 与 `delegationDepth > 0` 的子 agent 线程整份跳过。
+- **第三只宠**（托盘 → **🌊 dsh 桌宠**）：勾上就多一只独立的 dsh 宠，形象 / 位置 / 名牌各一套，dsh 的事件只进它；不勾则由主宠一起盯。它和「🛰️ Codex 桌宠」是两个独立开关，四种组合都成立。
+- 运行时面板会把 `dsh web`、`--profile headless`、已安装的 `--profile tui`，以及 Node / `npx @deepseek-ai/dsh` 入口识别为 dsh agent。`dsh web` 是内置的通用 Web profile（默认 `http://127.0.0.1:3080`，改过端口用 `LLMPET_DSH_WEB` 覆盖），不是某一条历史会话的精确定位；会话列表的「去回复」只能打开这个通用入口，不能承诺跳回具体 session。TUI 可用 `dsh --profile tui --resume <id>` 恢复，但该 profile 需要本机先安装；只有 web / headless profile 的机器不能把 dsh 作为 LLMPET 接管目标。dsh 会话仍可作为**来源**交接给 Claude / Codex（生成本地交接单）。
+- **不做用量 / 计费**：dsh 可接任意模型供应商，本地日志没有可信的单价口径，所以只报上下文 %；**不会显示推测的价格、成本或账单**。
+- `LLMPET_NO_DSH=1` 关闭 dsh 监听；`LLMPET_DSH_DIR=<dir>` 指向假目录做开发验证；日志根目录跟随 `$DSH_HOME`（默认 `~/.dsh`）。
 
 ### 🧳 青蛙旅行（只读探索）
 
@@ -112,7 +129,7 @@ npm ci               # 按 package-lock.json 安装（国内网络慢可加：EL
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
 
-启动后新开的 Claude Code / Codex 会话会被感知；近期仍活跃的 Codex rollout 也会静默恢复到会话列表。右键桌宠可切三款皮肤和单宠/双宠模式。
+启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切三款皮肤，并分别开关 Codex / dsh 分身。
 
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
@@ -122,8 +139,8 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
 - **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
-- 会话面板底部的 **📚 档案** = 打开独立的**会话档案馆**，统一查看 Claude Code / Codex 在客户端和 CLI 中留下的全部用户会话（子代理会话会被过滤），并可使用官方 resume 继续同代理会话，或生成本地交接单交给另一个代理接管。macOS 上 LLMPET 会保留一个 Dock 入口，点击即可重新显示或聚焦档案馆，不会创建第二个实例。
-- 档案馆的**定期本机备份默认关闭**。用户主动开启后，会增量备份到 `~/.octopus/session-vault`；恢复只补回已经丢失的 transcript，绝不覆盖仍存在的源文件。它能应对 provider 重装或记录被删，但不是云同步，也不能防止整块硬盘损坏。
+- 会话面板底部的 **📚 档案** = 打开独立的**会话档案馆**，统一查看 Claude Code / Codex / dsh 在客户端、CLI 或 Harness 日志中留下的全部用户会话（子代理会话会被过滤），并可使用已支持 provider 的官方 resume，或生成本地交接单交给另一个代理接管。macOS 上 LLMPET 会保留一个 Dock 入口，点击即可重新显示或聚焦档案馆，不会创建第二个实例。
+- 档案馆的**定期本机备份默认关闭**。用户主动开启后，会增量备份 Claude、Codex 与 DSH 会话到 `~/.octopus/session-vault`；恢复只补回已经丢失的 transcript，绝不覆盖仍存在的源文件。它能应对 provider 重装或记录被删，但不是云同步，也不能防止整块硬盘损坏。
 - 会话右侧的 **🧳** = 打开青蛙旅行：让对应 agent 在该项目中执行一次独立、只读探索，回来后展示明信片并累计成长 token。
 - 会话面板底部的 **🐱 闲逛** = 打开可见 CLI，不带项目、不带任务和工具，让猫猫自己随便想想、聊聊。
 - **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
@@ -184,6 +201,9 @@ backend/
   hookinstall.js        merge-safe 钩子安装器（合并不覆盖 / 原子写 / 卸载备份）
   launch.js             开终端跑 claude
   core.js               会话存储 + 状态机 + 快照 + 陈旧清理
+  dsh-watch.js          DeepSeek Harness 会话日志监听（只读 tail，agentId: 'dsh'）
+  zstd.js               zstd 分帧扫描 + 逐帧解压（原生优先，回落 vendor/fzstd）
+  vendor/fzstd.js       内置纯 JS zstd 解码器（MIT，见同目录 LICENSE-fzstd）
   server.js             本地 HTTP server（/state /permission /health）
   permission.js         授权持开/决策（字节级 CC 响应）
   adapter.js            内部模型 → 前端契约（事件 + 统计 + choice）
@@ -197,6 +217,8 @@ shared/
   i18n.js               全部界面文案的单一来源（zh / en / ja，主进程与渲染端共用）
 test/smoke.js           端到端冒烟测试
 test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗真的本地化了）
+test/dsh-watch.js       dsh 会话日志监听（事件映射 / 子 agent 过滤 / zstd 增量）
+test/zstd.js            zstd 分帧读取（完整帧 / 半帧 / 坏数据）
 ```
 
 ---

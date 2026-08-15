@@ -12,11 +12,30 @@ function jsonl(file, rows) {
   fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
 }
 
+function rawZstdFrame(payload) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload));
+  const parts = [];
+  const head = Buffer.alloc(9);
+  head.writeUInt32LE(0xFD2FB528, 0);
+  head[4] = 0xA0;
+  head.writeUInt32LE(body.length, 5);
+  parts.push(head);
+  for (let offset = 0; offset < body.length;) {
+    const n = Math.min(128 * 1024, body.length - offset);
+    const block = Buffer.alloc(3);
+    block.writeUIntLE((n << 3) | (offset + n === body.length ? 1 : 0), 0, 3);
+    parts.push(block, body.subarray(offset, offset + n));
+    offset += n;
+  }
+  return Buffer.concat(parts);
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-session-archive-'));
   const claudeRoot = path.join(root, '.claude', 'projects');
   const codexRoot = path.join(root, '.codex', 'sessions');
   const codexArchivedRoot = path.join(root, '.codex', 'archived_sessions');
+  const dshRoot = path.join(root, '.dsh', 'sessions');
   const stateDir = path.join(root, '.octopus');
   const claudeDesktop = path.join(claudeRoot, '-tmp-project', 'claude-desktop.jsonl');
   const claudeCli = path.join(claudeRoot, '-tmp-cli', 'claude-cli.jsonl');
@@ -45,28 +64,50 @@ async function main() {
     { timestamp: '2026-08-10T12:00:00Z', type: 'session_meta', payload: { id: 'subagent', cwd: '/tmp/internal', originator: 'Codex Desktop', source: { subagent: { other: 'guardian' } }, thread_source: 'subagent' } },
   ]);
 
+  const dshSession = path.join(dshRoot, '--tmp-dsh--', 'session-dsh-one', 'session.jsonl.zstd');
+  fs.mkdirSync(path.dirname(dshSession), { recursive: true });
+  const dshHeader = { type: 'session', version: 0, id: 'session-dsh-one', cwd: '/tmp/dsh', createdAt: Date.parse('2026-08-10T12:00:00Z'), delegationDepth: 0 };
+  const dshEvents = [
+    { type: 'user/message', seq: 0, time: Date.parse('2026-08-10T12:01:00Z'), data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Harness prompt' }] } },
+    { type: 'session/title', seq: 1, time: Date.parse('2026-08-10T12:02:00Z'), data: { title: 'DeepSeek Harness session' } },
+  ];
+  fs.writeFileSync(dshSession, Buffer.concat([
+    rawZstdFrame(`${JSON.stringify(dshHeader)}\n`),
+    rawZstdFrame(`${dshEvents.map((row) => JSON.stringify(row)).join('\n')}\n`),
+  ]));
+  const originalDshBytes = fs.readFileSync(dshSession);
+  jsonl(path.join(dshRoot, '--tmp-dsh--', 'future-version', 'session.jsonl'), [
+    { type: 'session', version: 99, id: 'future-version', cwd: '/tmp/dsh', createdAt: Date.now(), delegationDepth: 0 },
+  ]);
+
   const events = [];
   const archive = createSessionArchive({
-    homeDir: root, stateDir, claudeRoot, codexRoot, codexArchivedRoot,
+    homeDir: root, stateDir, claudeRoot, codexRoot, codexArchivedRoot, dshRoot,
     getSettings: () => ({ backupEnabled: false, backupIntervalHours: 24 }),
     onChange: (event) => events.push(event.type),
   });
   await archive.start();
   const all = archive.list({ pageSize: 50 });
-  assert.strictEqual(all.total, 4, 'only four user sessions should enter the archive');
+  assert.strictEqual(all.total, 5, 'Claude, Codex, and supported DSH user sessions enter the archive');
   assert.strictEqual(all.summary.claude, 2);
   assert.strictEqual(all.summary.codex, 2);
+  assert.strictEqual(all.summary.dsh, 1);
   assert.strictEqual(all.summary.desktop, 2);
   assert.strictEqual(all.summary.cli, 2);
+  assert.strictEqual(all.summary.harness, 1);
   assert.strictEqual(archive.list({ provider: 'codex' }).total, 2);
+  assert.strictEqual(archive.list({ provider: 'dsh' }).total, 1);
+  assert.strictEqual(archive.list({ origin: 'harness' }).total, 1);
+  assert.strictEqual(archive.list({ search: 'DeepSeek Harness' }).sessions[0].id, 'session-dsh-one');
   assert.strictEqual(archive.list({ origin: 'desktop' }).total, 2);
   assert.strictEqual(archive.list({ search: 'custom title' }).sessions[0].id, 'claude-desktop');
 
   const backup = await archive.backupNow();
   assert.strictEqual(backup.ok, true);
-  assert.strictEqual(backup.copied, 4);
-  assert.strictEqual(archive.summary().backedUp, 4);
+  assert.strictEqual(backup.copied, 5);
+  assert.strictEqual(archive.summary().backedUp, 5);
   assert.ok(fs.existsSync(path.join(stateDir, 'session-vault', 'claude', 'claude-desktop.jsonl')));
+  assert.ok(fs.existsSync(path.join(stateDir, 'session-vault', 'dsh', 'session-dsh-one.jsonl.zstd')));
   assert.ok(events.includes('backup-progress'));
 
   fs.unlinkSync(claudeDesktop);
@@ -74,7 +115,7 @@ async function main() {
   const missing = archive.get('claude:claude-desktop');
   assert.strictEqual(missing.sourceAvailable, false, 'metadata survives provider transcript deletion');
   assert.strictEqual(missing.backupAvailable, true, 'backup remains available after source deletion');
-  assert.strictEqual(archive.list({ backup: 'backed-up' }).total, 4);
+  assert.strictEqual(archive.list({ backup: 'backed-up' }).total, 5);
   const restored = await archive.restore('claude:claude-desktop');
   assert.strictEqual(restored.ok, true);
   assert.strictEqual(restored.code, 'restored');
@@ -83,6 +124,16 @@ async function main() {
   const secondRestore = await archive.restore('claude:claude-desktop');
   assert.strictEqual(secondRestore.code, 'already-present', 'restore never overwrites an existing transcript');
   assert.strictEqual(fs.readFileSync(claudeDesktop, 'utf8'), preserved);
+
+  fs.unlinkSync(dshSession);
+  await archive.refresh();
+  const missingDsh = archive.get('dsh:session-dsh-one');
+  assert.strictEqual(missingDsh.sourceAvailable, false);
+  assert.strictEqual(missingDsh.backupAvailable, true);
+  const restoredDsh = await archive.restore('dsh:session-dsh-one');
+  assert.strictEqual(restoredDsh.code, 'restored');
+  assert.deepStrictEqual(fs.readFileSync(dshSession), originalDshBytes,
+    'compressed DSH transcript restores byte-for-byte with its .jsonl.zstd suffix');
   archive.stop();
 
   const sanitized = config.sanitize({ sessionArchive: { backupEnabled: true, backupIntervalHours: 72 } });
@@ -113,6 +164,13 @@ async function main() {
   assert.ok(!archiveRenderer.includes('window.pet.setBudget'), 'the desktop dashboard no longer writes a 5h budget');
   assert.ok(archiveRenderer.includes('window.pet.installProgramSkill'), 'Launcher installs a provider skill only after a UI action');
   assert.ok(archiveRenderer.includes('window.pet.removeProgramSkill'), 'Launcher can remove its managed provider skill');
+  assert.ok(archiveMarkup.includes('data-provider="dsh"'), 'session archive exposes the DeepSeek Harness filter');
+  assert.ok(archiveMarkup.includes('data-origin="harness"'), 'session archive exposes the Harness source filter');
+  assert.ok(archiveRenderer.includes("dsh:'../assets/agents/dsh.svg'"), 'archive rows use the DSH asset');
+  assert.ok(archiveRenderer.includes("unknownProvider: 'Unknown'"), 'unknown providers keep a neutral label');
+  assert.ok(!archiveRenderer.includes("value==='codex'?'codex':'claude'"), 'unknown providers never fall back to the Claude icon');
+  const dshIcon = fs.readFileSync(path.join(__dirname, '..', 'assets', 'agents', 'dsh.svg'), 'utf8');
+  assert.ok(dshIcon.includes('<svg') && dshIcon.includes('#4D6BFE'), 'DSH icon is the attributed official blue SVG');
   for (const [provider, file, signature] of [['Claude', 'claude.webp', 'WEBP'], ['Codex', 'codex.png', 'PNG']]) {
     const assetPath = path.join(__dirname, '..', 'assets', 'agents', file);
     const asset = fs.readFileSync(assetPath);

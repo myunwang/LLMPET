@@ -3,7 +3,13 @@
 const assert = require('assert');
 const config = require('../backend/config');
 const { createAgentStartup } = require('../backend/agent-startup');
-const { cliProcessPids, isInteractiveCliCommand } = require('../backend/launch');
+const {
+  cliProcessPids,
+  isInteractiveCliCommand,
+  isDshWebCommand,
+  dshWebProcessPids,
+  ensureDshWeb,
+} = require('../backend/launch');
 
 async function main() {
   console.log('[AS1] 只把真正交互式 CLI 视为已运行');
@@ -17,6 +23,16 @@ async function main() {
     103 rg codex
     101 /Users/me/.local/bin/codex
   `, 'codex'), [101]);
+  assert.strictEqual(isDshWebCommand('/opt/homebrew/bin/dsh web'), true);
+  assert.strictEqual(isDshWebCommand('node /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/lib/bin.js web'), true);
+  assert.strictEqual(isDshWebCommand('npx @deepseek-ai/dsh web'), true);
+  assert.strictEqual(isDshWebCommand('/opt/homebrew/bin/dsh --profile headless "job"'), false);
+  assert.strictEqual(isDshWebCommand('/opt/homebrew/bin/dsh --profile tui --resume abc'), false);
+  assert.deepStrictEqual(dshWebProcessPids(`
+    201 /opt/homebrew/bin/dsh --profile headless job
+    202 /opt/homebrew/bin/dsh web
+    203 node /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/lib/bin.js web
+  `), [202, 203]);
   console.log('  ✓ 桌面端内嵌进程不会阻止 LLMPET 补开 CLI');
 
   console.log('[AS2] 已运行的不重复开，未安装不拖垮另一家');
@@ -41,6 +57,18 @@ async function main() {
   assert.strictEqual(launched[0][1].terminalTitle, 'LLMPET · Codex');
   assert.strictEqual(results.length, 2);
   console.log('  ✓ 单方失败隔离，另一方仍正常启动');
+
+  const dshLaunched = [];
+  const dshStartup = createAgentStartup({
+    getSettings: () => ({ claude: false, codex: false, dsh: true }),
+    installed: (agent) => agent === 'dsh',
+    running: async () => false,
+    launchers: { dsh: async (opts) => { dshLaunched.push(opts); return { ok: true, terminal: 'test' }; } },
+    pauseMs: 0,
+  });
+  assert.deepStrictEqual(await dshStartup.run(), [{ agent: 'dsh', status: 'launched', terminal: 'test' }]);
+  assert.strictEqual(dshLaunched[0].terminalTitle, 'LLMPET · dsh');
+  console.log('  ✓ dsh 遵循自己的启动开关，不依赖 Claude/Codex');
 
   let launchCount = 0;
   const existing = createAgentStartup({
@@ -72,12 +100,37 @@ async function main() {
   console.log('  ✓ 启动阶段重复触发不会开出双窗口');
 
   console.log('[AS4] 配置默认统一入口开启且可分别关闭');
-  assert.deepStrictEqual(config.DEFAULTS.agentStartup, { claude: true, codex: true });
+  // dsh 起的是本地 web 服务（会开浏览器），默认不自动补开——只有用户显式勾选才拉起
+  assert.deepStrictEqual(config.DEFAULTS.agentStartup, { claude: true, codex: true, dsh: false });
   assert.deepStrictEqual(config.sanitize({ agentStartup: { claude: false, codex: true } }).agentStartup,
-    { claude: false, codex: true });
+    { claude: false, codex: true, dsh: false });
+  assert.deepStrictEqual(config.sanitize({ agentStartup: { dsh: true } }).agentStartup,
+    { claude: true, codex: true, dsh: true });
   assert.deepStrictEqual(config.sanitize({ agentStartup: {} }).agentStartup,
-    { claude: true, codex: true });
-  console.log('  ✓ 旧配置自动获得默认值，两个 Agent 可独立控制');
+    { claude: true, codex: true, dsh: false });
+  console.log('  ✓ 旧配置自动获得默认值，三个 Agent 可独立控制');
+
+  console.log('[AS5] dsh Web 就绪判断不把 headless/TUI 冒充成 Web');
+  let webLaunches = 0;
+  const already = await ensureDshWeb({
+    url: 'http://127.0.0.1:3080', running: async () => true,
+    launch: async () => { webLaunches += 1; return { ok: true }; }, wait: async () => true,
+  });
+  assert.deepStrictEqual(already, { ok: true, status: 'already-running' });
+  assert.strictEqual(webLaunches, 0);
+  const opened = await ensureDshWeb({
+    url: 'http://127.0.0.1:3080', running: async () => false,
+    launch: async () => { webLaunches += 1; return { ok: true }; }, wait: async () => true,
+  });
+  assert.deepStrictEqual(opened, { ok: true, status: 'launched' });
+  assert.strictEqual(webLaunches, 1);
+  const notReady = await ensureDshWeb({
+    url: 'http://127.0.0.1:3080', running: async () => false,
+    launch: async () => ({ ok: true }), wait: async () => false,
+  });
+  assert.strictEqual(notReady.ok, false);
+  assert.strictEqual(notReady.status, 'not-ready');
+  console.log('  ✓ 只有可访问的 Web 前端才会被报告为可打开');
 
   console.log('agent startup checks passed');
 }

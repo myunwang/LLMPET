@@ -10,10 +10,12 @@
 
 const { spawn, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 
-// CLI 名 → 各平台常见安装位置（PATH 探测兜底）。codex 与 claude 同一套逻辑。
+// CLI 名 → 各平台常见安装位置（PATH 探测兜底）。codex / dsh 与 claude 同一套逻辑。
 const CLI_DIRS = {
   claude: (home) => [
     path.join(home, '.local', 'bin', 'claude'),
@@ -25,6 +27,12 @@ const CLI_DIRS = {
     path.join(home, '.local', 'bin', 'codex'),
     '/opt/homebrew/bin/codex',
     '/usr/local/bin/codex',
+  ],
+  // DeepSeek Harness：npm 包 @deepseek-ai/dsh 装出来的可执行名就是 dsh
+  dsh: (home) => [
+    path.join(home, '.local', 'bin', 'dsh'),
+    '/opt/homebrew/bin/dsh',
+    '/usr/local/bin/dsh',
   ],
 };
 
@@ -64,7 +72,7 @@ function cliInstalled(name) {
 
 function isInteractiveCliCommand(command, name) {
   const text = String(command || '').trim();
-  const target = name === 'claude' ? 'claude' : name === 'codex' ? 'codex' : '';
+  const target = ['claude', 'codex', 'dsh'].includes(name) ? name : '';
   if (!text || !target) return false;
 
   // Desktop clients embed the same binaries for app-server / stream-json
@@ -73,18 +81,26 @@ function isInteractiveCliCommand(command, name) {
   if (/\bapp-server\b/i.test(text)
       || /--(?:input|output)-format(?:=|\s+)stream-json\b/i.test(text)
       || /\b(?:Claude|Codex) Helper\b/i.test(text)
-      || /\b(?:grep|rg|ps|wmic)\b[^\n]*\b(?:claude|codex)\b/i.test(text)) return false;
+      || /\b(?:grep|rg|ps|wmic)\b[^\n]*\b(?:claude|codex|dsh)\b/i.test(text)) return false;
 
   const first = text.match(/^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
   const executable = first ? (first[1] || first[2] || first[3] || '') : '';
   const base = path.basename(executable).toLowerCase().replace(/\.exe$/i, '');
   if (base === target) return true;
 
+  // npx stays visible as its own process while it launches dsh.
+  if (target === 'dsh' && base === 'npx') {
+    return /@deepseek-ai[\\/]dsh(?:@[^\s]+)?(?:\s|$)/i.test(text);
+  }
+
   // npm installations can leave a node/bun launcher in the process table.
   if (!['node', 'nodejs', 'bun'].includes(base)) return false;
-  return target === 'codex'
-    ? /(?:^|[\\/])(?:@openai[\\/])?codex(?:\.js)?(?:\s|$|[\\/])/i.test(text)
-    : /(?:^|[\\/])(?:@anthropic-ai[\\/])?claude(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  if (target === 'codex') return /(?:^|[\\/])(?:@openai[\\/])?codex(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  // dsh is usually a direct binary or Node package entry point.
+  if (target === 'dsh') {
+    return /(?:^|[\\/])(?:@deepseek-ai[\\/])?dsh(?:\.js)?(?:\s|$|[\\/])/i.test(text);
+  }
+  return /(?:^|[\\/])(?:@anthropic-ai[\\/])?claude(?:\.js)?(?:\s|$|[\\/])/i.test(text);
 }
 
 function cliProcessPids(output, name) {
@@ -102,8 +118,37 @@ function cliProcessPids(output, name) {
   return result;
 }
 
+// A running Harness process is not necessarily its Web UI: headless and TUI
+// profiles are independent frontends and cannot make http://127.0.0.1:3080
+// ready. Keep this stricter predicate separate from isInteractiveCliCommand so
+// startup de-duplication can still recognise every real dsh process.
+function isDshWebCommand(command) {
+  const text = String(command || '').trim();
+  if (!isInteractiveCliCommand(text, 'dsh')) return false;
+  const profile = text.match(/--profile(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))/i);
+  const profileName = String(profile && (profile[1] || profile[2] || profile[3]) || '').toLowerCase();
+  if (profileName) return profileName === 'web';
+  if (/(?:^|\s)(?:headless|tui)(?:\s|$)/i.test(text) || /(?:--resume|--continue)\b/i.test(text)) return false;
+  return /(?:^|\s)web(?:\s|$)/i.test(text);
+}
+
+function dshWebProcessPids(output) {
+  const seen = new Set();
+  const result = [];
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+([\s\S]+)$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || seen.has(pid)) continue;
+    if (!isDshWebCommand(match[2])) continue;
+    seen.add(pid);
+    result.push(pid);
+  }
+  return result;
+}
+
 function isCliRunning(name) {
-  if (!['claude', 'codex'].includes(name)) return Promise.resolve(false);
+  if (!['claude', 'codex', 'dsh'].includes(name)) return Promise.resolve(false);
   if (process.platform === 'win32') {
     const script = [
       'Get-CimInstance Win32_Process',
@@ -126,6 +171,33 @@ function isCliRunning(name) {
   return new Promise((resolve) => {
     execFile('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 5000 }, (error, stdout) => {
       resolve(!error && cliProcessPids(stdout, name).length > 0);
+    });
+  });
+}
+
+function isDshWebRunning() {
+  if (process.platform === 'win32') {
+    const script = [
+      'Get-CimInstance Win32_Process',
+      'Select-Object ProcessId,CommandLine',
+      'ConvertTo-Json -Compress',
+    ].join(' | ');
+    return new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', script],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true }, (error, stdout) => {
+          if (error) { resolve(false); return; }
+          try {
+            const raw = JSON.parse(String(stdout || '[]'));
+            const rows = Array.isArray(raw) ? raw : [raw];
+            resolve(rows.some((row) => Number(row.ProcessId) !== process.pid
+              && isDshWebCommand(row.CommandLine)));
+          } catch { resolve(false); }
+        });
+    });
+  }
+  return new Promise((resolve) => {
+    execFile('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 5000 }, (error, stdout) => {
+      resolve(!error && dshWebProcessPids(stdout).length > 0);
     });
   });
 }
@@ -400,10 +472,71 @@ async function launchExecutable(command, opts = {}) {
 
 const launchClaude = (opts = {}) => launchCli('claude', opts);
 const launchCodex = (opts = {}) => launchCli('codex', opts);
+// `web` is the bundled, auto-initialized dsh profile. TUI is profile-based and
+// may not be installed locally, so the generic launcher keeps `dsh web` as its
+// safe default; callers with a known profile can pass their own arguments.
+const launchDsh = (opts = {}) => launchCli('dsh', {
+  ...opts,
+  args: Array.isArray(opts.args) && opts.args.length ? opts.args : ['web'],
+});
+
+function probeHttp(url, timeoutMs = 700) {
+  return new Promise((resolve) => {
+    let parsed;
+    try { parsed = new URL(url); } catch { resolve(false); return; }
+    const client = parsed.protocol === 'https:' ? https : parsed.protocol === 'http:' ? http : null;
+    if (!client) { resolve(false); return; }
+    const req = client.request(parsed, { method: 'GET' }, (res) => {
+      res.resume();
+      resolve(true); // Any HTTP response proves that the Web frontend is ready.
+    });
+    req.setTimeout(Math.max(100, Number(timeoutMs) || 700), () => req.destroy());
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
+async function waitForDshWeb(url, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts) || 20);
+  const intervalMs = Math.max(0, Number(options.intervalMs) || 250);
+  const probe = options.probe || probeHttp;
+  const pause = options.pause || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let index = 0; index < attempts; index += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await probe(url, options.timeoutMs)) return true;
+    if (index < attempts - 1 && intervalMs > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await pause(intervalMs);
+    }
+  }
+  return false;
+}
+
+// Ensure the generic Web frontend exists before callers open its URL. A live
+// headless/TUI process deliberately does not satisfy this check.
+async function ensureDshWeb(options = {}) {
+  const running = options.running || isDshWebRunning;
+  const launch = options.launch || launchDsh;
+  const wait = options.wait || waitForDshWeb;
+  const url = options.url || 'http://127.0.0.1:3080';
+  let status = 'already-running';
+  if (!(await running())) {
+    const result = await launch({ terminalTitle: options.terminalTitle || 'LLMPET · dsh' });
+    if (!result || !result.ok) {
+      return { ok: false, status: 'launch-failed', message: result && result.message || 'could not launch dsh web' };
+    }
+    status = 'launched';
+  }
+  if (!(await wait(url, options.waitOptions || {}))) {
+    return { ok: false, status: 'not-ready', message: 'dsh web did not become ready' };
+  }
+  return { ok: true, status };
+}
 
 module.exports = {
   launchClaude,
   launchCodex,
+  launchDsh,
   launchCli,
   launchExecutable,
   closeCliTerminal,
@@ -415,6 +548,11 @@ module.exports = {
   isCliRunning,
   isInteractiveCliCommand,
   cliProcessPids,
+  isDshWebCommand,
+  dshWebProcessPids,
+  isDshWebRunning,
+  waitForDshWeb,
+  ensureDshWeb,
   buildCandidates,
   cleanTerminalLaunchEnv,
 };

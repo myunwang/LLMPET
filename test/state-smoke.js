@@ -59,6 +59,69 @@ async function main() {
     check('复制成功有即时反馈', () => assert(row._parts.sessionId.classList.contains('copied')));
   }
 
+  console.log('[R-1b] provider capability 与 DSH 计费边界');
+  {
+    const w = world();
+    const row = vm.runInContext('createSessRow()', w.sandbox);
+    const update = (agent) => vm.runInContext(
+      `updateSessRow(__row, { project: 'capability-test', agent: '${agent}', state: 'idle', sessionId: 'cap-${agent}', badge: null })`,
+      Object.assign(w.sandbox, { __row: row }),
+    );
+    const hidden = (action) => row._parts[action].classList.contains('hidden');
+
+    update('claude');
+    check('Claude 显示接管/表情包/旅行', () => assert.deepStrictEqual(
+      ['takeover', 'meme', 'travel'].map(hidden), [false, false, false],
+    ));
+    update('dsh');
+    check('DSH 只保留作为来源的接管入口', () => assert.deepStrictEqual(
+      ['takeover', 'meme', 'travel'].map(hidden), [false, true, true],
+    ));
+    update('unknown');
+    check('unknown 三个动作全部 fail-closed', () => assert.deepStrictEqual(
+      ['takeover', 'meme', 'travel'].map(hidden), [true, true, true],
+    ));
+    const blockedTakeover = vm.runInContext("openTakeoverPage({ agent: 'unknown' })", w.sandbox);
+    const blockedMeme = await vm.runInContext("openMemePage({ agent: 'unknown' })", w.sandbox);
+    const blockedTravel = await vm.runInContext("openTravelPage({ agent: 'unknown' })", w.sandbox);
+    check('unknown 无法绕过隐藏状态直接打开动作页', () => assert.deepStrictEqual(
+      [blockedTakeover, blockedMeme, blockedTravel], [false, false, false],
+    ));
+    vm.runInContext("takeoverTarget = { agent: 'unknown', sessionId: 'unknown-takeover' }", w.sandbox);
+    const blockedTakeoverRun = await vm.runInContext("runTakeover('claude')", w.sandbox);
+    vm.runInContext("travelTarget = { agent: 'unknown', sessionId: 'unknown-travel' }", w.sandbox);
+    w.elements('sl-travel-mission').value = 'must not run';
+    await w.elements('sl-travel-start')._listeners.click[0]({ stopPropagation() {} });
+    check('unknown 即使污染内部 target 也不能触发 takeover/travel IPC', () => {
+      assert.strictEqual(blockedTakeoverRun, false);
+      assert.strictEqual(w.calls.some((call) => call[0] === 'takeOverSession'), false);
+      assert.strictEqual(w.calls.some((call) => call[0] === 'startTravel'), false);
+    });
+    update('codex');
+    check('row 复用回 Codex 后三个入口恢复，hidden 不残留', () => assert.deepStrictEqual(
+      ['takeover', 'meme', 'travel'].map(hidden), [false, false, false],
+    ));
+
+    const dsh = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'renderer/pet.js'],
+      { search: '?agent=dsh' },
+    );
+    dsh.handlers.config({ skin: 'pixel', muted: true });
+    dsh.handlers.stats(baseStats({
+      billingAvailable: false,
+      today: { cost: 123.456 },
+      lifetime: { cost: 999.999 },
+      codexUsage: { today: { cost: 88, tokens: 12345 } },
+    }));
+    check('DSH 独立宠只显示身份，不显示任何 Claude/Codex 美元值', () => {
+      assert.strictEqual(dsh.elements('chip-cost').textContent, 'DeepSeek Harness');
+      assert(dsh.elements('chip-sep').classList.contains('hidden'));
+      assert(dsh.elements('chip-window').classList.contains('hidden'));
+      assert(!dsh.elements('chip-cost').textContent.includes('$'));
+      assert(!dsh.elements('chip-window').textContent.includes('$'));
+    });
+  }
+
   console.log('[R0] 状态词表单一来源一致性');
   {
     // 后端 VALID_STATES（core 接受的状态）必须全部落在渲染端 STATE_WORDS 里，

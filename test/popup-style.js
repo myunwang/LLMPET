@@ -123,6 +123,25 @@ assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-
   && /snapshot\.petRect\.y\s*-\s*frameHeightExcess\s*\+\s*2/s.test(js),
   'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
 const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+assert(/id="sl-new-dsh"/.test(html) && /slNewDshBtn[\s\S]*launchDsh/.test(js),
+  'the combined session panel must expose a working new-dsh action');
+assert(/\['claude', 'codex', 'dsh'\]\.includes\(agent\)/.test(mainJs),
+  'the tray must allow the dsh startup preference to be changed');
+assert(!/runAgentStartup\(\{\s*agents:\s*\['claude', 'codex', 'dsh'\]/.test(mainJs),
+  'start-missing must respect saved provider toggles instead of forcing all three');
+assert(/ensureDshWeb\(\{\s*url:\s*DSH_WEB_URL/.test(mainJs),
+  'dsh focus must ensure the generic Web frontend is ready before opening it');
+const travelStartBegin = mainJs.indexOf("ipcMain.handle('travel-start'");
+const travelStartEnd = mainJs.indexOf("ipcMain.handle('travel-wander'", travelStartBegin);
+const travelStartHandler = mainJs.slice(travelStartBegin, travelStartEnd);
+const travelProviderGuard = travelStartHandler.indexOf("agent !== 'claude' && agent !== 'codex'");
+const travelManagerStart = travelStartHandler.indexOf('travelManager.start({');
+assert(travelProviderGuard >= 0,
+  'travel-start must reject providers other than Claude and Codex');
+assert(travelManagerStart > travelProviderGuard,
+  'travel-start must reject unsupported providers before starting a trip');
+assert(travelStartHandler.slice(travelProviderGuard, travelManagerStart).includes("code: 'invalid-target'"),
+  'travel-start must return invalid-target for DSH and unknown providers');
 const territoryTween = mainJs.slice(
   mainJs.indexOf('function tweenTerritoryPetTo'),
   mainJs.indexOf('function bootTerritory'));

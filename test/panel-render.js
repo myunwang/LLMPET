@@ -134,4 +134,22 @@ assert.strictEqual((byModel.match(/fill="#3b82f6"/g) || []).length, 2, 'both Cod
   assert.strictEqual(text('today-split'), '', 'no split line when only one agent has usage');
 }
 
+// ── dsh has context usage but no attributable billing ledger ────────────────
+{
+  const dshOnly = combineUsage(claude, codex, 'dsh');
+  vm.runInContext('render(__dsh)', Object.assign(world.sandbox, {
+    __dsh: { ...stats, ...dshOnly, usageProvider: 'dsh' },
+  }), { filename: 'drive-dsh' });
+  assert.strictEqual(dshOnly.billingAvailable, false);
+  assert.strictEqual(text('today-cost'), '—', 'DSH panel must not show combined provider cost');
+  assert.strictEqual(text('win-cost'), '—');
+  assert.strictEqual(text('today-split'), '');
+  assert.strictEqual(text('win-split'), '');
+  assert.strictEqual(text('t-cr'), '—', 'Claude token semantics are unavailable on DSH');
+  assert.ok(world.elements('codex-usage').classList.contains('hidden'));
+  assert.ok(!html('by-model').includes('$'), 'DSH must not inherit either provider model ledger');
+  assert.strictEqual(text('hours-readout'), '—');
+  assert.strictEqual(text('cal-readout'), '—');
+}
+
 console.log('panel render (combined Claude + Codex) checks passed');

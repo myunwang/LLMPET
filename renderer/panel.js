@@ -28,6 +28,18 @@ function shortModel(m) {
 }
 
 let lastStats = null; // kept so a language switch can relabel without a new push
+const hasBillingLedger = (stats) => !!(
+  stats && stats.billingAvailable !== false && !['dsh', 'unknown'].includes(stats.usageProvider)
+);
+
+function renderUnavailableUsage() {
+  $('chart').innerHTML = '';
+  $('cal').innerHTML = '';
+  hoursSummary = '—';
+  calSummary = '—';
+  $('hours-readout').textContent = hoursSummary;
+  $('cal-readout').textContent = calSummary;
+}
 
 function render(s) {
   if (!s) return;
@@ -36,36 +48,56 @@ function render(s) {
   if (s.active && s.active.project) {
     $('active-sub').textContent = `${s.active.project} · ${shortModel(s.active.model)}`;
   }
-  // 大数：Claude + Codex 合计，下方给出两家的拆分（只有一家有量时不显示拆分）
-  $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
-  $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + t('panel.rounds');
-  renderSplit('today-split', s.todayByProvider);
-  $('win-cost').textContent = '$' + (s.lifetime.cost || 0).toFixed(3);
-  $('win-reset').textContent = fmt(s.lifetime.tokens) + ' tokens · ' + s.lifetime.messages + t('panel.rounds');
-  renderSplit('win-split', s.lifetimeByProvider);
+  const billingAvailable = hasBillingLedger(s);
+  // 大数：Claude + Codex 合计，下方给出两家的拆分（只有一家有量时不显示拆分）。
+  // A dsh/unknown-only snapshot has no attributable price ledger; render a
+  // neutral dash rather than turning somebody else's spend into a $0/combined
+  // bill for that provider.
+  if (billingAvailable) {
+    $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
+    $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + t('panel.rounds');
+    renderSplit('today-split', s.todayByProvider);
+    $('win-cost').textContent = '$' + (s.lifetime.cost || 0).toFixed(3);
+    $('win-reset').textContent = fmt(s.lifetime.tokens) + ' tokens · ' + s.lifetime.messages + t('panel.rounds');
+    renderSplit('win-split', s.lifetimeByProvider);
+  } else {
+    $('today-cost').textContent = '—';
+    $('today-tokens').textContent = '—';
+    $('win-cost').textContent = '—';
+    $('win-reset').textContent = '—';
+    renderSplit('today-split', null);
+    renderSplit('win-split', null);
+  }
 
   // token 明细：这一块的行是 Claude 的缓存 TTL 语义（5m/1h 写入），Codex 没有
   // 对应字段，所以取 Claude 那一侧而不是合计——否则标题和数字对不上。
-  const claudeToday = (s.todayByProvider && s.todayByProvider.claude) || s.today;
-  $('t-in').textContent = fmt(claudeToday.input);
-  $('t-out').textContent = fmt(claudeToday.output);
-  $('t-cw5').textContent = fmt(claudeToday.cacheWrite5m);
-  $('t-cw1').textContent = fmt(claudeToday.cacheWrite1h);
-  $('t-cr').textContent = fmt(claudeToday.cacheRead);
-  $('t-msg').textContent = claudeToday.messages;
+  const claudeToday = billingAvailable
+    ? (s.todayByProvider && s.todayByProvider.claude) || s.today
+    : null;
+  for (const id of ['t-in', 't-out', 't-cw5', 't-cw1', 't-cr', 't-msg']) $(id).textContent = '—';
+  if (claudeToday) {
+    $('t-in').textContent = fmt(claudeToday.input);
+    $('t-out').textContent = fmt(claudeToday.output);
+    $('t-cw5').textContent = fmt(claudeToday.cacheWrite5m);
+    $('t-cw1').textContent = fmt(claudeToday.cacheWrite1h);
+    $('t-cr').textContent = fmt(claudeToday.cacheRead);
+    $('t-msg').textContent = claudeToday.messages;
+  }
 
-  renderCodexUsage(s.codexUsage, s.codexDiagnostics);
-  renderDiagnostics(s.diagnostics);
+  renderCodexUsage(billingAvailable ? s.codexUsage : null, billingAvailable ? s.codexDiagnostics : null);
+  renderDiagnostics(billingAvailable ? s.diagnostics : null);
 
   // 按模型（有总有分：每模型 cost + 占比条 + in/out/cache 四元组明细，末行合计）
-  renderByModel(s.byModel || {});
+  renderByModel(billingAvailable ? (s.byModel || {}) : {});
 
   // 待办清单
   renderTodos(s.todos || [], s.todosProject || '');
 
   // 用量趋势：24h + 日历
-  renderChart(s.hourly || [], s.hourlyTok || []);
-  renderCal(s.daily || {});
+  if (billingAvailable) {
+    renderChart(s.hourly || [], s.hourlyTok || []);
+    renderCal(s.daily || {});
+  } else renderUnavailableUsage();
 
   // 进行中的任务（各会话状态）
   renderSessList(s.sessions || []);
@@ -286,11 +318,14 @@ function renderCal(daily) {
   if (cr) cr.innerHTML = calSummary;
 }
 
-// 会话来源小图标：Claude 橙 burst / Codex 蓝终端块（与桌宠 HUD 同款）
+// 会话来源小图标：Claude 橙 burst / Codex 蓝终端块 / dsh 深蓝鲸波（与桌宠 HUD 同款）
 const AGENT_ICON = {
   claude: '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>',
   codex: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#3b82f6"/><path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  dsh: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#4d6bfe"/><circle cx="8.6" cy="9" r="1.5" fill="#fff"/><path d="M12 9h5.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><path d="M5 15c1.6 0 1.6-1.7 3.3-1.7S9.9 15 11.5 15s1.6-1.7 3.3-1.7S16.4 15 18 15" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>',
+  unknown: '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#777582"/><text x="12" y="17" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">?</text></svg>',
 };
+const AGENT_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', unknown: 'Agent' };
 
 function renderSessList(sessions) {
   const el = $('sess-list');
@@ -310,8 +345,8 @@ function renderSessList(sessions) {
         : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || t('state.needsinput'))
         : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
         : escapeHtml(t(m.key));
-      const icon = AGENT_ICON[s.agent] || AGENT_ICON.claude;
-      const who = s.agent === 'codex' ? 'Codex' : 'Claude';
+      const icon = AGENT_ICON[s.agent] || AGENT_ICON.unknown;
+      const who = AGENT_NAME[s.agent] || 'Agent';
       // 会话 id 芯片：短前缀够认人，点一下复制完整 id（跨 session 协作时贴给
       // 另一个 agent 去 resume）。title 挂完整 id，不用复制也能看全。
       const id = s.sessionId ? `<button class="sess-id" data-id="${escapeHtml(s.sessionId)}" title="${escapeHtml(s.sessionId)}&#10;${escapeHtml(t('panel.copyId'))}">${escapeHtml(shortId(s.sessionId))}</button>` : '';
@@ -465,8 +500,10 @@ document.querySelectorAll('.metric-tabs .mt').forEach((b) =>
     usageMetric = b.dataset.metric === 'cost' ? 'cost' : 'tokens';
     document.querySelectorAll('.metric-tabs .mt').forEach((x) => x.classList.toggle('active', x === b));
     if (lastStats) {
-      renderChart(lastStats.hourly || [], lastStats.hourlyTok || []);
-      renderCal(lastStats.daily || {});
+      if (hasBillingLedger(lastStats)) {
+        renderChart(lastStats.hourly || [], lastStats.hourlyTok || []);
+        renderCal(lastStats.daily || {});
+      } else renderUnavailableUsage();
     }
   })
 );

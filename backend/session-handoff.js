@@ -14,7 +14,13 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const transcript = require('./transcript');
 const { launchCli, findCli } = require('./launch');
+const { readLogEntries, messageText } = require('./dsh-watch');
+const { agentOf } = require('./adapter');
 
+// dsh may provide TUI resume through an installed profile, but a machine can
+// legitimately have only the built-in web/headless profiles. LLMPET therefore
+// does not offer dsh as a takeover target; dsh sessions remain readable sources
+// for a local handoff packet to Claude or Codex.
 const PROVIDERS = new Set(['claude', 'codex']);
 const MESSAGE_LIMIT = 14;
 const MESSAGE_CHARS = 3600;
@@ -27,7 +33,7 @@ const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+\/-]{12,}/gi;
 const TOKEN_RE = /\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g;
 
 function providerOf(session) {
-  return session && session.agentId === 'codex' ? 'codex' : 'claude';
+  return agentOf(session);
 }
 
 function contentText(content) {
@@ -93,10 +99,33 @@ function codexMessages(entries) {
   return out;
 }
 
+// dsh 的会话日志：surface 事件就是 user/message 与 assistant/message，
+// 正文在 ContentBlock[] 里（messageText 已经处理了字符串/块两种形状）。
+function dshMessages(entries) {
+  const out = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.type === 'user/message') {
+      const src = entry.data && entry.data.source;
+      if (src && typeof src === 'object' && src.kind !== 'user') continue; // 注入的上下文不算对话
+      pushMessage(out, 'user', messageText(entry.data));
+    } else if (entry.type === 'assistant/message') {
+      pushMessage(out, 'assistant', messageText(entry.data && entry.data.message));
+    }
+  }
+  return out;
+}
+
+function providerMessages(session, entries) {
+  const provider = providerOf(session);
+  if (provider === 'codex') return codexMessages(entries);
+  if (provider === 'dsh') return dshMessages(entries);
+  if (provider === 'claude') return claudeMessages(entries, session && session.id);
+  return [];
+}
+
 function recentConversation(session, entries) {
-  const messages = providerOf(session) === 'codex'
-    ? codexMessages(entries)
-    : claudeMessages(entries, session && session.id);
+  const messages = providerMessages(session, entries);
   const selected = [];
   let chars = 0;
   for (let i = messages.length - 1; i >= 0 && selected.length < MESSAGE_LIMIT; i--) {
@@ -170,9 +199,12 @@ function buildHandoffPacket(session, options = {}) {
   const target = options.target === 'codex' ? 'codex' : 'claude';
   const locale = ['zh', 'en', 'ja'].includes(options.locale) ? options.locale : 'zh';
   const copy = handoffCopy(locale);
+  // dsh 的日志是 zstd 分帧的自有格式，Claude 的 transcript 解析器读不了它。
   const entries = options.entries !== undefined
     ? options.entries
-    : transcript.readTail(session && session.transcriptPath);
+    : source === 'dsh'
+      ? readLogEntries(session && session.transcriptPath)
+      : transcript.readTail(session && session.transcriptPath);
   const messages = recentConversation(session, entries);
   const conversation = messages.length
     ? messages.map((message) => `[${message.role === 'user' ? 'USER' : 'ASSISTANT'}]\n${message.text}`).join('\n\n')
@@ -231,6 +263,12 @@ function createSessionTakeover(deps = {}) {
     if (!session || session.headless || !session.id) return { ok: false, code: 'invalid-target' };
     if (!PROVIDERS.has(target)) return { ok: false, code: 'invalid-provider' };
     const source = providerOf(session);
+    // A non-empty, unrecognised agentId must never become a Claude native
+    // resume or a cross-provider packet that falsely claims Claude provenance.
+    // dsh remains an allowed source below, while still not being a target.
+    if (!['claude', 'codex', 'dsh'].includes(source)) {
+      return { ok: false, code: 'invalid-source-provider', source };
+    }
     const cwd = session.cwd && fsImpl.existsSync(session.cwd) ? session.cwd : os.homedir();
     const cli = find(target);
     if (path.isAbsolute(cli) && !fsImpl.existsSync(cli)) return { ok: false, code: 'cli-missing', target };
@@ -280,6 +318,7 @@ module.exports = {
   buildHandoffPacket,
   claudeMessages,
   codexMessages,
+  dshMessages,
   createSessionTakeover,
   gitSnapshot,
   nativeArgs,

@@ -1,7 +1,7 @@
 {
   "name": "llmpet",
   "version": "1.1.1",
-  "description": "桌面宠物：实时呈现 Claude Code 与 OpenAI Codex 的状态、消息、用量和 Claude 授权",
+  "description": "桌面宠物：实时呈现 Claude Code、OpenAI Codex 与 DeepSeek Harness 的状态、消息和会话",
   "main": "main.js",
   "license": "MIT",
   "author": "myunwang",
@@ -15,7 +15,7 @@
     "package:mac:dev": "LLMPET_MAC_SIGN_MODE=adhoc bash scripts/package-mac.sh",
     "verify:mac": "bash scripts/verify-mac-release.sh",
     "package:win": "electron-builder --win --publish never",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/metering.js && node test/usage-archive.js && node test/usage-combine.js && node test/panel-render.js && node test/codex-metering.js && node test/codex-pricing.js && node test/agent-startup.js && node test/travel.js && node test/session-preferences.js && node test/session-handoff.js && node test/session-archive.js && node test/program-registry.js && node test/program-skill.js && node test/runtime-monitor.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/meme-actions.js && node test/i18n.js && node test/pet-geometry.js && node test/popup-style.js && node test/branding.js && node test/mac-release.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/metering.js && node test/usage-archive.js && node test/usage-combine.js && node test/panel-render.js && node test/codex-metering.js && node test/codex-pricing.js && node test/agent-startup.js && node test/travel.js && node test/session-preferences.js && node test/session-handoff.js && node test/session-archive.js && node test/program-registry.js && node test/program-skill.js && node test/runtime-monitor.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/zstd.js && node test/dsh-watch.js && node test/meme-actions.js && node test/i18n.js && node test/pet-geometry.js && node test/popup-style.js && node test/branding.js && node test/mac-release.js"
   },
   "devDependencies": {
     "@electron/notarize": "2.5.0",

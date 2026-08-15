@@ -270,6 +270,25 @@ function createCore(options = {}) {
     onDirty();
   }
 
+  // 纯展示字段的刷新（dsh 的 session/title、request/header 里的模型名）：同样
+  // 绕开状态机与 recentEvents —— 换个标题不该清掉「完成」徽标，也不该把最近
+  // 一次失败事件顶出历史。
+  function setSessionMeta(sid, fields) {
+    const s = sessions.get(sid);
+    if (!s || !fields) return;
+    let changed = false;
+    if (typeof fields.sessionTitle === 'string' && fields.sessionTitle
+        && s.sessionTitle !== fields.sessionTitle) {
+      s.sessionTitle = fields.sessionTitle;
+      changed = true;
+    }
+    if (typeof fields.model === 'string' && fields.model && s.model !== fields.model) {
+      s.model = fields.model;
+      changed = true;
+    }
+    if (changed) onDirty();
+  }
+
   // Mark a session as "completion acknowledged" (user saw the done state).
   function ackCompletion(sid) {
     const s = sessions.get(sid);
@@ -399,9 +418,10 @@ function createCore(options = {}) {
         // transcript 的 mtime = 模型最近一次产出时间。事件间隙里文件还在长，
         // 说明模型在干活（重连后继续跑/流式输出），adapter 据此不判摸鱼。
         try { s.transcriptActiveAt = fs.statSync(p).mtimeMs; } catch {}
-        // Codex 会话的 transcript 是 rollout JSONL（非 Claude 格式）：mtime 活跃度
-        // 通用，但上下文/中断/API 错误由 codex-watch 事件驱动，别用 Claude 解析器猜。
-        if (s.agentId === 'codex') continue;
+        // 非 Claude 后端的 transcript 不是 Claude 格式（Codex 是 rollout JSONL，
+        // dsh 是 zstd 分帧的会话日志）：mtime 活跃度通用，但上下文/中断/API 错误
+        // 都由各自的 watcher 事件驱动，别用 Claude 解析器去猜（dsh 那份还是二进制）。
+        if (s.agentId && s.agentId !== 'claude-code') continue;
         const entries = transcript.readTail(p);
         if (!entries) continue;
         const cu = transcript.contextUsage(entries, s.id);
@@ -498,6 +518,7 @@ function createCore(options = {}) {
     updateSession,
     seedSession,
     setContextUsage,
+    setSessionMeta,
     ackCompletion,
     getSession,
     buildSnapshot,

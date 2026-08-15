@@ -1,8 +1,8 @@
-# 🐙 LLMPET — A Desktop Pet for Claude Code and Codex
+# 🐙 LLMPET — A Desktop Pet for Claude Code, Codex, and DeepSeek Harness
 
 [简体中文](README.md) | **English** | [日本語](README_JA.md)
 
-LLMPET is a desktop companion that makes **Claude Code and OpenAI Codex** visible at a glance. Its expression changes while your agent is thinking, using tools, waiting for you, celebrating a completed turn, or taking a nap. It can surface the agent's latest reply in a speech bubble and show sessions, context usage, rate limits, estimated Claude cost, and usage history in a compact dashboard.
+LLMPET is a desktop companion that makes **Claude Code, OpenAI Codex, and DeepSeek Harness** visible at a glance. Its expression changes while your agent is thinking, using tools, waiting for you, celebrating a completed turn, or taking a nap. It can surface the agent's latest reply in a speech bubble and show sessions, context usage, rate limits, estimated Claude cost, and usage history in a compact dashboard.
 
 The interface is available in **Simplified Chinese, English, and Japanese**. Switch languages instantly from the tray menu under `Settings → Language`; no restart is required.
 
@@ -10,7 +10,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 
 - **Live agent state** — see thinking, working, parallel subagents, context cleanup, waiting, errors, completion, and idle time as pet animations.
 - **Claude Code approvals** — allow or deny a Claude Code permission request directly from the pet.
-- **Claude Code + Codex sessions** — one pet can watch both backends, or you can enable separate Claude and Codex pets with independent skins and positions.
+- **Claude Code + Codex + DeepSeek Harness sessions** — the main pet can watch all three backends, while Codex and dsh can each use a separate pet with its own skin and position.
 - **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
@@ -18,7 +18,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Three skins** — Octopus 🐙, Pixel Monster 👾, and Salary Cat 🐱.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
-LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex integration is read-only: LLMPET tails local rollout files and does not modify Codex configuration.
+LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.
 
 ## Salary Cat states
 
@@ -84,6 +84,20 @@ LLMPET does not install Codex hooks. It incrementally and read-only tails:
 
 It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
 
+### DeepSeek Harness (dsh)
+
+DeepSeek Harness is still a **developer preview** and may make breaking changes. LLMPET fails closed on an unknown session-log version instead of guessing its shape. It installs no dsh plugins; it read-only tails the harness's own session logs:
+
+```text
+$DSH_HOME|~/.dsh/sessions/--<project>--/<session>/session.jsonl.zstd
+```
+
+Those logs are **concatenated zstd frames** by default, and the Node runtime inside Electron 33 has no zstd API — so LLMPET scans frame boundaries itself and decodes complete frames one by one (bundled pure-JS decoder [fzstd](https://github.com/101arrowz/fzstd), MIT, see `backend/vendor/`), leaving a torn trailing frame for the next poll. A compressed frame has a 32 MiB decode safety limit; a larger frame is logged and skipped while later frames continue, so the watcher cannot remain stuck forever. Uncompressed `session.jsonl` logs (`compression: 'none'`) work too.
+
+`turn/start` means thinking; once the turn's first `tool/call` lands it stays "working"; `turn/end` maps to celebration, interruption, or error by its reason; `approval/asked` shows "waiting for you" (answer it in dsh's own UI); `session/title` supplies the session name, and `assistant/message.usage` plus `request/context.contextWindow` give the context percentage. Subagent logs (`origin: 'subagent'`, `delegationDepth > 0`) are skipped entirely.
+
+Tick **🌊 dsh pet** in the tray to give dsh its own pet with a separate skin, position, and name tag — independent of the Codex pet toggle. Without it the main pet watches dsh too. "Go reply" opens the generic `dsh web` UI (`http://127.0.0.1:3080` by default, override with `LLMPET_DSH_WEB`); it cannot promise to focus one exact historical session. Harness can resume through `dsh --profile tui --resume <id>` only when that optional profile is installed, and the tested rc.6 machine had web/headless only, so LLMPET does not advertise dsh as a takeover target. A dsh session can still be handed off as a source to Claude or Codex. No cost ledger is built for dsh — it can front any provider, so LLMPET reports context only and never displays a made-up `$0` bill.
+
 ## Travel Frog
 
 Click **🧳** beside a session to send that session's Claude Code or Codex agent on a separate expedition in the same project directory. Choose Project scout, Bug hunt, Idea trail, or write a custom mission.
@@ -122,9 +136,9 @@ Patrol mode is currently macOS-only.
 
 ## Privacy and security
 
-The **📚 Archive** button in the live session panel opens a separate desktop-style session archive. It indexes every user-owned Claude Code and Codex session created from either the desktop client or CLI, while filtering out internal subagent threads. Same-provider sessions resume through the provider's official flow; cross-provider takeover uses a local handoff packet. On macOS, LLMPET keeps one Dock entry; clicking it reopens or focuses the archive without creating another instance.
+The **📚 Archive** button in the live session panel opens a separate desktop-style session archive. It indexes user-owned Claude Code, Codex, and supported DeepSeek Harness sessions from desktop, CLI, and Harness storage while filtering internal subagent threads. Claude/Codex same-provider sessions use the official resume flow; cross-provider takeover uses a local handoff packet, and dsh is currently source-only. On macOS, LLMPET keeps one Dock entry; clicking it reopens or focuses the archive without creating another instance.
 
-Scheduled local backup is **off by default**. When the user explicitly enables it, transcripts are copied incrementally to `~/.octopus/session-vault`. Restore only recreates a missing transcript and never overwrites one that still exists. This protects against provider reinstall or deleted local history; it is not cloud sync and does not protect against losing the whole disk.
+Scheduled local backup is **off by default**. When the user explicitly enables it, Claude, Codex, and DeepSeek Harness transcripts are copied incrementally to `~/.octopus/session-vault` without changing their compression format. Restore only recreates a missing transcript and never overwrites one that still exists. This protects against provider reinstall or deleted local history; it is not cloud sync and does not protect against losing the whole disk.
 
 - The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
@@ -141,6 +155,8 @@ Scheduled local backup is **off by default**. When the user explicitly enables i
 - `OCTOPUS_DEBUG=1 npm start` — expose the local `/debug` endpoint.
 - `LLMPET_NO_CODEX=1 npm start` — disable Codex rollout watching.
 - `LLMPET_CODEX_DIR=<dir> npm start` — use a custom rollout directory for testing.
+- `LLMPET_NO_DSH=1 npm start` — disable DeepSeek Harness session watching.
+- `LLMPET_DSH_DIR=<dir> npm start` — use a custom dsh session directory for testing.
 
 ## Contributors
 

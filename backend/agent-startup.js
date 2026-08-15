@@ -4,19 +4,20 @@
 // the selected interactive CLIs that are not already running. A missing or
 // broken provider never prevents the pet or the other provider from starting.
 
-const { cliInstalled, isCliRunning, launchClaude, launchCodex } = require('./launch');
+const { cliInstalled, isCliRunning, launchClaude, launchCodex, launchDsh } = require('./launch');
 
-const AGENTS = ['claude', 'codex'];
+const AGENTS = ['claude', 'codex', 'dsh'];
 const TITLES = {
   claude: 'LLMPET · Claude Code',
   codex: 'LLMPET · Codex',
+  dsh: 'LLMPET · dsh',
 };
 
 function createAgentStartup(options = {}) {
-  const getSettings = options.getSettings || (() => ({ claude: true, codex: true }));
+  const getSettings = options.getSettings || (() => ({ claude: true, codex: true, dsh: false }));
   const installed = options.installed || cliInstalled;
   const running = options.running || isCliRunning;
-  const launchers = options.launchers || { claude: launchClaude, codex: launchCodex };
+  const launchers = options.launchers || { claude: launchClaude, codex: launchCodex, dsh: launchDsh };
   const onResult = options.onResult || (() => {});
   const pause = options.pause || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const pauseMs = Number.isFinite(options.pauseMs) ? Math.max(0, options.pauseMs) : 280;

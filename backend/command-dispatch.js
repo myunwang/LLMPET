@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { findCli } = require('./launch');
+const { agentOf } = require('./adapter');
 
 const MAX_PROMPT_CHARS = 12000;
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f-]{27,40}$/i;
@@ -135,6 +136,13 @@ function cleanTty(value) {
 
 function routeForSession(session, platform = process.platform) {
   if (!session || session.headless) return { kind: 'unavailable', label: '不可下发', exact: false };
+  const provider = agentOf(session);
+  // Command dispatch is a Claude/Codex capability. Physical terminal metadata
+  // and UUID-shaped ids must not let dsh or an unknown future provider bypass
+  // that boundary and get treated as Claude.
+  if (provider !== 'claude' && provider !== 'codex') {
+    return { kind: 'unavailable', label: '不可下发', exact: false };
+  }
   if (session.tmuxSocket && session.tmuxClient) {
     return { kind: 'tmux', label: '精确直发 · tmux', exact: true };
   }
@@ -144,7 +152,7 @@ function routeForSession(session, platform = process.platform) {
   }
   if (
     platform === 'darwin' &&
-    session.agentId === 'codex' &&
+    provider === 'codex' &&
     /codex desktop/i.test(String(session.originator || '')) &&
     SESSION_ID_RE.test(String(session.id || ''))
   ) {
@@ -152,13 +160,13 @@ function routeForSession(session, platform = process.platform) {
   }
   if (
     platform === 'darwin' &&
-    session.agentId !== 'codex' &&
+    provider === 'claude' &&
     resolveClaudeDesktopSessionId(session.id)
   ) {
     return { kind: 'claude-desktop', label: '精确直发 · Claude 客户端', exact: true };
   }
   if (SESSION_ID_RE.test(String(session.id || ''))) {
-    if (session.agentId === 'codex') {
+    if (provider === 'codex') {
       return { kind: 'codex-resume', label: '精确续聊 · Codex', exact: true };
     }
     return { kind: 'claude-resume', label: '精确续聊 · Claude', exact: true };
@@ -348,10 +356,22 @@ function createCommandDispatcher(options = {}) {
   async function dispatch(session, prompt) {
     if (!session) return { ok: false, submitted: false, inputSent: false, message: '目标 session 不存在，请重新选择。' };
     if (!validPrompt(prompt)) return { ok: false, submitted: false, inputSent: false, message: 'Prompt 为空或过长，已拒绝下发。' };
+    const provider = agentOf(session);
+    if (provider !== 'claude' && provider !== 'codex') {
+      return {
+        ok: false,
+        submitted: false,
+        inputSent: false,
+        copied: false,
+        focused: false,
+        route: 'unavailable',
+        message: '该 provider 不支持表情包下发。',
+      };
+    }
     let route = routeForSession(session, platform);
     if (
       platform === 'darwin' &&
-      session.agentId !== 'codex' &&
+      provider === 'claude' &&
       SESSION_ID_RE.test(String(session.id || '')) &&
       resolveClaudeSession(session.id)
     ) {

@@ -1,8 +1,8 @@
-# 🐙 LLMPET — Claude Code / Codex デスクトップペット
+# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness デスクトップペット
 
 [简体中文](README.md) | [English](README_EN.md) | **日本語**
 
-LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認できるデスクトップペットです。考え中、ツール実行中、ユーザー待ち、完了、エラー、休憩中といった agent の状態に合わせて表情が変わります。最新の返答を吹き出しで表示し、セッション、コンテキスト使用率、レート制限、Claude の推定コスト、利用履歴をコンパクトなパネルで確認できます。
+LLMPET は、**Claude Code、OpenAI Codex、DeepSeek Harness** の動きをひと目で確認できるデスクトップペットです。考え中、ツール実行中、ユーザー待ち、完了、エラー、休憩中といった agent の状態に合わせて表情が変わります。最新の返答を吹き出しで表示し、セッション、コンテキスト使用率、レート制限、Claude の推定コスト、利用履歴をコンパクトなパネルで確認できます。
 
 画面表示は **簡体字中国語、英語、日本語** に対応しています。トレイメニューの `設定 → 言語` から、再起動せずに切り替えられます。
 
@@ -10,15 +10,15 @@ LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認で�
 
 - **agent の状態をリアルタイム表示** — 思考、作業、並列 subagent、コンテキスト整理、ユーザー待ち、エラー、完了、休憩をアニメーションで表現します。
 - **Claude Code の権限確認** — 許可 / 拒否をデスクトップペットから直接選べます。
-- **Claude Code + Codex の複数セッション** — 1 匹で両方を監視することも、Claude 用と Codex 用の 2 匹に分けることもできます。
-- **セッション管理** — 検索、Claude / Codex / 要対応フィルター、ピン留め、アーカイブ、コンテキスト使用率の確認、対象ウィンドウへの移動ができます。
+- **Claude Code + Codex + DeepSeek Harness の複数 Session** — 本体ペットで三つを監視し、Codex と dsh はそれぞれ独立したペットにも分けられます。
+- **セッション管理** — 検索、Claude / Codex / DSH / 要対応フィルター、ピン留め、アーカイブ、コンテキスト使用率の確認、対象ウィンドウへの移動ができます。
 - **ミームアクション** — GIF と音声を再生しながら、対応する構造化 Prompt を選択中のセッションへ送れます。
 - **旅するカエル** — 選択した Claude / Codex を独立した読み取り専用の探索へ送り、帰還後にローカルの旅便りを受け取れます。
 - **利用状況パネル** — 実 token 推移、モデル別内訳、Claude の API 公開価格換算、Codex のローカル token 台帳、レート制限、診断情報、現在の操作を確認できます。
 - **3 種類のスキン** — タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱。
 - **macOS のパトロールモード** — 対応する他のデスクトップペットを検出し、最前面を維持しながら相手を画面端へ押し出します。
 
-状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex はローカルの rollout ファイルを読み取り専用で監視します。Codex の設定は変更しません。
+状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex と DeepSeek Harness は各自のローカル Session ファイルを読み取り専用で監視します。Agent の設定は変更しません。
 
 ## 月薪喵スキンの状態
 
@@ -84,6 +84,20 @@ Codex 用の hook はインストールしません。次の rollout を増分�
 
 rollout イベントを共通の状態機械へ変換し、内部 subagent スレッドを除外します。長時間セッションの復帰時も過去イベントを再生せず、新しく追加された部分だけを読み取ります。各イベントの `last_token_usage` から永続的なローカル token 台帳を作り、レート制限とは分けて表示します。この台帳を OpenAI の請求履歴とは表示しません。
 
+### DeepSeek Harness (dsh)
+
+DeepSeek Harness はまだ **developer preview** で、破壊的変更の可能性があります。LLMPET は未知のログ version を推測せず fail-closed で無視します。dsh 用プラグインはインストールせず、ハーネス自身のセッションログを読み取り専用で監視します。
+
+```text
+$DSH_HOME|~/.dsh/sessions/--<プロジェクト>--/<セッション>/session.jsonl.zstd
+```
+
+このログは既定で **zstd フレームの連結**です。Electron 33 同梱の Node には zstd API が無いため、LLMPET 自身がフレーム境界を走査し、完全なフレームだけを順に展開します（内蔵の純 JS デコーダ [fzstd](https://github.com/101arrowz/fzstd)、MIT、`backend/vendor/` 参照）。末尾の不完全なフレームは次の巡回まで持ち越します。圧縮フレーム 1 個の展開には 32 MiB の安全上限があり、それを超えたフレームは記録して飛ばし、後続を継続するため監視が永久停止しません。`compression: 'none'` の平文 `session.jsonl` にも対応します。
+
+`turn/start` は思考、そのターン最初の `tool/call` 以降は「作業中」を維持し、`turn/end` は理由に応じて完了祝い / 中断バッジ / エラーになります。`approval/asked` は「返事待ち」（承認は dsh 自身の画面で行います）、`session/title` はそのままセッション名に、`assistant/message.usage` と `request/context.contextWindow` からコンテキスト % を出します。subagent のログ（`origin: 'subagent'`、`delegationDepth > 0`）はファイルごと除外します。
+
+トレイの **🌊 dsh ペット** を有効にすると、見た目・位置・名札が独立した三匹目が現れます（Codex ペットの切り替えとは独立）。無効なら本体ペットが dsh も見ます。「返信しに行く」は汎用の `dsh web` 画面（既定 `http://127.0.0.1:3080`、`LLMPET_DSH_WEB` で上書き）を開きますが、特定の履歴 Session へ正確に移動する保証はありません。`dsh --profile tui --resume <id>` は任意の TUI profile がインストール済みの場合だけ利用でき、検証した rc.6 環境には web/headless しかなかったため、LLMPET は dsh を接管先として表示しません。dsh Session は Claude / Codex への引継ぎ元にはできます。dsh は任意のプロバイダを利用できるため料金台帳は作らず、コンテキスト % のみを表示し、推測の `$0` を料金として表示しません。
+
 ## 旅するカエル
 
 セッション右側の **🧳** を押すと、そのセッションの Claude Code / Codex が同じプロジェクトディレクトリへ別行動で出発します。「プロジェクト偵察」「バグ探し」「アイデア散歩」から選ぶか、目的を自由に入力できます。
@@ -122,9 +136,9 @@ assets/memes/<meme-id>/
 
 ## プライバシーとセキュリティ
 
-ライブセッション画面の **📚 保管庫** ボタンから、独立したデスクトップ形式のセッション保管庫を開けます。Claude Code / Codex のデスクトップクライアントと CLI にあるユーザーセッションをまとめて索引化し、内部サブエージェントのスレッドは除外します。同じプロバイダーでは公式の resume、別プロバイダーへの引き継ぎではローカルの引継ぎ資料を使用します。macOS では LLMPET の Dock アイコンを一つだけ常駐させ、クリックすると別インスタンスを作らず保管庫を再表示または前面化します。
+ライブセッション画面の **📚 保管庫** ボタンから、独立したデスクトップ形式のセッション保管庫を開けます。Claude Code / Codex / 対応 version の DeepSeek Harness にあるユーザー Session をまとめて索引化し、内部 subagent は除外します。Claude / Codex の同一プロバイダーは公式 resume、別プロバイダーはローカル引継ぎ資料を使用し、dsh は現在引継ぎ元のみです。macOS では LLMPET の Dock アイコンを一つだけ常駐させ、クリックすると別インスタンスを作らず保管庫を再表示または前面化します。
 
-定期ローカルバックアップは**初期設定ではオフ**です。ユーザーが明示的に有効にした場合だけ `~/.octopus/session-vault` へ差分保存します。復元は消えた transcript のみを再作成し、現在ある元ファイルは上書きしません。プロバイダーの再インストールやローカル履歴の削除には備えられますが、クラウド同期ではなく、ディスク全体の消失には対応できません。
+定期ローカルバックアップは**初期設定ではオフ**です。ユーザーが明示的に有効にした場合だけ Claude / Codex / DeepSeek Harness の transcript を圧縮形式を変えず `~/.octopus/session-vault` へ差分保存します。復元は消えた transcript のみを再作成し、現在ある元ファイルは上書きしません。プロバイダーの再インストールやローカル履歴の削除には備えられますが、クラウド同期ではなく、ディスク全体の消失には対応できません。
 
 - HTTP サーバーは `127.0.0.1` のみにバインドし、loopback / Host / browser-origin の検証に加えて、書き込み API に起動ごとのランダム token を要求します。
 - セッション情報、設定、利用履歴はローカル端末内に保存されます。
@@ -141,6 +155,8 @@ assets/memes/<meme-id>/
 - `OCTOPUS_DEBUG=1 npm start` — ローカル `/debug` エンドポイントを有効化します。
 - `LLMPET_NO_CODEX=1 npm start` — Codex rollout の監視を無効化します。
 - `LLMPET_CODEX_DIR=<dir> npm start` — テスト用の rollout ディレクトリを指定します。
+- `LLMPET_NO_DSH=1 npm start` — DeepSeek Harness のセッション監視を無効化します。
+- `LLMPET_DSH_DIR=<dir> npm start` — テスト用の dsh セッションディレクトリを指定します。
 
 ## コントリビューター
 

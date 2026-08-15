@@ -56,9 +56,10 @@ contextBridge.exposeInMainWorld('pet', {
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
   getWindowMetrics: () => ipcRenderer.invoke('get-window-metrics'),
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
-  // 唤起 Claude / Codex 客户端
+  // 唤起 Claude / Codex / dsh 客户端（dsh 起的是本地 web 界面）
   launchClaude: () => ipcRenderer.send('launch-claude'),
   launchCodex: () => ipcRenderer.send('launch-codex'),
+  launchDsh: () => ipcRenderer.send('launch-dsh'),
   // 原生授权：通过本地 HTTP server 回 CC 决策（allow/deny），不需按键/Accessibility
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端

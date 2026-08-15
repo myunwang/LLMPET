@@ -1,6 +1,6 @@
 'use strict';
 
-// Unified, read-only session archive for Claude Code + Codex.
+// Unified, read-only session archive for Claude Code + Codex + DeepSeek Harness.
 //
 // Source transcripts remain provider-owned. LLMPET persists only a small
 // metadata index until the user explicitly enables local backup, at which
@@ -11,6 +11,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
+const { readSessionMetadata: readDshSessionMetadata } = require('./dsh-watch');
 
 const INDEX_SCHEMA = 1;
 const HEAD_BYTES = 1024 * 1024;
@@ -89,6 +90,22 @@ async function walkJsonl(root, maxDepth = 8) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory() && depth < maxDepth) stack.push({ dir: file, depth: depth + 1 });
       else if (entry.isFile() && entry.name.endsWith('.jsonl')) out.push(file);
+    }
+  }
+  return out;
+}
+
+async function walkDshLogs(root, maxDepth = 4) {
+  const out = [];
+  const stack = [{ dir: root, depth: 0 }];
+  while (stack.length) {
+    const { dir, depth } = stack.pop();
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory() && depth < maxDepth) stack.push({ dir: file, depth: depth + 1 });
+      else if (entry.isFile() && (entry.name === 'session.jsonl.zstd' || entry.name === 'session.jsonl')) out.push(file);
     }
   }
   return out;
@@ -201,14 +218,35 @@ async function scanCodexRoot(root, providerArchived = false) {
   return sessions;
 }
 
+async function scanDsh(root) {
+  const files = await walkDshLogs(root, 4);
+  const sessions = [];
+  for (const file of files) {
+    const meta = readDshSessionMetadata(file);
+    if (!meta || !meta.id) continue;
+    const cwd = safeText(meta.cwd, 1024);
+    const id = safeText(meta.id, 256);
+    if (!id) continue;
+    sessions.push({
+      key: archiveKey('dsh', id), id, provider: 'dsh', origin: 'harness',
+      title: safeText(meta.title, 96) || path.basename(cwd || id), cwd,
+      project: safeText(path.basename(cwd || path.dirname(path.dirname(file))), 160),
+      sourcePath: file, sourceAvailable: true, providerArchived: false,
+      createdAt: Number(meta.createdAt) || Number(meta.updatedAt) || 0,
+      updatedAt: Number(meta.updatedAt) || 0, size: Math.max(0, Number(meta.size) || 0),
+    });
+  }
+  return sessions;
+}
+
 function cleanPersistedSession(value) {
   if (!value || typeof value !== 'object') return null;
-  const provider = value.provider === 'codex' ? 'codex' : value.provider === 'claude' ? 'claude' : '';
+  const provider = ['claude', 'codex', 'dsh'].includes(value.provider) ? value.provider : '';
   const id = safeText(value.id, 256);
   if (!provider || !id) return null;
   return {
     key: archiveKey(provider, id), id, provider,
-    origin: ['desktop', 'cli', 'unknown'].includes(value.origin) ? value.origin : 'unknown',
+    origin: ['desktop', 'cli', 'harness', 'unknown'].includes(value.origin) ? value.origin : 'unknown',
     title: safeText(value.title, 96), project: safeText(value.project, 160), cwd: safeText(value.cwd, 1024),
     sourcePath: safeText(value.sourcePath, 4096), sourceAvailable: value.sourceAvailable === true,
     providerArchived: value.providerArchived === true,
@@ -235,6 +273,7 @@ function createSessionArchive(options = {}) {
   const claudeRoot = options.claudeRoot || path.join(home, '.claude', 'projects');
   const codexRoot = options.codexRoot || path.join(home, '.codex', 'sessions');
   const codexArchivedRoot = options.codexArchivedRoot || path.join(home, '.codex', 'archived_sessions');
+  const dshRoot = options.dshRoot || path.join(process.env.DSH_HOME || path.join(home, '.dsh'), 'sessions');
   const getSettings = typeof options.getSettings === 'function'
     ? options.getSettings : () => ({ backupEnabled: false, backupIntervalHours: 24 });
   const onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
@@ -280,6 +319,7 @@ function createSessionArchive(options = {}) {
         scanClaude(claudeRoot),
         scanCodexRoot(codexRoot, false),
         scanCodexRoot(codexArchivedRoot, true),
+        scanDsh(dshRoot),
       ])).flat();
       // A Codex session can briefly exist in both the live and provider archive
       // directories during a move. Prefer the live copy rather than letting the
@@ -316,8 +356,10 @@ function createSessionArchive(options = {}) {
       total: all.length,
       claude: all.filter((s) => s.provider === 'claude').length,
       codex: all.filter((s) => s.provider === 'codex').length,
+      dsh: all.filter((s) => s.provider === 'dsh').length,
       desktop: all.filter((s) => s.origin === 'desktop').length,
       cli: all.filter((s) => s.origin === 'cli').length,
+      harness: all.filter((s) => s.origin === 'harness').length,
       available: all.filter((s) => s.sourceAvailable).length,
       backedUp, bytes, lastScanAt, lastBackupAt, backupError,
       backupRoot,
@@ -325,8 +367,8 @@ function createSessionArchive(options = {}) {
   }
 
   function list(query = {}) {
-    const provider = ['claude', 'codex'].includes(query.provider) ? query.provider : 'all';
-    const origin = ['desktop', 'cli'].includes(query.origin) ? query.origin : 'all';
+    const provider = ['claude', 'codex', 'dsh'].includes(query.provider) ? query.provider : 'all';
+    const origin = ['desktop', 'cli', 'harness'].includes(query.origin) ? query.origin : 'all';
     const backup = query.backup === 'backed-up' || query.backup === 'missing' ? query.backup : 'all';
     const needle = safeText(query.search, 200).toLocaleLowerCase();
     const activeIds = new Set(Array.isArray(query.activeIds) ? query.activeIds.map(String) : []);
@@ -352,7 +394,8 @@ function createSessionArchive(options = {}) {
     const providerDir = path.join(backupRoot, session.provider);
     await fsp.mkdir(providerDir, { recursive: true, mode: 0o700 });
     const safeId = session.id.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 220);
-    const destination = path.join(providerDir, `${safeId}.jsonl`);
+    const suffix = String(session.sourcePath || '').endsWith('.jsonl.zstd') ? '.jsonl.zstd' : '.jsonl';
+    const destination = path.join(providerDir, `${safeId}${suffix}`);
     let current = null;
     try { current = await fsp.stat(destination); } catch {}
     if (current && current.size === session.size && current.mtimeMs >= session.updatedAt) {
@@ -411,8 +454,9 @@ function createSessionArchive(options = {}) {
   function trustedSourcePath(session) {
     const candidate = path.resolve(session && session.sourcePath || '');
     if (!candidate) return '';
-    const roots = [claudeRoot, codexRoot, codexArchivedRoot].map((root) => path.resolve(root) + path.sep);
-    return roots.some((root) => candidate.startsWith(root)) && candidate.endsWith('.jsonl') ? candidate : '';
+    const roots = [claudeRoot, codexRoot, codexArchivedRoot, dshRoot].map((root) => path.resolve(root) + path.sep);
+    const supportedLog = candidate.endsWith('.jsonl') || candidate.endsWith('.jsonl.zstd');
+    return roots.some((root) => candidate.startsWith(root)) && supportedLog ? candidate : '';
   }
 
   async function restore(key) {
@@ -498,6 +542,7 @@ module.exports = {
   createSessionArchive,
   scanClaude,
   scanCodexRoot,
+  scanDsh,
   archiveKey,
   promptTitle,
 };

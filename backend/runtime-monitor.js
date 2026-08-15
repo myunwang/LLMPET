@@ -52,6 +52,28 @@ function shortPath(value) {
   return base || clean;
 }
 
+function dshProcessMeta(command) {
+  // dsh can be a direct binary, its Node package entry point, or an npx
+  // launcher. Keep this before generic Node-script detection so a live agent
+  // is not misreported as an arbitrary script runner.
+  const direct = /(?:^|\s)(?:[^\s]*[\\/])?dsh(?:\.js)?(?:\s|$)/i.test(command);
+  const nodeEntry = /(?:^|[\\/\s])@deepseek-ai[\\/]dsh[\\/]lib[\\/]bin\.js(?:\s|$)/i.test(command);
+  const npx = /(?:^|\s)(?:[^\s]*[\\/])?npx(?:\.cmd)?(?:\s+--[^\s]+(?:\s+[^\s]+)?)*\s+@deepseek-ai[\\/]dsh(?:@[^\s]+)?(?:\s|$)/i.test(command);
+  if (!direct && !nodeEntry && !npx) return null;
+
+  const profileMatch = command.match(/--profile(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))/i);
+  const profile = String(profileMatch && (profileMatch[1] || profileMatch[2] || profileMatch[3]) || '').toLowerCase();
+  const modeMatch = command.match(/\b(?:dsh|bin\.js)\s+(web|headless|tui)\b/i);
+  const mode = profile || String(modeMatch && modeMatch[1] || '').toLowerCase()
+    || (/--headless\b/i.test(command) ? 'headless' : '')
+    || (/(?:--resume|--continue)\b/i.test(command) ? 'tui' : '');
+  const label = mode === 'web' ? 'dsh · Web'
+    : mode === 'headless' ? 'dsh · Headless'
+      : mode === 'tui' ? 'dsh · TUI'
+        : 'dsh · CLI';
+  return { kind: 'agent', provider: 'dsh', label };
+}
+
 function processMeta(row) {
   const command = String(row.command || '');
   if (!command || IGNORE_RE.test(command)) return null;
@@ -67,6 +89,8 @@ function processMeta(row) {
     const resume = command.match(/--resume(?:=|\s+)([^\s]+)/i);
     return { kind: 'agent', provider: 'claude', label: resume ? `Claude · ${resume[1].slice(0, 8)}` : 'Claude Code' };
   }
+  const dsh = dshProcessMeta(command);
+  if (dsh) return dsh;
   if (/cua_node\/bin\/node\b.*\bkernel\.js\b/i.test(command)) {
     const cwd = command.match(/--working-dir\s+([^\n]+)$/i);
     return { kind: 'agent-tool', provider: 'codex', label: `Codex Computer Use · ${shortPath(cwd && cwd[1]) || 'Node REPL'}` };
