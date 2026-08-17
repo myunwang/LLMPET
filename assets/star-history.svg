@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-labelledby="title desc">
   <title id="title">LLMPET GitHub Star History</title>
-  <desc id="desc">A hand-drawn line chart showing LLMPET growing from 1 star on July 2, 2026 to 91 stars on August 10, 2026.</desc>
+  <desc id="desc">A hand-drawn line chart showing LLMPET growing from 1 star on July 2, 2026 to 100 stars on August 15, 2026.</desc>
   <defs>
     <filter id="paper" x="-8%" y="-8%" width="116%" height="116%">
       <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="23" result="noise"/>
@@ -31,28 +31,28 @@
         <path d="M81 80 C298 77 622 83 858 80"/>
       </g>
 
-      <path d="M80 396.8 L360 390.4 L380 358.4 L400 332.8 L420 307.2 L440 281.6 L460 259.2 L480 252.8 L500 240 L520 230.4 L540 227.2 L580 220.8 L600 211.2 L620 204.8 L640 192 L660 185.6 L680 179.2 L700 176 L720 172.8 L740 163.2 L760 156.8 L780 144 L800 137.6 L820 128 L840 121.6 L860 108.8 L860 400 L80 400 Z" fill="url(#warmFill)" stroke="none"/>
+      <path d="M80 396.8 L328.2 390.4 L345.9 358.4 L363.6 332.8 L381.4 307.2 L399.1 281.6 L416.8 259.2 L434.5 252.8 L452.3 240 L470 230.4 L487.7 227.2 L523.2 220.8 L540.9 211.2 L558.6 204.8 L576.4 192 L594.1 185.6 L611.8 179.2 L629.5 176 L647.3 172.8 L665 166.4 L682.7 160 L700.5 147.2 L718.2 140.8 L735.9 131.2 L753.6 124.8 L771.4 112 L789.1 102.4 L806.8 99.2 L824.5 86.4 L860 80 L860 400 L80 400 Z" fill="url(#warmFill)" stroke="none"/>
 
-      <path d="M80 396.8 L360 390.4 L380 358.4 L400 332.8 L420 307.2 L440 281.6 L460 259.2 L480 252.8 L500 240 L520 230.4 L540 227.2 L580 220.8 L600 211.2 L620 204.8 L640 192 L660 185.6 L680 179.2 L700 176 L720 172.8 L740 163.2 L760 156.8 L780 144 L800 137.6 L820 128 L840 121.6 L860 108.8" fill="none" stroke="#ee7348" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M80 399 L360 392 L380 361 L400 335 L420 310 L440 284 L460 262 L480 255 L500 243 L520 233 L540 230 L580 223 L600 214 L620 208 L640 195 L660 189 L680 182 L700 179 L720 176 L740 166 L760 160 L780 147 L800 141 L820 131 L840 125 L860 112" fill="none" stroke="#8a5b88" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".65"/>
+      <path d="M80 396.8 L328.2 390.4 L345.9 358.4 L363.6 332.8 L381.4 307.2 L399.1 281.6 L416.8 259.2 L434.5 252.8 L452.3 240 L470 230.4 L487.7 227.2 L523.2 220.8 L540.9 211.2 L558.6 204.8 L576.4 192 L594.1 185.6 L611.8 179.2 L629.5 176 L647.3 172.8 L665 166.4 L682.7 160 L700.5 147.2 L718.2 140.8 L735.9 131.2 L753.6 124.8 L771.4 112 L789.1 102.4 L806.8 99.2 L824.5 86.4 L860 80" fill="none" stroke="#ee7348" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M80 399 L328.2 393 L345.9 361 L363.6 335 L381.4 310 L399.1 284 L416.8 262 L434.5 255 L452.3 243 L470 233 L487.7 230 L523.2 223 L540.9 214 L558.6 208 L576.4 195 L594.1 189 L611.8 182 L629.5 179 L647.3 176 L665 169 L682.7 163 L700.5 150 L718.2 144 L735.9 134 L753.6 128 L771.4 115 L789.1 105 L806.8 102 L824.5 89 L860 83" fill="none" stroke="#8a5b88" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".65"/>
     </g>
 
     <g fill="#8a5b88" stroke="#fffaf4" stroke-width="3">
       <circle cx="80" cy="396.8" r="5"/>
-      <circle cx="420" cy="307.2" r="5"/>
-      <circle cx="500" cy="240" r="5"/>
-      <circle cx="640" cy="192" r="5"/>
-      <circle cx="780" cy="144" r="5"/>
-      <circle cx="860" cy="108.8" r="7" fill="#ee7348"/>
+      <circle cx="381.4" cy="307.2" r="5"/>
+      <circle cx="452.3" cy="240" r="5"/>
+      <circle cx="576.4" cy="192" r="5"/>
+      <circle cx="700.5" cy="147.2" r="5"/>
+      <circle cx="860" cy="80" r="7" fill="#ee7348"/>
     </g>
 
     <g font-size="13" fill="#756b78">
       <text x="66" y="424">Jul 02</text>
-      <text x="342" y="424">Jul 16</text>
-      <text x="482" y="424">Jul 23</text>
-      <text x="622" y="424">Jul 30</text>
-      <text x="762" y="424">Aug 06</text>
-      <text x="837" y="424">Aug 10</text>
+      <text x="310" y="424">Jul 16</text>
+      <text x="434" y="424">Jul 23</text>
+      <text x="558" y="424">Jul 30</text>
+      <text x="682" y="424">Aug 06</text>
+      <text x="837" y="424">Aug 15</text>
       <text x="50" y="404">0</text>
       <text x="39" y="340">20</text>
       <text x="39" y="276">40</text>
@@ -63,7 +63,7 @@
 
     <g transform="translate(680 27) rotate(-2)">
       <path d="M0 11 Q0 0 12 0 H134 Q146 0 146 12 V43 Q146 54 134 54 H39 L26 67 L28 54 H12 Q0 54 0 43 Z" fill="#fff" stroke="#2d2735" stroke-width="2.2"/>
-      <text x="18" y="34" font-size="14" font-weight="700" fill="#ee7348">91 stars — thanks!</text>
+      <text x="18" y="34" font-size="14" font-weight="700" fill="#ee7348">100 stars — thanks!</text>
     </g>
 
     <g transform="translate(668 85)" stroke="#2d2735" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -72,6 +72,6 @@
       <path d="M17 28 L20 31 M34 28 L31 31 M24 37 Q27 40 30 37" fill="none"/>
     </g>
 
-    <text x="450" y="452" font-size="11" text-anchor="middle" fill="#998e9b">updated Aug 10, 2026 · drawn from real GitHub stargazer timestamps</text>
+    <text x="450" y="452" font-size="11" text-anchor="middle" fill="#998e9b">updated Aug 15, 2026 · drawn from real GitHub stargazer timestamps</text>
   </g>
 </svg>

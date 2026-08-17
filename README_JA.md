@@ -161,6 +161,7 @@ assets/memes/<meme-id>/
 ## コントリビューター
 
 - [@james6666-max](https://github.com/james6666-max) は [PR #6](https://github.com/myunwang/LLMPET/pull/6) で、Windows のセッションフォーカス、ターミナル PID チェーンの解決とキャッシュ、electron-builder パッケージング、Windows CI テストマトリクスを提供しました。
+- [@ziyuezhou1](https://github.com/ziyuezhou1) は [PR #16](https://github.com/myunwang/LLMPET/pull/16) の独立実験ブランチで、タブ識別情報の取得、ルートキャッシュの復元、管理者権限 Terminal の対応、検証スクリプトを含む Windows Terminal タブの厳密なフォーカス機能を実装しました。
 - [@purrfecto114-lgtm](https://github.com/purrfecto114-lgtm) は [PR #10](https://github.com/myunwang/LLMPET/pull/10) で、CodeWhale 連携、ランタイムセキュリティ、永続化の堅牢化、テスト体系に関する大規模な監査と改善案を提出しました。PR はマージされませんでしたが、その監査と設計への尽力にも感謝します。
 - [@andglf](https://github.com/andglf) は [PR #13](https://github.com/myunwang/LLMPET/pull/13) で、並列サブエージェントが同一セッションを共有すると権限リクエストが誤って拒否される問題を、実測データと回帰テストをもとに特定・修正しました。
 
