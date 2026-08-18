@@ -14,7 +14,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 const DEFAULTS = Object.freeze({
   mode: 'pet',            // 'pet' | 'panel' | 'menubar'
-  skin: 'mascot',         // 'mascot' | 'pixel' | 'cat'
+  skin: 'mascot',         // 见 SKINS
   petPosition: null,      // {x,y} | null
   muted: false,
   permHook: true,         // whether the blocking permission HTTP hook is active
@@ -89,11 +89,15 @@ function sanitizeLootCapturedSessions(value, now = Date.now()) {
   return out;
 }
 
+// 皮肤白名单只此一份：渲染端 applySkin 和托盘菜单都以它为准，
+// 少改一处就会出现"菜单能点、设置存不下"的静默回落。
+const SKINS = ['mascot', 'pixel', 'cat', 'whale'];
+
 function sanitize(raw) {
   const out = { ...DEFAULTS };
   if (!raw || typeof raw !== 'object') return out;
   if (['pet', 'panel', 'menubar'].includes(raw.mode)) out.mode = raw.mode;
-  if (['mascot', 'pixel', 'cat'].includes(raw.skin)) out.skin = raw.skin;
+  if (SKINS.includes(raw.skin)) out.skin = raw.skin;
   if (raw.petPosition && Number.isFinite(raw.petPosition.x) && Number.isFinite(raw.petPosition.y)) {
     out.petPosition = { x: Math.round(raw.petPosition.x), y: Math.round(raw.petPosition.y) };
   }
@@ -107,12 +111,12 @@ function sanitize(raw) {
       .slice(0, 30);
   }
   if (raw.petMode === 'duo' || raw.petMode === 'single') out.petMode = raw.petMode;
-  if (['mascot', 'pixel', 'cat'].includes(raw.skinCodex)) out.skinCodex = raw.skinCodex;
+  if (SKINS.includes(raw.skinCodex)) out.skinCodex = raw.skinCodex;
   if (raw.petPositionCodex && Number.isFinite(raw.petPositionCodex.x) && Number.isFinite(raw.petPositionCodex.y)) {
     out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }
   out.dshPet = raw.dshPet === true;
-  if (['mascot', 'pixel', 'cat'].includes(raw.skinDsh)) out.skinDsh = raw.skinDsh;
+  if (SKINS.includes(raw.skinDsh)) out.skinDsh = raw.skinDsh;
   if (raw.petPositionDsh && Number.isFinite(raw.petPositionDsh.x) && Number.isFinite(raw.petPositionDsh.y)) {
     out.petPositionDsh = { x: Math.round(raw.petPositionDsh.x), y: Math.round(raw.petPositionDsh.y) };
   }

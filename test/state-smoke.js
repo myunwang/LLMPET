@@ -429,6 +429,21 @@ async function main() {
     check('旅行归来进入 happy 庆祝', () => assert(w.elements('cat').classList.contains('happy')));
   }
 
+  console.log('[R10b] 鲸鱼女仆皮肤状态与领地动画');
+  {
+    const w = world();
+    w.handlers.config({ skin: 'whale', muted: true });
+    w.handlers.stats(baseStats({ workingCount: 1 }));
+    check('whale working 使用鲸鱼素材', () => {
+      assert(catSrc(w).endsWith('/whale/whale-working.gif'));
+    });
+    w.handlers.event({ kind: 'loot', phase: 'kick', direction: -1 });
+    check('whale 出脚重播不会串回月薪喵素材', () => {
+      assert(/\/whale\/whale-idle\.gif\?loot-kick=\d+$/.test(catSrc(w)));
+      assert(!catSrc(w).includes('/cat/'));
+    });
+  }
+
   console.log('[R12] 旅行授权使用稳定的来信卡片');
   {
     const w = world();

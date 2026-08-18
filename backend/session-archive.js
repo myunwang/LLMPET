@@ -12,6 +12,7 @@ const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
 const { readSessionMetadata: readDshSessionMetadata } = require('./dsh-watch');
+const { readCodexSessionIndex } = require('./codex-session-index');
 
 const INDEX_SCHEMA = 1;
 const HEAD_BYTES = 1024 * 1024;
@@ -175,7 +176,7 @@ function codexMetaIgnored(meta) {
     || (source && typeof source === 'object' && source.subagent));
 }
 
-async function scanCodexRoot(root, providerArchived = false) {
+async function scanCodexRoot(root, providerArchived = false, officialTitles = new Map()) {
   const files = await walkJsonl(root, 5);
   const sessions = [];
   for (const file of files) {
@@ -206,9 +207,11 @@ async function scanCodexRoot(root, providerArchived = false) {
     const id = safeText(meta.id || meta.session_id || (match && match[1]) || path.basename(file, '.jsonl'), 256);
     if (!id) continue;
     cwd = cwd || (typeof meta.cwd === 'string' ? meta.cwd : '');
+    const officialTitle = officialTitles instanceof Map ? officialTitles.get(id) : '';
     sessions.push({
       key: archiveKey('codex', id), id, provider: 'codex', origin: codexOrigin(meta),
-      title: lastTitle || title || path.basename(cwd || id), cwd: safeText(cwd, 1024),
+      title: safeText(officialTitle, 96) || lastTitle || title || path.basename(cwd || id),
+      cwd: safeText(cwd, 1024),
       project: safeText(path.basename(cwd || path.dirname(file)), 160),
       sourcePath: file, sourceAvailable: true, providerArchived: !!providerArchived,
       createdAt: timestamp(meta.timestamp, stat.birthtimeMs || stat.mtimeMs),
@@ -273,6 +276,7 @@ function createSessionArchive(options = {}) {
   const claudeRoot = options.claudeRoot || path.join(home, '.claude', 'projects');
   const codexRoot = options.codexRoot || path.join(home, '.codex', 'sessions');
   const codexArchivedRoot = options.codexArchivedRoot || path.join(home, '.codex', 'archived_sessions');
+  const codexSessionIndexPath = options.codexSessionIndexPath || path.join(home, '.codex', 'session_index.jsonl');
   const dshRoot = options.dshRoot || path.join(process.env.DSH_HOME || path.join(home, '.dsh'), 'sessions');
   const getSettings = typeof options.getSettings === 'function'
     ? options.getSettings : () => ({ backupEnabled: false, backupIntervalHours: 24 });
@@ -315,10 +319,11 @@ function createSessionArchive(options = {}) {
     refreshPromise = (async () => {
       await load();
       const now = Date.now();
+      const officialCodexTitles = readCodexSessionIndex(codexSessionIndexPath);
       const discovered = (await Promise.all([
         scanClaude(claudeRoot),
-        scanCodexRoot(codexRoot, false),
-        scanCodexRoot(codexArchivedRoot, true),
+        scanCodexRoot(codexRoot, false, officialCodexTitles),
+        scanCodexRoot(codexArchivedRoot, true, officialCodexTitles),
         scanDsh(dshRoot),
       ])).flat();
       // A Codex session can briefly exist in both the live and provider archive

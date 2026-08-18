@@ -106,6 +106,45 @@ const CAT_POOLS = {
     'cat-loafing-3.gif', // 靠着枕头奶瓶+手机
   ],
 };
+
+// 鲸鱼女仆（whale）：自有角色，图生视频产出，每状态一张 GIF。
+// 结构与 cat 完全同构（120px、逐帧真透明、一状态一图），因此两者共用同一条
+// 渲染分支和同一个 DOM 节点，差别只在目录和文件名表。见 assets/whale/CREDITS.md。
+const WHALE_STATES = {
+  idle: 'whale-idle.gif',             // 转椅上饮料+手机：待命
+  working: 'whale-working.gif',       // 桌前对着笔记本：干活
+  thinking: 'whale-thinking.gif',     // 按着太阳穴+压力符号：思考
+  talking: 'whale-talking.gif',       // 戴耳机对着笔记本输出：回应中
+  juggling: 'whale-juggling.gif',     // 趴键盘上还刷手机：并行子任务
+  sweeping: 'whale-sweeping.gif',     // 喷消毒水：压缩/清理
+  waiting: 'whale-waiting.gif',       // 冒汗紧张特写：等你授权
+  needsinput: 'whale-needsinput.gif', // 头顶问号挠头：等你回复
+  attention: 'whale-attention.gif',   // 从工位够手机：需要注意
+  error: 'whale-error.gif',           // 抱头崩溃大叫：出错
+  sad: 'whale-sad.gif',               // 嚎啕大哭：负面情绪
+  loafing: 'whale-loafing.gif',       // 躺着刷手机：间隙摸鱼
+  sorry: 'whale-waiting.gif',         // 道歉 → 冒冷汗心虚
+  puzzled: 'whale-needsinput.gif',    // 疑惑 → 头顶问号
+  // ↓ 以下状态尚无专属画面，先借语义最近的顶上；有专属图后只改这几行即可。
+  happy: 'whale-idle.gif',            // 占位：完成庆祝 → 转椅上惬意
+  loved: 'whale-idle.gif',            // 占位
+  excited: 'whale-idle.gif',          // 占位
+  roam: 'whale-idle.gif',             // 占位：闲逛 → 待命
+  lookout: 'whale-loafing.gif',       // 占位：趴着望远处 → 躺着刷手机
+  sleeping: 'whale-loafing.gif',      // 占位：睡觉 → 躺着，最接近休息
+  greet: 'whale-attention.gif',       // 占位：新会话上线 → 从工位起身
+};
+// whale 每个状态只有一张图，没有可轮换的姿态，故不设 pool。
+const WHALE_POOLS = {};
+
+// meme 类皮肤共用一条渲染分支，彼此的差别全部收在这张表里。
+const MEME_PACKS = {
+  cat: { dir: 'cat', states: CAT_STATES, pools: CAT_POOLS },
+  whale: { dir: 'whale', states: WHALE_STATES, pools: WHALE_POOLS },
+};
+const isMeme = () => Object.prototype.hasOwnProperty.call(MEME_PACKS, skin);
+const memePack = () => MEME_PACKS[skin] || MEME_PACKS.cat;
+
 const POOL_ROTATE_MS = 60 * 1000;
 let poolIdx = 0;
 let poolRot = null;
@@ -121,9 +160,9 @@ function finishMemeWorkReaction(refresh = false) {
   // 高压工作姿态结束后，从当前真实状态的动画池随机接一张，避免每次
   // 都机械地回到同一个默认动作。睡眠唤醒或测试时钟跨越期限后，
   // activeMemeWorkVisual 的惰性到期路径也会走这里。
-  const pool = CAT_POOLS[state];
+  const pool = memePack().pools[state];
   if (pool && pool.length) poolIdx = Math.floor(Math.random() * pool.length);
-  if (refresh && skin === 'cat') updateCat(state);
+  if (refresh && isMeme()) updateCat(state);
 }
 function activeMemeWorkVisual(s) {
   if (!memeWorkReaction) return null;
@@ -135,21 +174,24 @@ function activeMemeWorkVisual(s) {
 }
 function updateCat(s) {
   if (!catImg) return;
+  const { dir, states, pools } = memePack();
   const workVisual = activeMemeWorkVisual(s);
-  const pool = (workVisual || lootActionVisual) ? null : CAT_POOLS[s];
+  const pool = (workVisual || lootActionVisual) ? null : pools[s];
   const f = lootActionVisual
-    ? (CAT_STATES[lootActionVisual] || CAT_STATES.attention)
+    ? (states[lootActionVisual] || states.attention)
     : workVisual
-    ? (CAT_STATES[workVisual] || CAT_STATES.working)
-    : (pool ? pool[poolIdx % pool.length] : (CAT_STATES[s] || CAT_STATES.idle));
-  if (!catAssetMatches(f)) catImg.src = '../assets/cat/' + f;
+    ? (states[workVisual] || states.working)
+    : (pool ? pool[poolIdx % pool.length] : (states[s] || states.idle));
+  if (!catAssetMatches(dir + '/' + f)) catImg.src = '../assets/' + dir + '/' + f;
   if (pool) {
     if (!poolRot) {
       poolRot = setInterval(() => {
-        const cur = CAT_POOLS[state];
-        if (!cur || skin !== 'cat') return;
+        if (!isMeme()) return;
+        const p = memePack();
+        const cur = p.pools[state];
+        if (!cur) return;
         poolIdx++;
-        catImg.src = '../assets/cat/' + cur[poolIdx % cur.length];
+        catImg.src = '../assets/' + p.dir + '/' + cur[poolIdx % cur.length];
       }, POOL_ROTATE_MS);
     }
   } else if (poolRot) {
@@ -158,6 +200,7 @@ function updateCat(s) {
     poolIdx++; // 下次进入轮换态直接是下一张
   }
 }
+// 比对含目录的尾巴，而不是裸文件名：两套皮肤同名文件不会互相误判为"已加载"。
 function catAssetMatches(filename) {
   if (!catImg) return false;
   try {
@@ -180,7 +223,7 @@ function setLootActionVisual(visualState, direction) {
   lootActionDirection = Number(direction) === 1 ? 1 : -1;
   cat.classList.toggle('loot-action-mirrored',
     lootVisualNeedsMirror(visualState, lootActionDirection));
-  if (skin === 'cat') updateCat(state);
+  if (isMeme()) updateCat(state);
 }
 function startLootCaptureVisual(direction) {
   clearTimeout(lootActionTimer);
@@ -193,8 +236,9 @@ function startLootKick(direction) {
   setLootActionVisual('roam', direction);
   // 同一张 GIF 连续触发时浏览器默认会沿用上次播放进度。加一次仅用于本轮
   // 演出的查询串，确保蓄力从第一帧开始，后端按真实 helper 时序同步出脚。
-  if (skin === 'cat' && catImg) {
-    catImg.src = '../assets/cat/' + CAT_STATES.roam + '?loot-kick=' + Date.now();
+  if (isMeme() && catImg) {
+    const { dir, states } = memePack();
+    catImg.src = '../assets/' + dir + '/' + (states.roam || states.idle) + '?loot-kick=' + Date.now();
   }
 }
 function startLootLookout(direction, durationMs = 6000) {
@@ -211,19 +255,19 @@ function stopLootActionVisual() {
   lootActionVisual = null;
   lootActionDirection = 0;
   cat.classList.remove('loot-action-mirrored');
-  if (skin === 'cat') updateCat(state);
+  if (isMeme()) updateCat(state);
 }
 function clearMemeWorkReaction(refresh = true) {
   const wasActive = !!memeWorkReaction;
   memeWorkReaction = null;
   clearTimeout(memeWorkReactionTimer);
   memeWorkReactionTimer = null;
-  if (wasActive && refresh && skin === 'cat') updateCat(state);
+  if (wasActive && refresh && isMeme()) updateCat(state);
 }
 function startMemeWorkReaction(work) {
   clearMemeWorkReaction(false);
   if (!work || !work.visualState || !Array.isArray(work.activeStates) || !work.activeStates.length) {
-    if (skin === 'cat') updateCat(state);
+    if (isMeme()) updateCat(state);
     return false;
   }
   const durationMs = Math.max(1000, Math.min(120000, Number(work.durationMs) || 30000));
@@ -232,7 +276,7 @@ function startMemeWorkReaction(work) {
     activeStates: new Set(work.activeStates),
     until: perfNow() + durationMs,
   };
-  if (skin === 'cat') updateCat(state);
+  if (isMeme()) updateCat(state);
   memeWorkReactionTimer = setTimeout(() => {
     if (!memeWorkReaction || perfNow() < memeWorkReaction.until) return;
     finishMemeWorkReaction(true);
@@ -2822,7 +2866,7 @@ function setState(s) {
   if (state === s) {
     // 语义状态没变，限时视觉层仍可能刚刚到期；同状态快照也要让猫
     // 重新选图，否则 30s 的高压工作姿态会一直拖到下一次状态切换。
-    if (skin === 'cat') updateCat(s);
+    if (isMeme()) updateCat(s);
     return;
   }
   for (const el of stateEls) {
@@ -2844,7 +2888,7 @@ function setState(s) {
   // 注意：不要在这里 hideAsk()！面板显隐只由 refreshAsk(按是否有待答事项) 管。
   // 之前「s!=='waiting' 就 hideAsk」会在聚合态变 working/thinking 时把 needsinput 的面板闪掉。
   if (skin === 'mascot') updateMascotEyes(s);
-  if (skin === 'cat') updateCat(s);
+  if (isMeme()) updateCat(s);
 }
 
 // 按工具播放专属动作 + 头顶道具
@@ -3032,7 +3076,7 @@ function scheduleIdleAction() {
 }
 scheduleIdleAction();
 
-const curSkinEl = () => (skin === 'pixel' ? pixel : skin === 'cat' ? cat : mascot);
+const curSkinEl = () => (skin === 'pixel' ? pixel : isMeme() ? cat : mascot);
 
 window.pet.onTravel((event) => {
   if (!event) return;
@@ -3528,12 +3572,12 @@ function applyLang(next) {
 }
 
 function applySkin(s) {
-  skin = ['pixel', 'mascot', 'cat'].includes(s) ? s : 'mascot';
+  skin = ['pixel', 'mascot', ...Object.keys(MEME_PACKS)].includes(s) ? s : 'mascot';
   document.body.classList.toggle('skin-pixel', skin === 'pixel');
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
-  document.body.classList.toggle('skin-cat', skin === 'cat');
+  document.body.classList.toggle('skin-cat', isMeme());
   if (skin === 'mascot') updateMascotEyes(state);
-  if (skin === 'cat') updateCat(state);
+  if (isMeme()) updateCat(state);
   requestAnimationFrame(reportPetVisualBounds);
 }
 
@@ -3825,7 +3869,7 @@ const MENU = [
 ];
 
 function toggleSkin() {
-  const order = ['mascot', 'pixel', 'cat'];
+  const order = ['mascot', 'pixel', 'cat', 'whale'];
   const next = order[(order.indexOf(skin) + 1) % order.length];
   applySkin(next);
   window.pet.setSkin(next);

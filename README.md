@@ -1,4 +1,4 @@
-# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness 桌面宠物
+# 🐙 LLMPET — 本地多 Agent 桌面工作台
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -7,9 +7,38 @@
   <a href="https://github.com/myunwang/LLMPET/forks"><img src="https://img.shields.io/github/forks/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Forks&amp;labelColor=2d2735&amp;color=8a5b88" alt="GitHub Forks"></a>
 </p>
 
-一个实时盯着 **Claude Code、OpenAI Codex 和 DeepSeek Harness** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
+LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**。它把 **Claude Code、OpenAI Codex 和 DeepSeek Harness** 的会话放到同一个桌面层：看状态、找会话、回到原窗口、管理历史，也能把一项工作从一个 Agent 安全地交给另一个 Agent 继续。
 
-共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 与 DeepSeek Harness 都只读监听各自的本机会话文件，不修改 Agent 配置。
+桌宠仍然是 LLMPET 最直观的交互方式：它会随 Agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把回复弹成气泡；但产品能力已经从“看 Agent 在做什么”，扩展到**统一会话管理、跨 Agent 接管、本机归档与备份、用量诊断和可控的 Agent 行动**。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
+
+> **跨 Agent 的准确边界：** Claude 与 Codex 之间不是共享一份原生 transcript。LLMPET 会在本地提取最近对话和当前 Git 工作区摘要，做密钥脱敏后生成临时交接单，再启动目标 Agent；交接单明确要求目标 Agent 重新核查文件、运行状态和失败路径。同一 Agent 内则使用官方 resume / fork。DeepSeek Harness 目前可作为交接来源，暂不作为接管目标。
+
+## 不只是桌宠
+
+| 能力层 | LLMPET 现在能做什么 |
+|---|---|
+| **桌面感知** | 用章鱼 🐙、像素怪兽 👾、月薪喵 🐱 三款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
+| **统一会话层** | 汇总 Claude Code、Codex、dsh 的实时会话与本机历史；支持搜索、筛选、置顶、归档和回到原窗口 |
+| **跨 Agent 接管** | Claude ↔ Codex 双向交接；dsh → Claude / Codex 单向交接；同代理使用原生 resume / fork |
+| **本机档案馆** | 统一索引三类 Agent 的用户会话，过滤内部 subagent；可选增量备份，恢复时不覆盖仍存在的源文件 |
+| **可控行动** | 一键处理 Claude 授权、发送表情包指令、发起只读项目旅行；所有主动任务都由用户明确触发 |
+| **用量与诊断** | 展示上下文、额度窗口、真实 token 趋势、本机台账和可追溯的估算口径，不把本机数据冒充厂商账单 |
+
+## 跨 Agent 接管怎么工作
+
+```text
+来源会话
+├─ 目标是同一 Agent ──► 官方 resume；来源仍在运行时使用官方 fork
+└─ 目标是另一 Agent ─► 最近对话 + Git 状态/差异摘要 + 来源标记
+                         └─ 本地脱敏交接单 ──► 启动可见的目标 Agent 会话
+```
+
+- 跨 Agent 交接单只取有上限的最近对话与工作区摘要，并对常见 API Key、Bearer token、密码和私钥字段做脱敏。
+- 临时目录权限为 `0700`、交接文件为 `0600`；启动成功后约两分钟自动清理，启动失败则立即清理。
+- 目标 Agent 收到的是带来源说明的**交接上下文**，不是伪装成原生恢复；它会被要求保留无关改动，并区分已验证、未验证和剩余风险。
+- 当前接管目标仅支持 Claude Code 与 Codex。dsh 会话可被读取并交给二者，但 LLMPET 不承诺在未安装可用 TUI profile 的机器上恢复某条 dsh 历史会话。
+
+LLMPET 的状态机、计量、权限流、进程对账、会话归档和桌面 UI 都在本仓库实现。Claude Code 通过公开 hook 接口接入；Codex 与 DeepSeek Harness 默认只读监听各自的本机会话文件，不修改 Agent 配置。
 
 **贡献者**
 

@@ -1,8 +1,12 @@
-# 🐙 LLMPET — A Desktop Pet for Claude Code, Codex, and DeepSeek Harness
+# 🐙 LLMPET — A Local Multi-Agent Desktop Workspace
 
 [简体中文](README.md) | **English** | [日本語](README_JA.md)
 
-LLMPET is a desktop companion that makes **Claude Code, OpenAI Codex, and DeepSeek Harness** visible at a glance. Its expression changes while your agent is thinking, using tools, waiting for you, celebrating a completed turn, or taking a nap. It can surface the agent's latest reply in a speech bubble and show sessions, context usage, rate limits, estimated Claude cost, and usage history in a compact dashboard.
+LLMPET is a **local-first multi-agent workspace with a desktop pet as its front door**. It brings **Claude Code, OpenAI Codex, and DeepSeek Harness** into one desktop layer where you can watch live state, find and reopen sessions, manage local history, and hand work from one agent to another.
+
+The pet remains the most immediate interface: it reacts while an agent is thinking, using tools, waiting for you, finishing, failing, or resting, and it surfaces the latest reply in a speech bubble. LLMPET now goes beyond observation with unified session management, cross-agent takeover, a local archive and optional backup, usage diagnostics, and explicit user-triggered agent actions.
+
+> **Exact cross-agent boundary:** Claude and Codex do not share a native transcript. LLMPET locally extracts a bounded recent conversation and Git worktree summary, redacts common secrets, writes a temporary handoff packet, and launches the receiving agent with instructions to verify the files, runtime state, and failure paths. Same-provider actions use the official resume or fork flow. DeepSeek Harness is currently a handoff source, not a takeover target.
 
 The interface is available in **Simplified Chinese, English, and Japanese**. Switch languages instantly from the tray menu under `Settings → Language`; no restart is required.
 
@@ -11,7 +15,9 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Live agent state** — see thinking, working, parallel subagents, context cleanup, waiting, errors, completion, and idle time as pet animations.
 - **Claude Code approvals** — allow or deny a Claude Code permission request directly from the pet.
 - **Claude Code + Codex + DeepSeek Harness sessions** — the main pet can watch all three backends, while Codex and dsh can each use a separate pet with its own skin and position.
-- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
+- **Unified session workspace** — search and filter live or historical sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
+- **Cross-agent takeover** — hand work between Claude and Codex in either direction, or hand a dsh session to Claude or Codex; same-provider sessions use native resume or fork.
+- **Local session archive** — index user-owned sessions across all three providers, filter internal subagents, and optionally back up transcripts without overwriting an existing source during restore.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
@@ -19,6 +25,17 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
 LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.
+
+## How cross-agent takeover works
+
+```text
+Source session
+├─ same agent ─────► official resume, or official fork while the source is active
+└─ another agent ─► recent dialogue + Git status/diff summary + provenance
+                     └─ local redacted handoff packet ─► visible target-agent session
+```
+
+The packet is deliberately bounded, stored in a `0700` temporary directory as a `0600` file, and removed about two minutes after a successful launch or immediately after a failed launch. It is labeled as handoff context—not a native transcript—and tells the receiving agent to preserve unrelated changes and separate verified facts from unverified claims and remaining risks. Takeover targets are currently Claude Code and Codex; dsh is source-only.
 
 ## Salary Cat states
 
