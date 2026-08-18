@@ -35,6 +35,7 @@ const path = require('path');
 const { log } = require('./log');
 const { detectEmotion } = require('./emotion');
 const { promptTitle } = require('./transcript');
+const { createCodexSessionIndex, DEFAULT_PATH: DEFAULT_SESSION_INDEX_PATH } = require('./codex-session-index');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 const POLL_MS = 2500;
@@ -182,6 +183,11 @@ function createCodexWatch(deps) {
   const onRateLimits = typeof deps.onRateLimits === 'function' ? deps.onRateLimits : () => {};
   const sessionsDir = deps.sessionsDir || SESSIONS_DIR; // 测试可注入
   const pollMs = deps.pollMs || POLL_MS;
+  const sessionIndex = createCodexSessionIndex(
+    deps.sessionIndexPath || (deps.sessionsDir
+      ? path.join(path.dirname(sessionsDir), 'session_index.jsonl')
+      : DEFAULT_SESSION_INDEX_PATH),
+  );
 
   /** @type {Map<string, object>} file path → tracker */
   const trackers = new Map();
@@ -275,6 +281,7 @@ function createCodexWatch(deps) {
     if (t.cwd) f.cwd = t.cwd;
     if (t.model) f.model = t.model;
     if (t.originator) f.originator = t.originator;
+    if (t.sessionTitle) f.sessionTitle = t.sessionTitle;
     return f;
   }
 
@@ -303,10 +310,15 @@ function createCodexWatch(deps) {
     const p = obj.payload || {};
 
     if (type === 'session_meta') {
+      const alreadyKnown = t.sawMeta;
       applyMeta(t, p);
       if (t.ignored) return;
-      // 运行期间新出现的会话：SessionStart 进欢迎判定（真正的欢迎等首条 prompt）
-      update(t, 'idle', 'SessionStart', { sessionSource: 'startup' });
+      // 新版 Codex 会在同一个长寿 rollout 的后续回合再次写 session_meta。
+      // 它只是元数据刷新，不能把已经 task_started 的回合重置成 idle。
+      if (!alreadyKnown) {
+        // 运行期间新出现的会话：SessionStart 进欢迎判定（真正的欢迎等首条 prompt）
+        update(t, 'idle', 'SessionStart', { sessionSource: 'startup' });
+      }
       return;
     }
     if (t.ignored) return;
@@ -467,6 +479,11 @@ function createCodexWatch(deps) {
     if (meta.thread_source === 'subagent' || (src && typeof src === 'object' && src.subagent)) {
       t.ignored = true;
     }
+    const officialTitle = sessionIndex.get(t.sid);
+    if (officialTitle) {
+      t.sessionTitle = officialTitle;
+      t.titleSet = true;
+    }
   }
 
   function hydrateMeta(t) {
@@ -486,7 +503,7 @@ function createCodexWatch(deps) {
     if (t.ignored) return;
     if (Date.now() - mtimeMs > BACKFILL_MAX_AGE_MS) return; // 太久没动的不上列表
 
-    let title = null;
+    let title = t.sessionTitle || null;
     let contextUsage = null;
     const pendingChoices = new Map();
     const start = Math.max(0, size - TAIL_PROBE_BYTES);
@@ -534,6 +551,7 @@ function createCodexWatch(deps) {
       updatedAt: mtimeMs,
     });
     t.titleSet = !!title;
+    t.sessionTitle = title;
   }
 
   // “掠夺”要拿的是用户最近的 Codex 会话，而不是仅限 30 分钟内仍活跃的
@@ -550,7 +568,7 @@ function createCodexWatch(deps) {
       hydrateMeta(t);
       if (t.ignored || !t.sid) continue;
 
-      let title = null;
+      let title = t.sessionTitle || null;
       let contextUsage = null;
       const start = Math.max(0, file.size - TAIL_PROBE_BYTES);
       const tail = readBytes(file.fp, start, file.size - start);
@@ -608,8 +626,22 @@ function createCodexWatch(deps) {
     return {
       fp, sid: null, offset: cursor ? cursor.offset : 0, carry: cursor ? cursor.carry : '',
       ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null,
-      lastAgentMessage: null, titleSet: false, turnActive: false, didWorkThisTurn: false,
+      lastAgentMessage: null, sessionTitle: null, titleSet: false,
+      turnActive: false, didWorkThisTurn: false,
     };
+  }
+
+  function refreshOfficialTitles() {
+    if (!sessionIndex.refresh()) return;
+    if (!core || typeof core.setSessionMeta !== 'function') return;
+    for (const t of trackers.values()) {
+      if (!t.sid || t.ignored) continue;
+      const title = sessionIndex.get(t.sid);
+      if (!title || title === t.sessionTitle) continue;
+      t.sessionTitle = title;
+      t.titleSet = true;
+      core.setSessionMeta(t.sid, { sessionTitle: title });
+    }
   }
 
   function tick() {
@@ -617,6 +649,7 @@ function createCodexWatch(deps) {
     const now = Date.now();
     const fullSweep = !booted || (tickCount % FULL_SWEEP_TICKS === 0);
     tickCount++;
+    refreshOfficialTitles();
     try {
       if (!fs.existsSync(sessionsDir)) {
         if (!missingLogged) { log('codex', `no ${sessionsDir} — Codex not installed? watcher idle`); missingLogged = true; }
@@ -687,7 +720,10 @@ function createCodexWatch(deps) {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  return { start, stop, tick, seedRecent, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
+  return {
+    start, stop, tick, seedRecent, getRateLimits: () => rateLimits,
+    _trackers: trackers, _cursors: cursors, _sessionIndex: sessionIndex,
+  };
 }
 
 module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool, parseRequestUserInput };

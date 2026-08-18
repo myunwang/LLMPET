@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmpet.local/schemas/gif-retarget.v1.json",
+  "title": "LLMPET GIF retarget job",
+  "type": "object",
+  "required": ["schema_version", "inputs", "output", "semantic_contract", "routes", "manual_review"],
+  "properties": {
+    "schema_version": {"const": "gif-retarget.v1"},
+    "inputs": {
+      "type": "object",
+      "required": ["action_gif", "character_reference"],
+      "properties": {
+        "action_gif": {"type": "string"},
+        "character_reference": {"type": "string"}
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["selected_gif", "canvas", "frame_count", "duration_scale", "loop"],
+      "properties": {
+        "selected_gif": {"type": "string"},
+        "canvas": {
+          "type": "array",
+          "prefixItems": [{"type": "integer"}, {"type": "integer"}],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "frame_count": {"type": "integer", "minimum": 1},
+        "duration_scale": {"type": "number", "exclusiveMinimum": 0},
+        "loop": {"type": "integer"},
+        "max_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "world_anchors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "box", "max_unique_hashes"],
+        "properties": {
+          "id": {"type": "string"},
+          "box": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "max_unique_hashes": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "semantic_contract": {"type": "object"},
+    "motion_track": {"type": "object"},
+    "routes": {"type": "object"},
+    "generation": {"type": "object"},
+    "manual_review": {
+      "type": "object",
+      "required": ["semantic_pass", "animation_pass"],
+      "properties": {
+        "semantic_pass": {"type": "boolean"},
+        "animation_pass": {"type": "boolean"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

@@ -26,6 +26,15 @@ assert.strictEqual(lootCfg.lootCapturedSessions[0].agent, 'codex',
   'loot snapshots are always Codex sessions');
 assert.strictEqual(lootCfg.lootCapturedSessions[0].project, 'A');
 
+const whaleCfg = sanitize({ skin: 'whale', skinCodex: 'whale', skinDsh: 'whale' });
+assert.deepStrictEqual(
+  [whaleCfg.skin, whaleCfg.skinCodex, whaleCfg.skinDsh],
+  ['whale', 'whale', 'whale'],
+  'the whale skin must survive config sanitization for every pet role',
+);
+assert.strictEqual(sanitize({ skin: 'unknown-skin' }).skin, 'mascot',
+  'unknown skins must still fail closed to the default');
+
 const root = path.join(__dirname, '..');
 const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');

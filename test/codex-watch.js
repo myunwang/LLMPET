@@ -22,10 +22,11 @@ function check(name, fn) {
 // 假 core：只记账
 function fakeCore() {
   return {
-    updates: [], seeds: [], ctx: [],
+    updates: [], seeds: [], ctx: [], metas: [],
     updateSession(sid, state, event, fields) { this.updates.push({ sid, state, event, fields }); },
     seedSession(s) { this.seeds.push(s); },
     setContextUsage(sid, cu) { this.ctx.push({ sid, cu }); },
+    setSessionMeta(sid, fields) { this.metas.push({ sid, fields }); },
   };
 }
 
@@ -105,6 +106,22 @@ check('meta+尾部 user_message/token_count → seedSession(不发事件)', () =
   assert.strictEqual(core.seeds[0].sessionTitle, '帮我修个 bug');
   assert.strictEqual(core.seeds[0].contextUsage.percent, 10);
   assert.strictEqual(core.updates.length, 0, 'backfill 不应发 updateSession');
+});
+check('Codex session_index 的正式标题覆盖 prompt 猜名', () => {
+  const { root, dir } = mkSessions();
+  const sessionIndexPath = path.join(root, 'session_index.jsonl');
+  fs.writeFileSync(sessionIndexPath, line({
+    id: UUID_A, thread_name: '继续 FaceAI 阶段收尾工作', updated_at: new Date().toISOString(),
+  }));
+  const fp = path.join(dir, `rollout-official-title-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp,
+    meta(UUID_A) +
+    line({ type: 'event_msg', payload: { type: 'user_message', message: '你先告诉我现在是什么状态？' } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, sessionIndexPath, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].sessionTitle, '继续 FaceAI 阶段收尾工作');
 });
 check('启动时 Codex 已在等选择 → 回填真实选择卡', () => {
   const { root, dir } = mkSessions();
@@ -190,6 +207,23 @@ check('SessionStart→prompt→tool→complete 全链路', () => {
   assert.strictEqual(limits.usedPercent, 12);
 });
 
+check('运行中新增/重命名的 Codex 正式标题会刷新到现有会话', () => {
+  const { root, dir } = mkSessions();
+  const sessionIndexPath = path.join(root, 'session_index.jsonl');
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, sessionIndexPath, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-dynamic-title-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B)
+    + line({ type: 'event_msg', payload: { type: 'user_message', message: '临时 prompt 标题' } }));
+  w.tick();
+  fs.writeFileSync(sessionIndexPath, line({ id: UUID_B, thread_name: '正式任务标题' }));
+  w.tick();
+  assert.deepStrictEqual(core.metas.at(-1), {
+    sid: UUID_B, fields: { sessionTitle: '正式任务标题' },
+  });
+});
+
 check('回合生命周期：首个工具前 thinking；开工后 output/reasoning 都保持 working', () => {
   const { root, dir } = mkSessions();
   const core = fakeCore();
@@ -226,6 +260,23 @@ check('新一轮会重置开工锁：上一轮用过工具不污染下一轮初�
   w.tick();
   const tail = core.updates.slice(-2).map((u) => `${u.event}:${u.state}`);
   assert.deepStrictEqual(tail, ['TaskStarted:thinking', 'Reasoning:thinking']);
+});
+
+check('长寿 rollout 在回合中重复 session_meta 不会把进行中状态重置为 idle', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-repeated-meta-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B)
+    + line({ type: 'event_msg', payload: { type: 'task_started' } })
+    + line({ type: 'response_item', payload: { type: 'function_call', name: 'wait_agent' } }));
+  w.tick();
+  const sessionStartsBefore = core.updates.filter((u) => u.event === 'SessionStart').length;
+  fs.appendFileSync(fp, meta(UUID_B, { memory_mode: 'auto' }));
+  w.tick();
+  assert.strictEqual(core.updates.filter((u) => u.event === 'SessionStart').length, sessionStartsBefore);
+  assert.strictEqual(core.updates.at(-1).state, 'working');
 });
 
 check('turn_aborted → TurnAborted(idle)；approval → Notification', () => {
@@ -340,6 +391,19 @@ check('坏 JSON 行 / 空目录 / 目录不存在都不炸', () => {
 });
 
 console.log('[C5] 长寿会话与超长 meta（实测踩坑回归）');
+check('Codex 没有 terminal pid 时，rollout 仍在写就不会被 30 分钟清理误删', () => {
+  const core = createCore();
+  core.updateSession(UUID_A, 'working', 'PreToolUse', { agentId: 'codex', headless: false });
+  const session = core.getSession(UUID_A);
+  session.updatedAt = Date.now() - 31 * 60 * 1000;
+  session.transcriptActiveAt = Date.now() - 1000;
+  core.cleanStaleSessions();
+  assert.ok(core.getSession(UUID_A), '活跃 rollout 对应的长任务应继续留在桌宠会话框');
+  session.transcriptActiveAt = Date.now() - 31 * 60 * 1000;
+  core.cleanStaleSessions();
+  assert.strictEqual(core.getSession(UUID_A), null, '事件和 rollout 都沉默超时后仍应正常回收');
+  core.stopStaleCleanup();
+});
 check('几天前日期目录里的活跃文件：启动即入库，之后每轮都能跟进增量', () => {
   const { root } = mkSessions();
   // 会话 5 天前开始 → rollout 在 5 天前的日期目录里，但 mtime 是现在（还在写）

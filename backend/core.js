@@ -464,6 +464,7 @@ function createCore(options = {}) {
     const now = Date.now();
     for (const [id, s] of sessions) {
       const idle = now - (s.updatedAt || now);
+      const sourceIdle = now - Math.max(s.updatedAt || 0, s.transcriptActiveAt || 0);
       const alive = s.sourcePid ? pidAlive(s.sourcePid) : null;
       // Claude and Codex each own one durable LLMPET travel conversation.
       // Its terminal is intentionally closed between outings, but the mailbox
@@ -484,14 +485,17 @@ function createCore(options = {}) {
       if (!durableTravelSession && alive === false && idle > DETACHED_REMOVE_MS) {
         sessions.delete(id); changed = true; continue;
       }
-      // No terminal info at all + silent very long → remove.
-      if (!durableTravelSession && alive === null && idle > SESSION_STALE_MS) {
+      // No terminal info at all + source transcript silent very long → remove.
+      // Codex Desktop has no terminal pid. A long task can keep appending rollout
+      // rows that do not map to state transitions (token counts, world state,
+      // sub-agent activity), so event-idle alone must not evict a live session.
+      if (!durableTravelSession && alive === null && sourceIdle > SESSION_STALE_MS) {
         sessions.delete(id); changed = true; continue;
       }
       // Stuck working/thinking → settle to idle, but KEEP it visible.
       // 「卡死」的判定用 事件时间 和 transcript 产出时间 取较新者：慢长任务
       // （17 分钟一轮、token 缓慢增长）事件少但文件一直在写，不算卡死。
-      const busyIdle = now - Math.max(s.updatedAt || 0, s.transcriptActiveAt || 0);
+      const busyIdle = sourceIdle;
       if (BUSY_STATES.has(s.state) && busyIdle > WORKING_STALE_MS) {
         s.state = 'idle'; changed = true;
       }

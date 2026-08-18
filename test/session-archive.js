@@ -60,6 +60,9 @@ async function main() {
     { timestamp: '2026-08-09T11:00:00Z', type: 'session_meta', payload: { id: 'codex-cli', cwd: '/tmp/codex-cli', originator: 'codex-tui', source: 'cli', thread_source: 'user' } },
     { timestamp: '2026-08-09T11:01:00Z', type: 'event_msg', payload: { type: 'user_message', message: 'Codex cli prompt' } },
   ]);
+  jsonl(path.join(root, '.codex', 'session_index.jsonl'), [
+    { id: 'codex-desktop', thread_name: '继续 FaceAI 阶段收尾工作', updated_at: '2026-08-10T11:02:00Z' },
+  ]);
   jsonl(path.join(codexRoot, '2026', '08', '10', 'rollout-subagent.jsonl'), [
     { timestamp: '2026-08-10T12:00:00Z', type: 'session_meta', payload: { id: 'subagent', cwd: '/tmp/internal', originator: 'Codex Desktop', source: { subagent: { other: 'guardian' } }, thread_source: 'subagent' } },
   ]);
@@ -97,6 +100,10 @@ async function main() {
   assert.strictEqual(all.summary.harness, 1);
   assert.strictEqual(archive.list({ provider: 'codex' }).total, 2);
   assert.strictEqual(archive.list({ provider: 'dsh' }).total, 1);
+  const titledCodex = archive.list({ search: '继续 FaceAI 阶段收尾工作' }).sessions[0];
+  assert.strictEqual(titledCodex.id, 'codex-desktop',
+    'Codex 正式任务名进入档案搜索，而不是被最后一条 prompt 覆盖');
+  assert.strictEqual(titledCodex.cwd, '/tmp/codex-desktop', '正式标题不能挤掉档案 cwd');
   assert.strictEqual(archive.list({ origin: 'harness' }).total, 1);
   assert.strictEqual(archive.list({ search: 'DeepSeek Harness' }).sessions[0].id, 'session-dsh-one');
   assert.strictEqual(archive.list({ origin: 'desktop' }).total, 2);
