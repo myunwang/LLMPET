@@ -531,6 +531,8 @@ function anchoredLayoutPayload(next) {
   const yOffset = yAlign === 'top' ? rect.top : viewportH - rect.bottom;
   return {
     screenX, screenY,
+    windowX: wr.x, windowY: wr.y,
+    windowWidth: wr.width, windowHeight: wr.height,
     width: rect.width, height: rect.height,
     xAlign, yAlign, xOffset, yOffset,
   };
@@ -4169,11 +4171,20 @@ function setMouseIgnore(on, reason = 'unknown', details = {}) {
   try { window.pet.setIgnoreMouse(on); } catch {}
 }
 window.addEventListener('mousemove', (e) => {
-  // A stale gesture may currently own the whole transparent BrowserWindow, so
-  // the hover can land outside the original pet element and never reach its
-  // pointermove handler. Clean it up at window scope as well.
-  if (g && Number.isFinite(e.buttons) && (e.buttons & 1) === 0) cancelActiveDrag();
-  if (g) { setMouseIgnore(false, 'active-gesture'); return; } // 拖动中保持可点
+  // macOS can forward a window-level mousemove with buttons=0 in the same
+  // frame as pointerdown on a transparent BrowserWindow. It is not proof of a
+  // release: cancelling here makes the pet impossible to drag. Pointerup,
+  // pointercancel, lostpointercapture and the element's pointermove own cleanup.
+  if (g) {
+    if (Number.isFinite(e.buttons) && (e.buttons & 1) === 0 && !g.loggedZeroButtonMousemove) {
+      g.loggedZeroButtonMousemove = true;
+      traceDrag('window-mousemove-buttons-zero', {
+        dragId: g.traceId, client: { x: e.clientX, y: e.clientY }, frame: g.frame,
+      });
+    }
+    setMouseIgnore(false, 'active-gesture');
+    return;
+  }
   const el = document.elementFromPoint(e.clientX, e.clientY);
   // 命中测试权威同步悬停态：穿透切换时 pointerleave 可能漏发，会把 askHover 卡在 true，
   // 进而让 isInteracting() 永远为真、refreshAsk 永不对账（旧卡片冻结、新卡片进不来）。

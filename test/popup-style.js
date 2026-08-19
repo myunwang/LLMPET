@@ -124,6 +124,9 @@ assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-
   'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
 const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const preloadJs = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+assert(/windowX:\s*wr\.x, windowY:\s*wr\.y/.test(js)
+  && /correctStalePetAnchor\(validAnchor, b\)/.test(mainJs),
+  'main process must correct a stale renderer window origin before applying a popup anchor');
 assert(/if \(process\.platform === 'darwin'\) app\.disableHardwareAcceleration\(\);/.test(mainJs),
   'macOS transparent pet windows must avoid the GPU compositor path that retains stale tiles');
 assert(/transparent:\s*true,[\s\S]{0,120}backgroundColor:\s*'#00000000',[\s\S]{0,120}hasShadow:\s*false/.test(mainJs),
@@ -237,7 +240,7 @@ assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHo
   'wide popups must switch horizontal anchors during a drag before they leave the work area');
 assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture,\s*true,\s*'buttons-released-during-move'\)/.test(js)
   && /lostpointercapture/.test(js)
-  && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
+  && /window\.addEventListener\('mousemove'[\s\S]*window-mousemove-buttons-zero/.test(js),
   'a released or lost pointer must not leave hover events owning a stale drag');
 assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.screenX, window\.screenY\]/.test(js)
   && /const accepted = g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),

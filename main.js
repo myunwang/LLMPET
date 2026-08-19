@@ -310,12 +310,15 @@ function applyPetSize(st, requestedAnchor) {
   const { w } = targetSize(st);
   let { h } = targetSize(st);
   const b = win.getBounds();
+  const validAnchor = validPetAnchor(requestedAnchor);
+  const anchor = validAnchor ? petGeometry.correctStalePetAnchor(validAnchor, b) : null;
   dragTrace.record('main', 'size-request', {
     agent: st.agent,
     before: b,
     customSize: st.customSize,
     requested: { width: w, height: h },
     anchor: requestedAnchor,
+    correctedAnchor: anchor,
   });
   // Cap the window to the screen's work area so a tall popup can NEVER push the
   // pet / footer buttons off-screen — the popup scrolls internally instead.
@@ -323,7 +326,6 @@ function applyPetSize(st, requestedAnchor) {
     const wa = screen.getDisplayMatching(b).workArea;
     const width = Math.min(w, wa.width);
     h = Math.min(h, wa.height);
-    const anchor = validPetAnchor(requestedAnchor);
     const anchored = anchor ? anchoredPetOrigin(anchor, width, h) : null;
     const cx = b.x + b.width / 2;
     const bottom = b.y + b.height;
@@ -334,16 +336,16 @@ function applyPetSize(st, requestedAnchor) {
     win.setBounds({ x, y, width, height: h });
     dragTrace.record('main', 'size-applied', {
       agent: st.agent, before: b, requested: { x, y, width, height: h },
-      actual: win.getBounds(), anchor: requestedAnchor,
+      actual: win.getBounds(), anchor: requestedAnchor, correctedAnchor: anchor,
     });
   } catch {
-    const anchor = validPetAnchor(requestedAnchor);
     const anchored = anchor ? anchoredPetOrigin(anchor, w, h) : null;
     const bottom = b.y + b.height;
     const fallback = { x: anchored ? anchored.x : b.x, y: anchored ? anchored.y : Math.round(bottom - h), width: w, height: h };
     win.setBounds(fallback);
     dragTrace.record('main', 'size-applied-fallback', {
-      agent: st.agent, before: b, requested: fallback, actual: win.getBounds(), anchor: requestedAnchor,
+      agent: st.agent, before: b, requested: fallback, actual: win.getBounds(),
+      anchor: requestedAnchor, correctedAnchor: anchor,
     });
   }
   schedulePetArtifactCleanup(st);

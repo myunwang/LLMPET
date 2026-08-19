@@ -263,6 +263,28 @@ async function main() {
     });
   }
 
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 55, screenX: 100, screenY: 100,
+    });
+    w.dispatchWindow('mousemove', { buttons: 0, clientX: 140, clientY: 140 });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 55, screenX: 125, screenY: 120,
+    });
+    check('透明窗同帧转发的 window mousemove(buttons=0) 不会抢先取消拖动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'));
+      assert(w.calls.some((c) => c[0] === 'petDragTrace'
+        && c[1][0].event === 'window-mousemove-buttons-zero'));
+    });
+    cat.dispatch('pointerup', { pointerId: 55 });
+  }
+
   console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
   {
     const w = world();

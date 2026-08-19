@@ -169,12 +169,13 @@ function createStubWorld(options = {}) {
     static now() { return RealDate.now() + clock.offset; }
   }
 
+  const windowListeners = {};
   const window = {
     pet,
     OctoIcons: undefined,
     AudioContext: undefined,
     webkitAudioContext: undefined,
-    addEventListener: () => {},
+    addEventListener: (ev, fn) => { (windowListeners[ev] = windowListeners[ev] || []).push(fn); },
     ...(options.window || {}),
   };
 
@@ -210,7 +211,10 @@ function createStubWorld(options = {}) {
     location: { search: '' },
   };
   sandbox.globalThis = sandbox;
-  return { sandbox, elements: byId, handlers, calls, clock, document, window };
+  const dispatchWindow = (ev, payload = {}) => {
+    for (const fn of windowListeners[ev] || []) fn({ type: ev, ...payload });
+  };
+  return { sandbox, elements: byId, handlers, calls, clock, document, window, dispatchWindow };
 }
 
 // Load renderer/pet.js (and anything else, e.g. a future shared module) into

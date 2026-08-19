@@ -37,6 +37,23 @@ assert.strictEqual(
   'an implausible single pointer-frame jump must not move the native window',
 );
 
+assert.deepStrictEqual(
+  geometry.correctStalePetAnchor({
+    screenX: 1410, screenY: 601, windowX: 1010, windowY: 404,
+    width: 120, height: 120, xAlign: 'right', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  }, { x: 810, y: 404, width: 520, height: 340 }),
+  {
+    screenX: 1210, screenY: 601, windowX: 1010, windowY: 404,
+    width: 120, height: 120, xAlign: 'right', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  },
+  'a second popup measurement must correct a stale renderer window origin instead of pushing the pet 200px',
+);
+assert.deepStrictEqual(
+  geometry.correctStalePetAnchor({ screenX: 80, screenY: 100 }, { x: 20, y: 30 }),
+  { screenX: 80, screenY: 100 },
+  'legacy anchors without a renderer window snapshot remain backward compatible',
+);
+
 // Old saved positions put the transparent window at the top while the visible
 // pet remained around its bottom. That must be interpreted as a top-edge drag.
 assert.deepStrictEqual(

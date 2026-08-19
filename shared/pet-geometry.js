@@ -31,6 +31,25 @@
     return point;
   }
 
+  // Renderer screenX/screenY can lag one Electron resize transaction. Carry
+  // the renderer's own window snapshot with the pet anchor, then translate the
+  // anchor by the difference to the main process' authoritative bounds.
+  function correctStalePetAnchor(anchor, actualWindow) {
+    if (!anchor || typeof anchor !== 'object') return anchor;
+    const corrected = { ...anchor };
+    const actualX = Number(actualWindow && actualWindow.x);
+    const actualY = Number(actualWindow && actualWindow.y);
+    const reportedX = Number(anchor.windowX);
+    const reportedY = Number(anchor.windowY);
+    if (Number.isFinite(corrected.screenX) && Number.isFinite(actualX) && Number.isFinite(reportedX)) {
+      corrected.screenX += actualX - reportedX;
+    }
+    if (Number.isFinite(corrected.screenY) && Number.isFinite(actualY) && Number.isFinite(reportedY)) {
+      corrected.screenY += actualY - reportedY;
+    }
+    return corrected;
+  }
+
   function normalizeRect(rect) {
     const x = Number(rect && rect.x) || 0;
     const y = Number(rect && rect.y) || 0;
@@ -270,6 +289,7 @@
 
   return {
     safeNativeWindowPoint,
+    correctStalePetAnchor,
     chooseRestingLayout,
     choosePopupLayout,
     chooseDragVerticalLayout,
