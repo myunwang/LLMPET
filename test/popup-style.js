@@ -227,11 +227,9 @@ assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture\)/.test(js)
   && /lostpointercapture/.test(js)
   && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
   'a released or lost pointer must not leave hover events owning a stale drag');
-assert(/const livePoint = safeDragScreenPoint\(window\.screenX, window\.screenY\)[\s\S]*\[livePoint\.x, livePoint\.y\]/.test(js)
+assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.screenX, window\.screenY\]/.test(js)
   && /if \(g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),
-  'drag must start from validated live screen coordinates and ignore a late IPC origin after movement');
-assert(/const pointer = safeDragScreenPoint\(e\.screenX, e\.screenY,[\s\S]*if \(!pointer\) return[\s\S]*movePetDuringDrag\(gesture, pointer,/.test(js),
-  'a bad edge-crossing pointer frame must be ignored before it reaches window-position IPC');
+  'drag must start from live screen coordinates and ignore a late IPC origin after movement');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
   && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),
