@@ -199,10 +199,13 @@ assert(/const PET_POSITION_SAVE_DELAY_MS = 220/.test(mainJs)
   && /function schedulePetPositionSave[\s\S]*setTimeout[\s\S]*persistPetPosition/.test(mainJs)
   && /win\.on\('moved',[\s\S]*schedulePetPositionSave\(st\)/.test(mainJs),
   'drag position persistence must be debounced instead of blocking every moved frame');
-assert(/ipcMain\.on\('set-win-pos',[\s\S]*win\.setPosition\(Math\.round\(x\), Math\.round\(y\), false\)/.test(mainJs),
-  'pointer drag must move only the window origin instead of resubmitting its size');
+assert(/function movePetWindow[\s\S]*safeNativeWindowPoint\(\{ x, y, current, maxStep \}\)[\s\S]*win\.setPosition\(point\.x, point\.y, false\)/.test(mainJs)
+  && /ipcMain\.on\('set-win-pos',[\s\S]{0,300}movePetWindow\(st, win, x, y\)/.test(mainJs),
+  'pointer drag must validate native coordinates and move only the window origin');
+assert(/function movePetWindow[\s\S]*try \{[\s\S]*win\.setPosition\(point\.x, point\.y, false\)[\s\S]*catch \(error\)/.test(mainJs),
+  'a malformed edge-crossing frame must not escape as an uncaught main-process exception');
 assert(/function schedulePetArtifactCleanup[\s\S]*invalidateShadow\(\)/.test(mainJs)
-  && /set-win-pos[\s\S]{0,700}schedulePetArtifactCleanup\(st\)/.test(mainJs)
+  && /function movePetWindow[\s\S]{0,1800}schedulePetArtifactCleanup\(st\)/.test(mainJs)
   && /function applyPetSize[\s\S]{0,1800}schedulePetArtifactCleanup\(st\)/.test(mainJs),
   'macOS transparent-window artifacts must be invalidated after move and resize bursts');
 assert(/\.pixel-sprite\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css)
@@ -224,9 +227,11 @@ assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture\)/.test(js)
   && /lostpointercapture/.test(js)
   && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
   'a released or lost pointer must not leave hover events owning a stale drag');
-assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.screenX, window\.screenY\]/.test(js)
+assert(/const livePoint = safeDragScreenPoint\(window\.screenX, window\.screenY\)[\s\S]*\[livePoint\.x, livePoint\.y\]/.test(js)
   && /if \(g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),
-  'drag must start from live screen coordinates and ignore a late IPC origin after movement');
+  'drag must start from validated live screen coordinates and ignore a late IPC origin after movement');
+assert(/const pointer = safeDragScreenPoint\(e\.screenX, e\.screenY,[\s\S]*if \(!pointer\) return[\s\S]*movePetDuringDrag\(gesture, pointer,/.test(js),
+  'a bad edge-crossing pointer frame must be ignored before it reaches window-position IPC');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
   && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),

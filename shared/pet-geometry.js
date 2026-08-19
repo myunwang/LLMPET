@@ -9,6 +9,27 @@
   if (root) root.PetGeometry = api;
 })(typeof window !== 'undefined' ? window : globalThis, () => {
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  // Electron ultimately converts BrowserWindow positions to signed native
+  // integers. A Chromium pointer event can briefly expose a finite sentinel
+  // outside that range while a transparent window crosses a screen edge.
+  const NATIVE_WINDOW_COORD_MIN = -2147483648;
+  const NATIVE_WINDOW_COORD_MAX = 2147483647;
+
+  function safeNativeWindowPoint({ x, y, current = null, maxStep = Infinity }) {
+    const point = { x: Math.round(Number(x)), y: Math.round(Number(y)) };
+    if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y)) return null;
+    if (point.x < NATIVE_WINDOW_COORD_MIN || point.x > NATIVE_WINDOW_COORD_MAX
+      || point.y < NATIVE_WINDOW_COORD_MIN || point.y > NATIVE_WINDOW_COORD_MAX) return null;
+
+    const limit = Number(maxStep);
+    if (current && Number.isFinite(limit) && limit >= 0) {
+      const currentX = Number(current.x);
+      const currentY = Number(current.y);
+      if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) return null;
+      if (Math.abs(point.x - currentX) > limit || Math.abs(point.y - currentY) > limit) return null;
+    }
+    return point;
+  }
 
   function normalizeRect(rect) {
     const x = Number(rect && rect.x) || 0;
@@ -248,6 +269,7 @@
   }
 
   return {
+    safeNativeWindowPoint,
     chooseRestingLayout,
     choosePopupLayout,
     chooseDragVerticalLayout,

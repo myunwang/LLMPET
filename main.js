@@ -51,6 +51,7 @@ const { createProgramSkillManager } = require('./backend/program-skill');
 const { createRuntimeMonitor } = require('./backend/runtime-monitor');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
+const petGeometry = require('./shared/pet-geometry');
 
 const t = i18n.t;
 // Main-process strings (tray, dialogs, adapter-built labels) are localized at
@@ -105,6 +106,7 @@ const anyUiBusy = () => petStates().some((s) => s.uiBusy);
 const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.visualRect : null; };
 const PET_POSITION_SAVE_DELAY_MS = 220;
 const PET_ARTIFACT_CLEANUP_DELAY_MS = 48;
+const PET_MAX_POSITION_STEP = 32768;
 
 function persistPetPosition(st) {
   if (!st || !st.win || st.win.isDestroyed() || st.customSize) return;
@@ -136,6 +138,46 @@ function schedulePetArtifactCleanup(st) {
     // burst settles so pointer frames are not slowed by another native call.
     try { st.win.invalidateShadow(); } catch {}
   }, PET_ARTIFACT_CLEANUP_DELAY_MS);
+}
+
+function reportRejectedPetPosition(st, x, y, error = null) {
+  const now = Date.now();
+  if (st && now - (st.invalidPositionLogAt || 0) < 1000) return;
+  if (st) st.invalidPositionLogAt = now;
+  const suffix = error ? `: ${error.message || error}` : '';
+  log('main', `ignored invalid pet window position (${String(x)}, ${String(y)})${suffix}`);
+}
+
+function movePetWindow(st, win, x, y) {
+  let current;
+  try { current = win.getBounds(); } catch (error) {
+    reportRejectedPetPosition(st, x, y, error);
+    return false;
+  }
+
+  let maxStep = PET_MAX_POSITION_STEP;
+  try {
+    const bounds = screen.getDisplayMatching(current).bounds;
+    maxStep = Math.max(maxStep, bounds.width * 4, bounds.height * 4);
+  } catch {}
+  const point = petGeometry.safeNativeWindowPoint({ x, y, current, maxStep });
+  if (!point) {
+    reportRejectedPetPosition(st, x, y);
+    return false;
+  }
+
+  try {
+    // Moving only the origin avoids a redundant size/layout transaction on
+    // every pointer frame. setBounds was the other half of the drag jitter.
+    win.setPosition(point.x, point.y, false);
+  } catch (error) {
+    // Never let one malformed edge-crossing frame escape the IPC listener and
+    // trigger Electron's uncaught main-process error dialog.
+    reportRejectedPetPosition(st, point.x, point.y, error);
+    return false;
+  }
+  if (st && st.win === win) schedulePetArtifactCleanup(st);
+  return true;
 }
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
@@ -307,6 +349,7 @@ function makePetWindow(agent) {
   const st = {
     agent, win, customSize: null, visualRect: null, uiBusy: false,
     mouseIgnoring: true, positionSaveTimer: null, artifactCleanupTimer: null,
+    invalidPositionLogAt: 0,
   };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
@@ -1151,12 +1194,7 @@ function registerIpc() {
   ipcMain.on('set-win-pos', (e, x, y) => {
     const st = stateOfSender(e.sender) || primaryPetState();
     const win = st && st.win && !st.win.isDestroyed() ? st.win : senderPetWin(e);
-    if (win && Number.isFinite(x) && Number.isFinite(y)) {
-      // Moving only the origin avoids a redundant size/layout transaction on
-      // every pointer frame. setBounds was the other half of the drag jitter.
-      win.setPosition(Math.round(x), Math.round(y), false);
-      if (st && st.win === win) schedulePetArtifactCleanup(st);
-    }
+    if (win) movePetWindow(st, win, x, y);
   });
 
   ipcMain.on('open-panel', openPanel);

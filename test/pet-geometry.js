@@ -5,6 +5,38 @@ const geometry = require('../shared/pet-geometry');
 
 const workArea = { x: 0, y: 24, width: 1440, height: 876 };
 
+assert.deepStrictEqual(
+  geometry.safeNativeWindowPoint({
+    x: 620.4, y: 300.6, current: { x: 0, y: 24 }, maxStep: 32768,
+  }),
+  { x: 620, y: 301 },
+  'an ordinary edge-to-centre drag must remain a valid native position',
+);
+assert.deepStrictEqual(
+  geometry.safeNativeWindowPoint({
+    x: -1600, y: 240, current: { x: -1200, y: 220 }, maxStep: 32768,
+  }),
+  { x: -1600, y: 240 },
+  'negative coordinates on a left-hand display must remain valid',
+);
+assert.strictEqual(
+  geometry.safeNativeWindowPoint({ x: 0, y: 2147483648 }),
+  null,
+  'a finite coordinate outside the native signed-integer range must be rejected',
+);
+assert.strictEqual(
+  geometry.safeNativeWindowPoint({ x: 0, y: Number.MAX_VALUE }),
+  null,
+  'a huge finite Chromium sentinel must be rejected',
+);
+assert.strictEqual(
+  geometry.safeNativeWindowPoint({
+    x: 50000, y: 240, current: { x: 1200, y: 220 }, maxStep: 32768,
+  }),
+  null,
+  'an implausible single pointer-frame jump must not move the native window',
+);
+
 // Old saved positions put the transparent window at the top while the visible
 // pet remained around its bottom. That must be interpreted as a top-edge drag.
 assert.deepStrictEqual(

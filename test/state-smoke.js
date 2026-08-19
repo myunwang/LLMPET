@@ -233,6 +233,32 @@ async function main() {
     cat.dispatch('pointerup', { pointerId: 53 });
   }
 
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 54, screenX: 100, screenY: 100,
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 54, screenX: 130, screenY: Number.MAX_VALUE,
+    });
+    check('屏幕边缘的坏坐标帧不会发送到主进程', () => {
+      assert(!w.calls.some((c) => c[0] === 'setWinPos'));
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 54, screenX: 130, screenY: 125,
+    });
+    check('坏坐标帧不会污染手势，下一正常帧继续拖动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][0] === 330 && c[1][1] === 225));
+    });
+    cat.dispatch('pointerup', { pointerId: 54 });
+  }
+
   console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
   {
     const w = world();

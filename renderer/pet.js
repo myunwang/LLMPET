@@ -3589,6 +3589,20 @@ function reportPetVisualBounds() {
 // ====================================================================
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
+const DRAG_POINTER_MAX_STEP = 32768;
+function safeDragScreenPoint(x, y, current = null) {
+  if (window.PetGeometry && window.PetGeometry.safeNativeWindowPoint) {
+    return window.PetGeometry.safeNativeWindowPoint({
+      x, y, current, maxStep: current ? DRAG_POINTER_MAX_STEP : Infinity,
+    });
+  }
+  const point = { x: Math.round(Number(x)), y: Math.round(Number(y)) };
+  return Number.isSafeInteger(point.x) && Number.isSafeInteger(point.y)
+    && Math.abs(point.x) <= 2147483647 && Math.abs(point.y) <= 2147483647
+    ? point
+    : null;
+}
+
 let g = null; // 当前手势（同步建立，保证快速点击也能识别）
 function clearDragGesture(gesture, settle = true) {
   if (!gesture || g !== gesture) return false;
@@ -3610,6 +3624,8 @@ function cancelActiveDrag(settle = true) {
 function attachDrag(el) {
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    const pressPoint = safeDragScreenPoint(e.screenX, e.screenY);
+    if (!pressPoint) return;
     // A missed pointerup/lost-capture must never leak ownership into the next
     // press. This is especially important for a moving transparent window.
     cancelActiveDrag(false);
@@ -3619,11 +3635,12 @@ function attachDrag(el) {
     // the renderer. Starting with null made quick drags wait for an IPC round
     // trip, then apply the accumulated delta all at once — the visible one-frame
     // kick reported by users. The IPC read remains a pre-move calibration only.
-    const liveOrigin = Number.isFinite(window.screenX) && Number.isFinite(window.screenY)
-      ? [window.screenX, window.screenY]
+    const livePoint = safeDragScreenPoint(window.screenX, window.screenY);
+    const liveOrigin = livePoint
+      ? [livePoint.x, livePoint.y]
       : null;
     const gesture = {
-      el, pid: e.pointerId, sx: e.screenX, sy: e.screenY,
+      el, pid: e.pointerId, sx: pressPoint.x, sy: pressPoint.y,
       moved: false, win: liveOrigin,
     };
     g = gesture;
@@ -3648,12 +3665,17 @@ function attachDrag(el) {
       clearDragGesture(gesture);
       return;
     }
-    const dx = e.screenX - gesture.sx;
-    const dy = e.screenY - gesture.sy;
+    // Chromium can emit a finite out-of-native-range sentinel for one pointer
+    // frame while a transparent window crosses a display edge. Ignore that
+    // frame so it cannot poison the rebased gesture origin or main-process IPC.
+    const pointer = safeDragScreenPoint(e.screenX, e.screenY, { x: gesture.sx, y: gesture.sy });
+    if (!pointer) return;
+    const dx = pointer.x - gesture.sx;
+    const dy = pointer.y - gesture.sy;
     if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) gesture.moved = true;
     if (gesture.moved && gesture.win) {
       if (radialOpen) closeRadial();
-      movePetDuringDrag(gesture, e, gesture.win[0] + dx, gesture.win[1] + dy);
+      movePetDuringDrag(gesture, pointer, gesture.win[0] + dx, gesture.win[1] + dy);
     }
   });
   el.addEventListener('pointerup', (e) => {
