@@ -197,6 +197,19 @@ assert(/const PET_POSITION_SAVE_DELAY_MS = 220/.test(mainJs)
   'drag position persistence must be debounced instead of blocking every moved frame');
 assert(/ipcMain\.on\('set-win-pos',[\s\S]*win\.setPosition\(Math\.round\(x\), Math\.round\(y\), false\)/.test(mainJs),
   'pointer drag must move only the window origin instead of resubmitting its size');
+assert(/function schedulePetArtifactCleanup[\s\S]*invalidateShadow\(\)/.test(mainJs)
+  && /set-win-pos[\s\S]{0,700}schedulePetArtifactCleanup\(st\)/.test(mainJs)
+  && /function applyPetSize[\s\S]{0,1800}schedulePetArtifactCleanup\(st\)/.test(mainJs),
+  'macOS transparent-window artifacts must be invalidated after move and resize bursts');
+assert(/\.pixel-sprite\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css)
+  && /#mascot\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css)
+  && /#cat\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css),
+  'animated pet layers must not carry compositor-heavy alpha shadows');
+assert(/#pixel\.dragging \.pixel-sprite\s*\{[^}]*animation\s*:\s*none\s*;/s.test(css)
+  && /#mascot\.dragging #mascot-img\s*\{[^}]*animation\s*:\s*none\s*;/s.test(css),
+  'pointer-down must not trigger a shake animation shared by clicks and drags');
+assert(/\.sesslist\s*\{[^}]*box-shadow\s*:\s*inset\b/s.test(css),
+  'the resized session surface must use an inner depth cue instead of a detached outer shadow');
 assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
   'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
 assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubbleMsg, 2600\)\) resetPetSize\(\)/.test(js),

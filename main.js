@@ -97,6 +97,7 @@ const primaryPetState = () => (petWin && !petWin.isDestroyed() ? petState.get(pe
 const anyUiBusy = () => petStates().some((s) => s.uiBusy);
 const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.visualRect : null; };
 const PET_POSITION_SAVE_DELAY_MS = 220;
+const PET_ARTIFACT_CLEANUP_DELAY_MS = 48;
 
 function persistPetPosition(st) {
   if (!st || !st.win || st.win.isDestroyed() || st.customSize) return;
@@ -115,6 +116,19 @@ function schedulePetPositionSave(st) {
     st.positionSaveTimer = null;
     persistPetPosition(st);
   }, PET_POSITION_SAVE_DELAY_MS);
+}
+
+function schedulePetArtifactCleanup(st) {
+  if (process.platform !== 'darwin' || !st) return;
+  clearTimeout(st.artifactCleanupTimer);
+  st.artifactCleanupTimer = setTimeout(() => {
+    st.artifactCleanupTimer = null;
+    if (!st.win || st.win.isDestroyed()) return;
+    // Electron documents that transparent BrowserWindows can leave visual
+    // artifacts on macOS. Coalesce the cleanup until the current move/resize
+    // burst settles so pointer frames are not slowed by another native call.
+    try { st.win.invalidateShadow(); } catch {}
+  }, PET_ARTIFACT_CLEANUP_DELAY_MS);
 }
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
@@ -224,6 +238,7 @@ function applyPetSize(st, requestedAnchor) {
     const bottom = b.y + b.height;
     win.setBounds({ x: anchored ? anchored.x : b.x, y: anchored ? anchored.y : Math.round(bottom - h), width: w, height: h });
   }
+  schedulePetArtifactCleanup(st);
 }
 
 // 分身开关：主宠始终在（single 模式盯全部后端；有分身时盯「剩下的」），
@@ -283,7 +298,7 @@ function makePetWindow(agent) {
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
   const st = {
     agent, win, customSize: null, visualRect: null, uiBusy: false,
-    mouseIgnoring: true, positionSaveTimer: null,
+    mouseIgnoring: true, positionSaveTimer: null, artifactCleanupTimer: null,
   };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
@@ -291,6 +306,7 @@ function makePetWindow(agent) {
   petState.set(wcId, st);
   win.on('closed', () => {
     clearTimeout(st.positionSaveTimer);
+    clearTimeout(st.artifactCleanupTimer);
     petState.delete(wcId);
     if (petWin === win) petWin = null;
     if (petWinCodex === win) petWinCodex = null;
@@ -1125,11 +1141,13 @@ function registerIpc() {
   });
 
   ipcMain.on('set-win-pos', (e, x, y) => {
-    const win = senderPetWin(e);
+    const st = stateOfSender(e.sender) || primaryPetState();
+    const win = st && st.win && !st.win.isDestroyed() ? st.win : senderPetWin(e);
     if (win && Number.isFinite(x) && Number.isFinite(y)) {
       // Moving only the origin avoids a redundant size/layout transaction on
       // every pointer frame. setBounds was the other half of the drag jitter.
       win.setPosition(Math.round(x), Math.round(y), false);
+      if (st && st.win === win) schedulePetArtifactCleanup(st);
     }
   });
 
