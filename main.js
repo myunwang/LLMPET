@@ -52,6 +52,7 @@ const { createRuntimeMonitor } = require('./backend/runtime-monitor');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 const petGeometry = require('./shared/pet-geometry');
+const { dragTrace, PET_DRAG_TRACE_PATH } = require('./backend/pet-drag-trace');
 
 const t = i18n.t;
 // Main-process strings (tray, dialogs, adapter-built labels) are localized at
@@ -113,6 +114,11 @@ function persistPetPosition(st) {
   if (st.win === petWin && (petGuided || petFrameGuided)) return;
   const b = st.win.getBounds();
   const at = { x: b.x, y: b.y };
+  dragTrace.record('main', 'position-persisted', {
+    agent: st.agent,
+    dragId: st.lastDragRequest && st.lastDragRequest.dragId,
+    bounds: b,
+  });
   if (st.agent === 'codex') config.save({ petPositionCodex: at });
   else if (st.agent === 'dsh') config.save({ petPositionDsh: at });
   else config.save({ petPosition: at });
@@ -148,9 +154,13 @@ function reportRejectedPetPosition(st, x, y, error = null) {
   log('main', `ignored invalid pet window position (${String(x)}, ${String(y)})${suffix}`);
 }
 
-function movePetWindow(st, win, x, y) {
+function movePetWindow(st, win, x, y, meta = null) {
   let current;
   try { current = win.getBounds(); } catch (error) {
+    dragTrace.record('main', 'position-rejected', {
+      agent: st && st.agent, reason: 'get-bounds-error', requested: { x, y }, meta,
+      error: error && (error.message || String(error)),
+    });
     reportRejectedPetPosition(st, x, y, error);
     return false;
   }
@@ -160,8 +170,22 @@ function movePetWindow(st, win, x, y) {
     const bounds = screen.getDisplayMatching(current).bounds;
     maxStep = Math.max(maxStep, bounds.width * 4, bounds.height * 4);
   } catch {}
+  dragTrace.record('main', 'position-request', {
+    agent: st && st.agent,
+    dragId: meta && meta.dragId,
+    frame: meta && meta.frame,
+    requested: { x, y },
+    current,
+    maxStep,
+    trigger: meta && meta.trigger,
+    meta,
+  });
   const point = petGeometry.safeNativeWindowPoint({ x, y, current, maxStep });
   if (!point) {
+    dragTrace.record('main', 'position-rejected', {
+      agent: st && st.agent, dragId: meta && meta.dragId,
+      frame: meta && meta.frame, reason: 'native-range-or-step', requested: { x, y }, current, maxStep,
+    });
     reportRejectedPetPosition(st, x, y);
     return false;
   }
@@ -173,9 +197,29 @@ function movePetWindow(st, win, x, y) {
   } catch (error) {
     // Never let one malformed edge-crossing frame escape the IPC listener and
     // trigger Electron's uncaught main-process error dialog.
+    dragTrace.record('main', 'position-rejected', {
+      agent: st && st.agent, dragId: meta && meta.dragId,
+      frame: meta && meta.frame, reason: 'native-set-position-error', requested: point, current,
+      error: error && (error.message || String(error)),
+    });
     reportRejectedPetPosition(st, point.x, point.y, error);
     return false;
   }
+  let actual = null;
+  try { actual = win.getBounds(); } catch {}
+  if (st) {
+    st.lastDragRequest = {
+      dragId: meta && meta.dragId,
+      frame: meta && meta.frame,
+      requested: point,
+      actual,
+      trigger: meta && meta.trigger,
+    };
+  }
+  dragTrace.record('main', 'position-accepted', {
+    agent: st && st.agent, dragId: meta && meta.dragId,
+    frame: meta && meta.frame, requested: point, actual, previous: current,
+  });
   if (st && st.win === win) schedulePetArtifactCleanup(st);
   return true;
 }
@@ -266,6 +310,13 @@ function applyPetSize(st, requestedAnchor) {
   const { w } = targetSize(st);
   let { h } = targetSize(st);
   const b = win.getBounds();
+  dragTrace.record('main', 'size-request', {
+    agent: st.agent,
+    before: b,
+    customSize: st.customSize,
+    requested: { width: w, height: h },
+    anchor: requestedAnchor,
+  });
   // Cap the window to the screen's work area so a tall popup can NEVER push the
   // pet / footer buttons off-screen — the popup scrolls internally instead.
   try {
@@ -281,11 +332,19 @@ function applyPetSize(st, requestedAnchor) {
     x = Math.min(Math.max(x, wa.x), wa.x + wa.width - width);
     y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
     win.setBounds({ x, y, width, height: h });
+    dragTrace.record('main', 'size-applied', {
+      agent: st.agent, before: b, requested: { x, y, width, height: h },
+      actual: win.getBounds(), anchor: requestedAnchor,
+    });
   } catch {
     const anchor = validPetAnchor(requestedAnchor);
     const anchored = anchor ? anchoredPetOrigin(anchor, w, h) : null;
     const bottom = b.y + b.height;
-    win.setBounds({ x: anchored ? anchored.x : b.x, y: anchored ? anchored.y : Math.round(bottom - h), width: w, height: h });
+    const fallback = { x: anchored ? anchored.x : b.x, y: anchored ? anchored.y : Math.round(bottom - h), width: w, height: h };
+    win.setBounds(fallback);
+    dragTrace.record('main', 'size-applied-fallback', {
+      agent: st.agent, before: b, requested: fallback, actual: win.getBounds(), anchor: requestedAnchor,
+    });
   }
   schedulePetArtifactCleanup(st);
 }
@@ -349,7 +408,7 @@ function makePetWindow(agent) {
   const st = {
     agent, win, customSize: null, visualRect: null, uiBusy: false,
     mouseIgnoring: true, positionSaveTimer: null, artifactCleanupTimer: null,
-    invalidPositionLogAt: 0,
+    invalidPositionLogAt: 0, lastDragRequest: null,
   };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
@@ -366,9 +425,20 @@ function makePetWindow(agent) {
 
   // 注意读 st.agent 而非闭包 agent：单宠⇄双宠切换时主宠原地重载、身份会变
   win.on('moved', () => {
-    if (st.customSize) return; // only persist the resting position
-    if (win === petWin && (petGuided || petFrameGuided)) return; // 领地走位不算用户拖拽
     if (win.isDestroyed()) return;
+    const skipPersist = st.customSize
+      ? 'custom-size'
+      : (win === petWin && (petGuided || petFrameGuided)) ? 'guided-move' : null;
+    dragTrace.record('main', 'window-moved', {
+      agent: st.agent,
+      dragId: st.lastDragRequest && st.lastDragRequest.dragId,
+      frame: st.lastDragRequest && st.lastDragRequest.frame,
+      requested: st.lastDragRequest && st.lastDragRequest.requested,
+      acceptedActual: st.lastDragRequest && st.lastDragRequest.actual,
+      actual: win.getBounds(),
+      skipPersist,
+    });
+    if (skipPersist) return; // only persist a user's resting position
     // setPosition emits one moved event per pointer frame. Writing the JSON
     // config synchronously for every frame stalls Electron's main thread and
     // makes the transparent window visibly kick backwards once during a drag.
@@ -1191,10 +1261,10 @@ function registerIpc() {
     return { window: windowBounds, workArea };
   });
 
-  ipcMain.on('set-win-pos', (e, x, y) => {
+  ipcMain.on('set-win-pos', (e, x, y, meta) => {
     const st = stateOfSender(e.sender) || primaryPetState();
     const win = st && st.win && !st.win.isDestroyed() ? st.win : senderPetWin(e);
-    if (win) movePetWindow(st, win, x, y);
+    if (win) movePetWindow(st, win, x, y, meta);
   });
 
   ipcMain.on('open-panel', openPanel);
@@ -1597,8 +1667,16 @@ function registerIpc() {
     st.mouseIgnoring = !!ignore; // 记录 renderer 期望的穿透状态(巡视结束后恢复用)
     // 巡视拖拽期间主宠强制穿透：renderer 只能更新“结束后想要的状态”，
     // 不能把最高层章鱼重新变成可点击并挡住目标。Codex 分身不受巡视约束。
-    if (territoryClickThrough && w === petWin) return;
-    try { w.setIgnoreMouseEvents(!!ignore, { forward: true }); } catch {}
+    if (territoryClickThrough && w === petWin) {
+      dragTrace.record('main', 'mouse-ignore-deferred', { agent: st.agent, requested: !!ignore, reason: 'territory-click-through' });
+      return;
+    }
+    try {
+      w.setIgnoreMouseEvents(!!ignore, { forward: true });
+      dragTrace.record('main', 'mouse-ignore-applied', { agent: st.agent, ignore: !!ignore });
+    } catch (error) {
+      dragTrace.record('main', 'mouse-ignore-error', { agent: st.agent, ignore: !!ignore, error: error && (error.message || String(error)) });
+    }
   });
 
   // 渲染端上报「用户正在交互」(领地模式据此避战/撤退,别的场景以后也能用)
@@ -1618,7 +1696,14 @@ function registerIpc() {
   });
 
   ipcMain.on('open-log', () => { shell.openPath(LOG_PATH); });
+  ipcMain.on('open-drag-log', () => { shell.openPath(PET_DRAG_TRACE_PATH); });
   ipcMain.on('pet-log', (_e, tag, msg) => { log('ui:' + String(tag || ''), String(msg || '')); });
+  ipcMain.on('pet-drag-trace', (e, entry) => {
+    const st = stateOfSender(e.sender);
+    if (!entry || typeof entry !== 'object') return;
+    const { event, ...details } = entry;
+    dragTrace.record('renderer', event, { agent: st && st.agent, ...details });
+  });
 }
 
 // ── settings actions (shared by tray menu + panel IPC) ─────────────────────────

@@ -123,6 +123,7 @@ assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-
   && /snapshot\.petRect\.y\s*-\s*frameHeightExcess\s*\+\s*2/s.test(js),
   'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
 const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const preloadJs = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
 assert(/if \(process\.platform === 'darwin'\) app\.disableHardwareAcceleration\(\);/.test(mainJs),
   'macOS transparent pet windows must avoid the GPU compositor path that retains stale tiles');
 assert(/transparent:\s*true,[\s\S]{0,120}backgroundColor:\s*'#00000000',[\s\S]{0,120}hasShadow:\s*false/.test(mainJs),
@@ -158,7 +159,7 @@ assert(/wr\.y\s*<=\s*wa\.y\s*\+\s*3[\s\S]*screenY\s*=\s*wa\.y/.test(js),
 assert(/PetGeometry\.radialLayout/.test(js),
   'right-click menu must use bounded edge-aware geometry');
 assert(/getWindowMetrics:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('get-window-metrics'\)/.test(
-  fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')),
+  preloadJs),
   'renderer must be able to request exact BrowserWindow and display bounds');
 assert(/ipcMain\.handle\('get-window-metrics'[\s\S]*screen\.getDisplayMatching\(windowBounds\)\.workArea/.test(mainJs),
   'radial layout must use the main-process work area for the window current display');
@@ -200,13 +201,24 @@ assert(/const PET_POSITION_SAVE_DELAY_MS = 220/.test(mainJs)
   && /win\.on\('moved',[\s\S]*schedulePetPositionSave\(st\)/.test(mainJs),
   'drag position persistence must be debounced instead of blocking every moved frame');
 assert(/function movePetWindow[\s\S]*safeNativeWindowPoint\(\{ x, y, current, maxStep \}\)[\s\S]*win\.setPosition\(point\.x, point\.y, false\)/.test(mainJs)
-  && /ipcMain\.on\('set-win-pos',[\s\S]{0,300}movePetWindow\(st, win, x, y\)/.test(mainJs),
+  && /ipcMain\.on\('set-win-pos',[\s\S]{0,300}movePetWindow\(st, win, x, y, meta\)/.test(mainJs),
   'pointer drag must validate native coordinates and move only the window origin');
 assert(/function movePetWindow[\s\S]*try \{[\s\S]*win\.setPosition\(point\.x, point\.y, false\)[\s\S]*catch \(error\)/.test(mainJs),
   'a malformed edge-crossing frame must not escape as an uncaught main-process exception');
+assert(/petDragTrace: \(entry\) => ipcRenderer\.send\('pet-drag-trace', entry\)/.test(preloadJs)
+  && /ipcMain\.on\('pet-drag-trace'/.test(mainJs)
+  && /ipcMain\.on\('set-win-pos', \(e, x, y, meta\)/.test(mainJs)
+  && /dragTrace\.record\('main', 'window-moved'/.test(mainJs),
+  'renderer and main process must share structured drag IDs through the actual window-move event');
+assert(/traceDrag\('pointerdown'/.test(js)
+  && /traceDrag\('drag-threshold-crossed'/.test(js)
+  && /traceDrag\('position-request'/.test(js)
+  && /traceDrag\('gesture-end'/.test(js)
+  && /traceDrag\('mouse-ignore-change'/.test(js),
+  'drag diagnostics must include triggers, requested positions, hit-through changes, and completion');
 assert(/function schedulePetArtifactCleanup[\s\S]*invalidateShadow\(\)/.test(mainJs)
-  && /function movePetWindow[\s\S]{0,1800}schedulePetArtifactCleanup\(st\)/.test(mainJs)
-  && /function applyPetSize[\s\S]{0,1800}schedulePetArtifactCleanup\(st\)/.test(mainJs),
+  && /function movePetWindow[\s\S]{0,3600}schedulePetArtifactCleanup\(st\)/.test(mainJs)
+  && /function applyPetSize[\s\S]{0,3600}schedulePetArtifactCleanup\(st\)/.test(mainJs),
   'macOS transparent-window artifacts must be invalidated after move and resize bursts');
 assert(/\.pixel-sprite\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css)
   && /#mascot\s*\{[^}]*filter\s*:\s*none\s*;/s.test(css)
@@ -223,12 +235,12 @@ assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubb
   'permission confirmation must inherit the expanded window without a base-frame resize in between');
 assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHorizontal/.test(js),
   'wide popups must switch horizontal anchors during a drag before they leave the work area');
-assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture\)/.test(js)
+assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture,\s*true,\s*'buttons-released-during-move'\)/.test(js)
   && /lostpointercapture/.test(js)
   && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
   'a released or lost pointer must not leave hover events owning a stale drag');
 assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.screenX, window\.screenY\]/.test(js)
-  && /if \(g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),
+  && /const accepted = g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),
   'drag must start from live screen coordinates and ignore a late IPC origin after movement');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)

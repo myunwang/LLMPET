@@ -149,6 +149,7 @@ function createStubWorld(options = {}) {
     toggleMute: () => calls.push(['toggleMute']),
     openPanel: () => calls.push(['openPanel']),
     openLog: () => calls.push(['openLog']),
+    openDragLog: () => calls.push(['openDragLog']),
     quit: () => calls.push(['quit']),
     launchClaude: () => calls.push(['launchClaude']),
     focusSession: (...a) => calls.push(['focusSession', a]),
@@ -157,6 +158,7 @@ function createStubWorld(options = {}) {
     blurPet: () => calls.push(['blurPet']),
     decidePermission: (...a) => calls.push(['decidePermission', a]),
     petLog: () => {},
+    petDragTrace: (...a) => calls.push(['petDragTrace', a]),
   };
 
   // Controllable clock: advance() shifts Date.now() so transient windows can be

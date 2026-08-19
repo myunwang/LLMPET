@@ -403,6 +403,14 @@ const isInteracting = () => askActive && (askHover || document.activeElement ===
 
 // 把 UI 决策写日志，便于自检；双宠模式给 tag 带上身份前缀（claude:state / codex:state）
 const rlog = (tag, msg) => { try { window.pet.petLog((AGENT === 'all' ? '' : AGENT + ':') + tag, msg); } catch {} };
+let dragTraceCounter = 0;
+const dragRect = (rect) => rect && ({
+  x: rect.x, y: rect.y, left: rect.left, top: rect.top,
+  right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
+});
+const traceDrag = (event, details = {}) => {
+  try { window.pet.petDragTrace({ event, at: Date.now(), ...details }); } catch {}
+};
 // i18n: shared/i18n.js is loaded as a <script> before this file.
 const t = (key, vars) => window.OctoI18n.t(key, vars);
 // A reason arrives as a stable key ('reply'|'plan'|'perm'); older payloads may
@@ -706,9 +714,16 @@ function settleEdgeLayout() {
 // jump. Returning from the top probes the normal layout first and restores it
 // as soon as the whole frame can fit on-screen again.
 function movePetDuringDrag(gesture, e, targetX, targetY) {
+  const frame = ++gesture.frame;
   const el = curSkinEl();
   if (!el) {
-    window.pet.setWinPos(targetX, targetY);
+    const meta = {
+      dragId: gesture.traceId, frame, trigger: 'pointermove-no-skin',
+      pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+      target: { x: targetX, y: targetY },
+    };
+    traceDrag('position-request', meta);
+    window.pet.setWinPos(targetX, targetY, meta);
     return;
   }
   const before = el.getBoundingClientRect();
@@ -717,6 +732,7 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const wa = browserWorkArea();
   let nextVertical = edgeLayout.vertical;
   let nextHorizontal = edgeLayout.horizontal;
+  const previousLayout = { ...edgeLayout };
 
   if (edgeLayout.vertical === 'above') {
     nextVertical = window.PetGeometry
@@ -768,12 +784,29 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const anchoredX = petScreenX - after.left;
   const anchoredY = petScreenY - after.top;
 
-  if (Math.abs(anchoredX - targetX) > 0.5 || Math.abs(anchoredY - targetY) > 0.5) {
+  const rebased = Math.abs(anchoredX - targetX) > 0.5 || Math.abs(anchoredY - targetY) > 0.5;
+  if (rebased) {
     gesture.win = [anchoredX, anchoredY];
     gesture.sx = e.screenX;
     gesture.sy = e.screenY;
   }
-  window.pet.setWinPos(anchoredX, anchoredY);
+  const meta = {
+    dragId: gesture.traceId,
+    frame,
+    trigger: rebased ? 'pointermove-layout-rebase' : 'pointermove',
+    pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+    target: { x: targetX, y: targetY },
+    anchored: { x: anchoredX, y: anchoredY },
+    window: { x: window.screenX, y: window.screenY, width: window.innerWidth, height: window.innerHeight },
+    petBefore: dragRect(before),
+    petAfter: dragRect(after),
+    layoutBefore: previousLayout,
+    layoutAfter: { ...edgeLayout },
+    layoutChanged: previousLayout.vertical !== edgeLayout.vertical || previousLayout.horizontal !== edgeLayout.horizontal,
+    rebased,
+  };
+  traceDrag('position-request', meta);
+  window.pet.setWinPos(anchoredX, anchoredY, meta);
 }
 
 // 从快照重建队列（多任务都在、且标明项目）
@@ -3590,8 +3623,14 @@ function reportPetVisualBounds() {
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
 let g = null; // 当前手势（同步建立，保证快速点击也能识别）
-function clearDragGesture(gesture, settle = true) {
+function clearDragGesture(gesture, settle = true, reason = 'clear') {
   if (!gesture || g !== gesture) return false;
+  traceDrag('gesture-end', {
+    dragId: gesture.traceId, reason, moved: gesture.moved, frame: gesture.frame,
+    settle: !!settle, pointerOrigin: { x: gesture.sx, y: gesture.sy },
+    windowOrigin: gesture.win && { x: gesture.win[0], y: gesture.win[1] },
+    edgeLayout: { ...edgeLayout }, mouseIgnoring,
+  });
   // Clear the global owner before releasePointerCapture(): Chromium may emit
   // lostpointercapture synchronously, and that event must not finish a newer
   // gesture or run the cleanup twice.
@@ -3602,17 +3641,20 @@ function clearDragGesture(gesture, settle = true) {
   return true;
 }
 
-function cancelActiveDrag(settle = true) {
+function cancelActiveDrag(settle = true, reason = 'cancel-active') {
   const gesture = g;
-  if (gesture) clearDragGesture(gesture, settle);
+  if (gesture) clearDragGesture(gesture, settle, reason);
 }
 
 function attachDrag(el) {
   el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0) {
+      traceDrag('pointerdown-ignored', { reason: 'non-primary-button', button: e.button, buttons: e.buttons, pointerId: e.pointerId });
+      return;
+    }
     // A missed pointerup/lost-capture must never leak ownership into the next
     // press. This is especially important for a moving transparent window.
-    cancelActiveDrag(false);
+    cancelActiveDrag(false, 'superseded-by-pointerdown');
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
     // BrowserWindow screen coordinates are already available synchronously in
@@ -3625,42 +3667,73 @@ function attachDrag(el) {
     const gesture = {
       el, pid: e.pointerId, sx: e.screenX, sy: e.screenY,
       moved: false, win: liveOrigin,
+      traceId: `${Date.now().toString(36)}-${++dragTraceCounter}`,
+      frame: 0,
     };
     g = gesture;
+    traceDrag('pointerdown', {
+      dragId: gesture.traceId,
+      element: el.id || el.className || el.tagName,
+      pointer: { id: e.pointerId, button: e.button, buttons: e.buttons, x: e.screenX, y: e.screenY },
+      client: { x: e.clientX, y: e.clientY },
+      liveOrigin: liveOrigin && { x: liveOrigin[0], y: liveOrigin[1] },
+      window: { x: window.screenX, y: window.screenY, width: window.innerWidth, height: window.innerHeight },
+      petRect: dragRect(el.getBoundingClientRect()),
+      edgeLayout: { ...edgeLayout },
+      mouseIgnoring,
+    });
     window.pet.getWinPos().then(([wx, wy]) => {
       // IPC from an earlier click may resolve after a new pointerdown. Binding
       // that stale window origin to the new gesture produces a large jump.
       // It must also not overwrite the live origin after this gesture has begun
       // moving, or its delayed reply reintroduces the same kick one frame later.
-      if (g === gesture && (!gesture.moved || !gesture.win)
+      const accepted = g === gesture && (!gesture.moved || !gesture.win)
+        && Number.isFinite(wx) && Number.isFinite(wy);
+      traceDrag('origin-resolved', {
+        dragId: gesture.traceId, resolved: { x: wx, y: wy }, accepted,
+        stillActive: g === gesture, moved: gesture.moved, alreadyHadOrigin: !!gesture.win,
+      });
+      if (accepted
         && Number.isFinite(wx) && Number.isFinite(wy)) {
         gesture.win = [wx, wy];
       }
-    }).catch(() => {});
+    }).catch((error) => traceDrag('origin-error', { dragId: gesture.traceId, error: error && (error.message || String(error)) }));
   });
   el.addEventListener('pointermove', (e) => {
     const gesture = g;
     if (!gesture) return;
-    if (e.pointerId != null && e.pointerId !== gesture.pid) return;
+    if (e.pointerId != null && e.pointerId !== gesture.pid) {
+      traceDrag('pointermove-ignored', { dragId: gesture.traceId, reason: 'pointer-id-mismatch', expected: gesture.pid, actual: e.pointerId });
+      return;
+    }
     // Transparent BrowserWindows can lose pointerup while they move. A later
     // hover has buttons=0; treat it as stale-capture cleanup, never as a drag.
     if (Number.isFinite(e.buttons) && (e.buttons & 1) === 0) {
-      clearDragGesture(gesture);
+      clearDragGesture(gesture, true, 'buttons-released-during-move');
       return;
     }
     const dx = e.screenX - gesture.sx;
     const dy = e.screenY - gesture.sy;
-    if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) gesture.moved = true;
+    if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) {
+      gesture.moved = true;
+      traceDrag('drag-threshold-crossed', {
+        dragId: gesture.traceId, delta: { x: dx, y: dy },
+        pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+        windowOrigin: gesture.win && { x: gesture.win[0], y: gesture.win[1] },
+      });
+    }
     if (gesture.moved && gesture.win) {
       if (radialOpen) closeRadial();
       movePetDuringDrag(gesture, e, gesture.win[0] + dx, gesture.win[1] + dy);
+    } else if (gesture.moved) {
+      traceDrag('pointermove-blocked', { dragId: gesture.traceId, reason: 'no-window-origin', delta: { x: dx, y: dy } });
     }
   });
   el.addEventListener('pointerup', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
     const wasMove = gesture.moved;
-    if (!clearDragGesture(gesture, wasMove)) return;
+    if (!clearDragGesture(gesture, wasMove, 'pointerup')) return;
     if (wasMove) {
       // clearDragGesture schedules the final top/bottom or left/right anchor
       // exchange after the last setBounds has landed.
@@ -3674,12 +3747,12 @@ function attachDrag(el) {
   el.addEventListener('pointercancel', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
-    clearDragGesture(gesture);
+    clearDragGesture(gesture, true, 'pointercancel');
   });
   el.addEventListener('lostpointercapture', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
-    clearDragGesture(gesture);
+    clearDragGesture(gesture, true, 'lostpointercapture');
   });
   // 右键 = 泡泡菜单
   el.addEventListener('contextmenu', (e) => {
@@ -3688,7 +3761,7 @@ function attachDrag(el) {
   });
 }
 stateEls.forEach(attachDrag);
-window.addEventListener('blur', cancelActiveDrag);
+window.addEventListener('blur', () => cancelActiveDrag(true, 'window-blur'));
 
 // 卡片按钮：Submit/Next、Back、Go to Terminal、Other 输入
 askSubmit.addEventListener('click', () => { const c = askQueue[askIdx]; if (c && c.kind === 'ask') elicNextOrSubmit(c); });
@@ -4089,9 +4162,10 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
 // 因此一旦光标回到内容上即可恢复可点。拖动中(g)始终保持可点。
 const HIT_SEL = '#pixel,#mascot,#cat,#radial,#notepad,#todopop,#ask,#sesslist';
 let mouseIgnoring = false;
-function setMouseIgnore(on) {
+function setMouseIgnore(on, reason = 'unknown', details = {}) {
   if (on === mouseIgnoring) return;
   mouseIgnoring = on;
+  traceDrag('mouse-ignore-change', { ignore: on, reason, hasGesture: !!g, ...details });
   try { window.pet.setIgnoreMouse(on); } catch {}
 }
 window.addEventListener('mousemove', (e) => {
@@ -4099,15 +4173,18 @@ window.addEventListener('mousemove', (e) => {
   // the hover can land outside the original pet element and never reach its
   // pointermove handler. Clean it up at window scope as well.
   if (g && Number.isFinite(e.buttons) && (e.buttons & 1) === 0) cancelActiveDrag();
-  if (g) { setMouseIgnore(false); return; } // 拖动中保持可点
+  if (g) { setMouseIgnore(false, 'active-gesture'); return; } // 拖动中保持可点
   const el = document.elementFromPoint(e.clientX, e.clientY);
   // 命中测试权威同步悬停态：穿透切换时 pointerleave 可能漏发，会把 askHover 卡在 true，
   // 进而让 isInteracting() 永远为真、refreshAsk 永不对账（旧卡片冻结、新卡片进不来）。
   askHover = !!(el && el.closest('#ask'));
-  setMouseIgnore(!(el && el.closest(HIT_SEL)));
+  const hit = el && el.closest(HIT_SEL);
+  setMouseIgnore(!hit, hit ? 'hit-interactive-surface' : 'transparent-area', {
+    client: { x: e.clientX, y: e.clientY }, hit: hit && (hit.id || hit.className || hit.tagName),
+  });
 }, true);
 // 启动即默认穿透（透明区不挡），光标移到内容上时由上面的命中测试恢复
-setMouseIgnore(true);
+setMouseIgnore(true, 'renderer-startup');
 
 // ---------- 交互状态上报(领地模式避战用) ----------
 // 主进程无法区分「气泡 fitPopup 撑大的窗口」和「用户真的开着面板」,由渲染端

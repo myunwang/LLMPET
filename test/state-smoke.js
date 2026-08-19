@@ -233,6 +233,36 @@ async function main() {
     cat.dispatch('pointerup', { pointerId: 53 });
   }
 
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 54, screenX: 100, screenY: 100,
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 54, screenX: 125, screenY: 120,
+    });
+    cat.dispatch('pointerup', { pointerId: 54, screenX: 125, screenY: 120 });
+    const traceEntries = w.calls
+      .filter((c) => c[0] === 'petDragTrace')
+      .map((c) => c[1][0]);
+    const pointerdown = traceEntries.find((entry) => entry.event === 'pointerdown');
+    const request = traceEntries.find((entry) => entry.event === 'position-request');
+    const ended = traceEntries.find((entry) => entry.event === 'gesture-end');
+    check('一次拖动可用同一 dragId 串起触发、位置请求和结束原因', () => {
+      assert(pointerdown && pointerdown.dragId);
+      assert.strictEqual(request && request.dragId, pointerdown.dragId);
+      assert.strictEqual(ended && ended.dragId, pointerdown.dragId);
+      assert.strictEqual(ended.reason, 'pointerup');
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][2] && c[1][2].dragId === pointerdown.dragId));
+    });
+  }
+
   console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
   {
     const w = world();
