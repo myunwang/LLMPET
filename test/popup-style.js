@@ -178,13 +178,13 @@ assert(!/fitPopup\(sesslist\)/.test(appendLootSource)
 assert(/else if \(!memeTarget && !takeoverTarget && !lootCapture\)/.test(js)
   && /sessListOpen && !memeTarget && !takeoverTarget && !lootCapture/.test(js),
   'ordinary stats/config refreshes must not rebuild an open sub-page or restart an active loot animation');
-assert(/lastPetSizeRequestSig/.test(js)
-  && /!options\.popup && requestSig === lastPetSizeRequestSig/.test(js),
-  'non-popup geometry may use request dedupe without swallowing a live popup repair');
-assert(/function popupFrameAlreadySettled[\s\S]*window\.innerWidth[\s\S]*window\.innerHeight[\s\S]*nextLayout\.vertical === edgeLayout\.vertical/.test(js)
+assert(/function petFrameAlreadySettled[\s\S]*window\.innerWidth[\s\S]*window\.innerHeight[\s\S]*nextLayout\.vertical === edgeLayout\.vertical/.test(js)
   && /windowFitsWorkArea\(frame, wa\)/.test(js)
-  && /options\.popup && popupFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
-  'only an on-screen settled popup may skip a resize; stale request signatures must not block repair');
+  && /options\.popup && petFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
+  'only an on-screen settled popup may skip a resize');
+assert(!/lastPetSizeRequestSig|requestSig ===/.test(js)
+  && /Never dedupe a resting-frame or meme transition/.test(js),
+  'resting and meme transitions must always reach the main process because renderer size can lag');
 assert(/function activeSizedSurface[\s\S]*sessListOpen[\s\S]*askActive[\s\S]*todoPopOpen[\s\S]*bubble/.test(js)
   && /function settleEdgeLayout[\s\S]*const surface = activeSizedSurface\(\)[\s\S]*if \(surface\) fitPopup\(surface\)/.test(js),
   'drag release must refit the still-open session, choice, todo, or speech surface instead of collapsing it');

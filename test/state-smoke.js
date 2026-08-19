@@ -233,6 +233,45 @@ async function main() {
     });
   }
 
+  console.log('[R0.3] 弹层关闭必须修复真实窗口尺寸');
+  {
+    const catRect = { left: 100, top: 160, right: 220, bottom: 280, width: 120, height: 120 };
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      {
+        window: {
+          screenX: 996,
+          screenY: 230,
+          innerWidth: 320,
+          innerHeight: 340,
+          screen: { availLeft: 0, availTop: 0, availWidth: 1440, availHeight: 900 },
+        },
+        elementRects: { cat: catRect },
+      },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    await sleep(20);
+
+    // Send one ordinary reset while the real frame is resting. A later reset
+    // must still reach the main process even though its payload is identical.
+    vm.runInContext('setRequestedPetSize(0, 0)', w.sandbox);
+    w.calls.length = 0;
+
+    // A popup has widened the real BrowserWindow, but the visible cat is still
+    // on the same screen pixel. Signature-only dedupe used to swallow this
+    // second reset and leave 520/760px frames behind.
+    w.window.screenX = 896;
+    w.window.innerWidth = 520;
+    catRect.left = 200;
+    catRect.right = 320;
+    const repaired = vm.runInContext('setRequestedPetSize(0, 0)', w.sandbox);
+    check('前一次相同 reset 不能吞掉仍为 520px 的真实窗口修复', () => {
+      assert.strictEqual(repaired, true);
+      assert(w.calls.some((c) => c[0] === 'setPetSize'
+        && c[1][0] === 0 && c[1][1] === 0));
+    });
+  }
+
   console.log('[R1] 聚合梯子优先级（对齐 STATES.md）');
   {
     const w = world();

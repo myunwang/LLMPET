@@ -81,7 +81,7 @@ function makeElement(tag, id) {
   return el;
 }
 
-function createStubWorld() {
+function createStubWorld(options = {}) {
   const elements = new Map(); // id -> element
   const byId = (id) => {
     if (!elements.has(id)) elements.set(id, makeElement('div', id));
@@ -173,7 +173,12 @@ function createStubWorld() {
     AudioContext: undefined,
     webkitAudioContext: undefined,
     addEventListener: () => {},
+    ...(options.window || {}),
   };
+
+  for (const [id, rect] of Object.entries(options.elementRects || {})) {
+    byId(id).getBoundingClientRect = () => ({ ...rect });
+  }
 
   const sandbox = {
     document,
@@ -209,7 +214,7 @@ function createStubWorld() {
 // Load renderer/pet.js (and anything else, e.g. a future shared module) into
 // the stub world. Returns the world for driving + assertions.
 function loadRenderer(files, options = {}) {
-  const world = createStubWorld();
+  const world = createStubWorld(options);
   if (typeof options.search === 'string') world.sandbox.location.search = options.search;
   vm.createContext(world.sandbox);
   for (const f of files) {

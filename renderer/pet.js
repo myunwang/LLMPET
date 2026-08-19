@@ -440,7 +440,6 @@ const RESTING_FRAME_MAX_W = 360;
 const RESTING_FRAME_MAX_H = 360;
 let memeLayoutActive = false;
 let fitPopupSeq = 0;
-let lastPetSizeRequestSig = '';
 let edgeLayout = { vertical: 'above', horizontal: 'center' };
 
 function browserWorkArea() {
@@ -566,7 +565,7 @@ function popupEdgeLayout(height, popupHeight) {
   });
 }
 
-function popupFrameAlreadySettled(width, height, nextLayout) {
+function petFrameAlreadySettled(width, height, nextLayout) {
   if (!(width > 0) || !(height > 0) || !nextLayout) return false;
   const wa = browserWorkArea();
   const targetWidth = Math.min(width, wa.width);
@@ -603,20 +602,14 @@ function setRequestedPetSize(w, h, options = {}) {
   // viewport and edge direction, a changing DOM anchor is not a resize request.
   // Reapplying the same BrowserWindow bounds makes macOS briefly repaint only
   // half of the transparent window, which looks like the panel lost its top.
-  if (options.popup && popupFrameAlreadySettled(width, height, nextLayout)) return false;
+  if (options.popup && petFrameAlreadySettled(width, height, nextLayout)) return false;
   const anchor = anchoredLayoutPayload(nextLayout);
-  // Stats arrive continuously. Re-sending an identical BrowserWindow resize
-  // makes the transparent window briefly repaint even when nothing visible
-  // changed, which reads as a flash around every open panel.
-  const requestSig = JSON.stringify({ width, height, anchor });
-  // For popups the real BrowserWindow is authoritative. A drag/native clamp can
-  // leave it at 520x340 even though our last *requested* signature says
-  // 520x544. popupFrameAlreadySettled() already proved the live frame is wrong,
-  // so never let this historical signature swallow the repair request.
-  if (!options.popup && requestSig === lastPetSizeRequestSig) return false;
+  // Never dedupe a resting-frame or meme transition. Renderer innerWidth can
+  // lag the main-process BrowserWindow by a frame, so even a live-size check can
+  // falsely call a 520/760px frame "already reset". Close/hide paths are sparse;
+  // sending their 320x340 reset every time is both cheaper and correctness-safe.
   try {
     window.pet.setPetSize(width, height, anchor);
-    lastPetSizeRequestSig = requestSig;
     return true;
   } catch {
     return false;
