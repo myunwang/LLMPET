@@ -180,14 +180,23 @@ assert(/else if \(!memeTarget && !takeoverTarget && !lootCapture\)/.test(js)
   'ordinary stats/config refreshes must not rebuild an open sub-page or restart an active loot animation');
 assert(/function petFrameAlreadySettled[\s\S]*window\.innerWidth[\s\S]*window\.innerHeight[\s\S]*nextLayout\.vertical === edgeLayout\.vertical/.test(js)
   && /windowFitsWorkArea\(frame, wa\)/.test(js)
-  && /options\.popup && petFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
-  'only an on-screen settled popup may skip a resize');
+  && /\(options\.popup \|\| options\.settle\) && petFrameAlreadySettled\(width, height, nextLayout\)/.test(js),
+  'only an on-screen settled popup or drag finish may skip a resize');
 assert(!/lastPetSizeRequestSig|requestSig ===/.test(js)
   && /Never dedupe a resting-frame or meme transition/.test(js),
   'resting and meme transitions must always reach the main process because renderer size can lag');
 assert(/function activeSizedSurface[\s\S]*sessListOpen[\s\S]*askActive[\s\S]*todoPopOpen[\s\S]*bubble/.test(js)
   && /function settleEdgeLayout[\s\S]*const surface = activeSizedSurface\(\)[\s\S]*if \(surface\) fitPopup\(surface\)/.test(js),
   'drag release must refit the still-open session, choice, todo, or speech surface instead of collapsing it');
+assert(/options\.popup \|\| options\.settle/.test(js)
+  && /setRequestedPetSize\([\s\S]*\{ settle: true \},[\s\S]*\);/.test(js),
+  'drag release must skip an already settled frame without weakening close-path repairs');
+assert(/const PET_POSITION_SAVE_DELAY_MS = 220/.test(mainJs)
+  && /function schedulePetPositionSave[\s\S]*setTimeout[\s\S]*persistPetPosition/.test(mainJs)
+  && /win\.on\('moved',[\s\S]*schedulePetPositionSave\(st\)/.test(mainJs),
+  'drag position persistence must be debounced instead of blocking every moved frame');
+assert(/ipcMain\.on\('set-win-pos',[\s\S]*win\.setPosition\(Math\.round\(x\), Math\.round\(y\), false\)/.test(mainJs),
+  'pointer drag must move only the window origin instead of resubmitting its size');
 assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
   'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
 assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubbleMsg, 2600\)\) resetPetSize\(\)/.test(js),
@@ -198,8 +207,9 @@ assert(/buttons\s*&\s*1[\s\S]*clearDragGesture\(gesture\)/.test(js)
   && /lostpointercapture/.test(js)
   && /window\.addEventListener\('mousemove'[\s\S]*cancelActiveDrag\(\)/.test(js),
   'a released or lost pointer must not leave hover events owning a stale drag');
-assert(/if \(g === gesture\) gesture\.win/.test(js),
-  'an old getWinPos response must not overwrite the origin of a newer drag');
+assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.screenX, window\.screenY\]/.test(js)
+  && /if \(g === gesture && \(!gesture\.moved \|\| !gesture\.win\)/.test(js),
+  'drag must start from live screen coordinates and ignore a late IPC origin after movement');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
   && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),

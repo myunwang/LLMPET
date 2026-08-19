@@ -96,6 +96,26 @@ const stateOfSender = (sender) => petState.get(sender.id) || null;
 const primaryPetState = () => (petWin && !petWin.isDestroyed() ? petState.get(petWin.webContents.id) : null);
 const anyUiBusy = () => petStates().some((s) => s.uiBusy);
 const primaryVisualRect = () => { const st = primaryPetState(); return st ? st.visualRect : null; };
+const PET_POSITION_SAVE_DELAY_MS = 220;
+
+function persistPetPosition(st) {
+  if (!st || !st.win || st.win.isDestroyed() || st.customSize) return;
+  if (st.win === petWin && (petGuided || petFrameGuided)) return;
+  const b = st.win.getBounds();
+  const at = { x: b.x, y: b.y };
+  if (st.agent === 'codex') config.save({ petPositionCodex: at });
+  else if (st.agent === 'dsh') config.save({ petPositionDsh: at });
+  else config.save({ petPosition: at });
+}
+
+function schedulePetPositionSave(st) {
+  if (!st) return;
+  clearTimeout(st.positionSaveTimer);
+  st.positionSaveTimer = setTimeout(() => {
+    st.positionSaveTimer = null;
+    persistPetPosition(st);
+  }, PET_POSITION_SAVE_DELAY_MS);
+}
 
 let lastStats = null;   // 全量快照（面板用；single 模式也是主宠的快照）
 let statsTimer = null;
@@ -261,12 +281,16 @@ function makePetWindow(agent) {
   win.loadFile(path.join(__dirname, 'renderer', 'pet.html'), { query: { agent } });
 
   // mouseIgnoring=true：透明窗启动即穿透，renderer 命中测试后再接管（pet.js 同款默认）
-  const st = { agent, win, customSize: null, visualRect: null, uiBusy: false, mouseIgnoring: true };
+  const st = {
+    agent, win, customSize: null, visualRect: null, uiBusy: false,
+    mouseIgnoring: true, positionSaveTimer: null,
+  };
   // 'closed' 之后绝不能再碰 win.webContents（抛 "Object has been destroyed"，主进程
   // 未捕获直接崩）——id 在创建时取好。收起一只宠是独立事件，只清自己的状态。
   const wcId = win.webContents.id;
   petState.set(wcId, st);
   win.on('closed', () => {
+    clearTimeout(st.positionSaveTimer);
     petState.delete(wcId);
     if (petWin === win) petWin = null;
     if (petWinCodex === win) petWinCodex = null;
@@ -278,11 +302,17 @@ function makePetWindow(agent) {
     if (st.customSize) return; // only persist the resting position
     if (win === petWin && (petGuided || petFrameGuided)) return; // 领地走位不算用户拖拽
     if (win.isDestroyed()) return;
-    const b = win.getBounds();
-    const at = { x: b.x, y: b.y };
-    if (st.agent === 'codex') config.save({ petPositionCodex: at });
-    else if (st.agent === 'dsh') config.save({ petPositionDsh: at });
-    else config.save({ petPosition: at });
+    // setPosition emits one moved event per pointer frame. Writing the JSON
+    // config synchronously for every frame stalls Electron's main thread and
+    // makes the transparent window visibly kick backwards once during a drag.
+    // Persist only the final quiet position.
+    schedulePetPositionSave(st);
+  });
+  win.on('close', () => {
+    if (!st.positionSaveTimer) return;
+    clearTimeout(st.positionSaveTimer);
+    st.positionSaveTimer = null;
+    persistPetPosition(st);
   });
   win.webContents.on('did-finish-load', () => {
     sendWin(win, 'pet:config', frontendConfig(st.agent));
@@ -1097,8 +1127,9 @@ function registerIpc() {
   ipcMain.on('set-win-pos', (e, x, y) => {
     const win = senderPetWin(e);
     if (win && Number.isFinite(x) && Number.isFinite(y)) {
-      const b = win.getBounds();
-      win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
+      // Moving only the origin avoids a redundant size/layout transaction on
+      // every pointer frame. setBounds was the other half of the drag jitter.
+      win.setPosition(Math.round(x), Math.round(y), false);
     }
   });
 

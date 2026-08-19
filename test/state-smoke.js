@@ -199,6 +199,40 @@ async function main() {
     cat.dispatch('pointercancel', { pointerId: 52 });
   }
 
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    let resolveOrigin;
+    w.window.pet.getWinPos = () => new Promise((resolve) => { resolveOrigin = resolve; });
+
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 53, screenX: 100, screenY: 100,
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 53, screenX: 125, screenY: 120,
+    });
+    check('首个 pointermove 不等待异步窗口坐标，直接连续移动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][0] === 325 && c[1][1] === 220));
+    });
+
+    resolveOrigin([900, 700]);
+    await sleep(0);
+    w.calls.length = 0;
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 53, screenX: 130, screenY: 125,
+    });
+    check('迟到的 IPC 坐标不会让已开始的拖动突然跳位', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][0] === 330 && c[1][1] === 225));
+    });
+    cat.dispatch('pointerup', { pointerId: 53 });
+  }
+
   console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
   {
     const w = world();
@@ -266,6 +300,42 @@ async function main() {
     catRect.right = 320;
     const repaired = vm.runInContext('setRequestedPetSize(0, 0)', w.sandbox);
     check('前一次相同 reset 不能吞掉仍为 520px 的真实窗口修复', () => {
+      assert.strictEqual(repaired, true);
+      assert(w.calls.some((c) => c[0] === 'setPetSize'
+        && c[1][0] === 0 && c[1][1] === 0));
+    });
+  }
+
+  console.log('[R0.4] 拖动收尾不重复提交已稳定窗口');
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      {
+        window: {
+          screenX: 600,
+          screenY: 300,
+          innerWidth: 320,
+          innerHeight: 340,
+          screen: { availLeft: 0, availTop: 0, availWidth: 1440, availHeight: 900 },
+        },
+        elementRects: {
+          cat: { left: 100, top: 160, right: 220, bottom: 280, width: 120, height: 120 },
+        },
+      },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    await sleep(20);
+    w.calls.length = 0;
+
+    const skipped = vm.runInContext('setRequestedPetSize(0, 0, { settle: true })', w.sandbox);
+    check('基础窗已经稳定时，拖动结束不再触发一次 setBounds', () => {
+      assert.strictEqual(skipped, false);
+      assert(!w.calls.some((c) => c[0] === 'setPetSize'));
+    });
+
+    w.window.innerWidth = 520;
+    const repaired = vm.runInContext('setRequestedPetSize(0, 0, { settle: true })', w.sandbox);
+    check('拖动结束遇到残留大窗口时仍会修复', () => {
       assert.strictEqual(repaired, true);
       assert(w.calls.some((c) => c[0] === 'setPetSize'
         && c[1][0] === 0 && c[1][1] === 0));

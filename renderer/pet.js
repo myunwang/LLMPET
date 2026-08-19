@@ -435,6 +435,7 @@ const MEME_WINDOW_H = 340;
 const MEME_MEDIA_W = 260;
 const MEME_GAP = 14;
 const MEME_EDGE_PAD = 10;
+const BASE_PET_FRAME_W = 320;
 const BASE_PET_FRAME_H = 340;
 const RESTING_FRAME_MAX_W = 360;
 const RESTING_FRAME_MAX_H = 360;
@@ -566,10 +567,10 @@ function popupEdgeLayout(height, popupHeight) {
 }
 
 function petFrameAlreadySettled(width, height, nextLayout) {
-  if (!(width > 0) || !(height > 0) || !nextLayout) return false;
+  if (!nextLayout) return false;
   const wa = browserWorkArea();
-  const targetWidth = Math.min(width, wa.width);
-  const targetHeight = Math.min(height, wa.height);
+  const targetWidth = Math.min(width > 0 ? width : BASE_PET_FRAME_W, wa.width);
+  const targetHeight = Math.min(height > 0 ? height : BASE_PET_FRAME_H, wa.height);
   const frame = {
     x: Number(window.screenX) || 0,
     y: Number(window.screenY) || 0,
@@ -602,7 +603,7 @@ function setRequestedPetSize(w, h, options = {}) {
   // viewport and edge direction, a changing DOM anchor is not a resize request.
   // Reapplying the same BrowserWindow bounds makes macOS briefly repaint only
   // half of the transparent window, which looks like the panel lost its top.
-  if (options.popup && petFrameAlreadySettled(width, height, nextLayout)) return false;
+  if ((options.popup || options.settle) && petFrameAlreadySettled(width, height, nextLayout)) return false;
   const anchor = anchoredLayoutPayload(nextLayout);
   // Never dedupe a resting-frame or meme transition. Renderer innerWidth can
   // lag the main-process BrowserWindow by a frame, so even a live-size check can
@@ -690,7 +691,11 @@ function settleEdgeLayout() {
   // session list / question card / speech bubble was still open. The DOM kept
   // rendering, but Electron clipped it to that smaller transparent frame.
   if (surface) fitPopup(surface);
-  else setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
+  else setRequestedPetSize(
+    memeLayoutActive ? MEME_WINDOW_W : 0,
+    memeLayoutActive ? MEME_WINDOW_H : 0,
+    { settle: true },
+  );
   requestAnimationFrame(reportPetVisualBounds);
 }
 
@@ -3610,12 +3615,27 @@ function attachDrag(el) {
     cancelActiveDrag(false);
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
-    const gesture = { el, pid: e.pointerId, sx: e.screenX, sy: e.screenY, moved: false, win: null };
+    // BrowserWindow screen coordinates are already available synchronously in
+    // the renderer. Starting with null made quick drags wait for an IPC round
+    // trip, then apply the accumulated delta all at once — the visible one-frame
+    // kick reported by users. The IPC read remains a pre-move calibration only.
+    const liveOrigin = Number.isFinite(window.screenX) && Number.isFinite(window.screenY)
+      ? [window.screenX, window.screenY]
+      : null;
+    const gesture = {
+      el, pid: e.pointerId, sx: e.screenX, sy: e.screenY,
+      moved: false, win: liveOrigin,
+    };
     g = gesture;
     window.pet.getWinPos().then(([wx, wy]) => {
       // IPC from an earlier click may resolve after a new pointerdown. Binding
       // that stale window origin to the new gesture produces a large jump.
-      if (g === gesture) gesture.win = [wx, wy];
+      // It must also not overwrite the live origin after this gesture has begun
+      // moving, or its delayed reply reintroduces the same kick one frame later.
+      if (g === gesture && (!gesture.moved || !gesture.win)
+        && Number.isFinite(wx) && Number.isFinite(wy)) {
+        gesture.win = [wx, wy];
+      }
     }).catch(() => {});
   });
   el.addEventListener('pointermove', (e) => {
