@@ -17,6 +17,13 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dia
 try { app.setName('LLMPET'); } catch {}
 try { app.setAppUserModelId('com.octopus.pet'); } catch {}
 
+// LLMPET's pet is a continuously animated, click-through transparent window.
+// On macOS the GPU compositor can retain stale tiles while that window moves or
+// resizes, which appears as a one-frame duplicate/"shadow" on both drag and
+// click. Software compositing is cheap for this small 2D UI and avoids that
+// transparent-surface path. Electron requires this call before app readiness.
+if (process.platform === 'darwin') app.disableHardwareAcceleration();
+
 const config = require('./backend/config');
 const { log, LOG_PATH } = require('./backend/log');
 const { createCore } = require('./backend/core');
@@ -276,6 +283,7 @@ function makePetWindow(agent) {
     x, y,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     hasShadow: false,
     resizable: false,
     alwaysOnTop: true,

@@ -123,6 +123,10 @@ assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-
   && /snapshot\.petRect\.y\s*-\s*frameHeightExcess\s*\+\s*2/s.test(js),
   'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
 const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+assert(/if \(process\.platform === 'darwin'\) app\.disableHardwareAcceleration\(\);/.test(mainJs),
+  'macOS transparent pet windows must avoid the GPU compositor path that retains stale tiles');
+assert(/transparent:\s*true,[\s\S]{0,120}backgroundColor:\s*'#00000000',[\s\S]{0,120}hasShadow:\s*false/.test(mainJs),
+  'the pet BrowserWindow backing surface must be explicitly transparent with no native shadow');
 assert(/id="sl-new-dsh"/.test(html) && /slNewDshBtn[\s\S]*launchDsh/.test(js),
   'the combined session panel must expose a working new-dsh action');
 assert(/\['claude', 'codex', 'dsh'\]\.includes\(agent\)/.test(mainJs),
