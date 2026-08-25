@@ -107,9 +107,10 @@ const CAT_POOLS = {
   ],
 };
 
-// 鲸鱼女仆（whale）：自有角色，图生视频产出，每状态一张 GIF。
-// 结构与 cat 完全同构（120px、逐帧真透明、一状态一图），因此两者共用同一条
-// 渲染分支和同一个 DOM 节点，差别只在目录和文件名表。见 assets/whale/CREDITS.md。
+// 鲸鱼女仆（whale）：自有角色，图生视频产出，每状态一张 360px GIF。
+// 状态结构与 cat 完全同构，因此两者共用同一条渲染分支和同一个 DOM 节点；
+// whale 通过 skin-whale 类以 180px 呈现，在 Retina 屏上使用真实 2x 源。
+// 见 assets/whale/CREDITS.md。
 const WHALE_STATES = {
   idle: 'whale-idle.gif',             // 转椅上饮料+手机：待命
   working: 'whale-working.gif',       // 桌前对着笔记本：干活
@@ -3626,6 +3627,7 @@ function applySkin(s) {
   document.body.classList.toggle('skin-pixel', skin === 'pixel');
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
   document.body.classList.toggle('skin-cat', isMeme());
+  document.body.classList.toggle('skin-whale', skin === 'whale');
   if (skin === 'mascot') updateMascotEyes(state);
   if (isMeme()) updateCat(state);
   requestAnimationFrame(reportPetVisualBounds);
