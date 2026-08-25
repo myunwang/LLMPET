@@ -76,7 +76,7 @@ npm start
 
 ```bash
 npm test                 # ヘッドレス回帰テスト一式
-npm run package:mac:dev  # ローカル用 ad-hoc 署名 macOS パッケージ
+npm run package:mac:dev  # 独立した LLMPET Dev.app（ad-hoc 署名）
 npm run package:win      # Windows インストーラー + ZIP
 npm run uninstall:hooks  # LLMPET の Claude hook を安全に削除
 ```

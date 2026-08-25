@@ -75,7 +75,7 @@ For a local ad-hoc-signed macOS package:
 npm run package:mac:dev
 ```
 
-This produces `dist/LLMPET.app` and `dist/LLMPET-<version>-mac-<arch>-unsigned.zip`. The ad-hoc-signed package is for local development validation only and is not a public distribution. `npm run package:mac` is the fail-closed public release path and requires Apple Developer ID and notarization credentials; see [macOS release signing and notarization](MACOS_RELEASE.md).
+This produces `dist/LLMPET Dev.app` and `dist/LLMPET-<version>-mac-<arch>-dev-unsigned.zip`. The development app uses the isolated `com.octopus.pet.dev` bundle id, so a branch build cannot be confused with the verified `/Applications/LLMPET.app`; only the guarded three-piece workflow may update that canonical path. The ad-hoc-signed package is for local development validation only and is not a public distribution. `npm run package:mac` is the fail-closed public release path and requires Apple Developer ID and notarization credentials; see [macOS release signing and notarization](MACOS_RELEASE.md).
 
 On Windows x64:
 

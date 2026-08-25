@@ -75,7 +75,7 @@ macOS のローカル ad-hoc 署名パッケージ：
 npm run package:mac:dev
 ```
 
-`dist/LLMPET.app` と `dist/LLMPET-<version>-mac-<arch>-unsigned.zip` が生成されます。ad-hoc 署名パッケージはローカル開発検証専用で、公開配布用ではありません。`npm run package:mac` は Apple Developer ID と公証資格情報を必須とする正式公開用の fail-closed 経路です。詳細は [macOS の署名と公証](MACOS_RELEASE.md) をご覧ください。
+`dist/LLMPET Dev.app` と `dist/LLMPET-<version>-mac-<arch>-dev-unsigned.zip` が生成されます。開発版は独立した `com.octopus.pet.dev` bundle id を使うため、ブランチのビルドが検証済みの `/Applications/LLMPET.app` と混同されません。正式 App を更新できるのは、ガード付きの三件套ワークフローだけです。ad-hoc 署名パッケージはローカル開発検証専用で、公開配布用ではありません。`npm run package:mac` は Apple Developer ID と公証資格情報を必須とする正式公開用の fail-closed 経路です。詳細は [macOS の署名と公証](MACOS_RELEASE.md) をご覧ください。
 
 Windows x64：
 

@@ -12,10 +12,17 @@ const fs = require('fs');
 const os = require('os');
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, systemPreferences, clipboard } = require('electron');
 
-// Give the dev app the public LLMPET identity so it isn't shown as a generic
-// "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
-try { app.setName('LLMPET'); } catch {}
-try { app.setAppUserModelId('com.octopus.pet'); } catch {}
+// An ordinary branch build carries this marker and gets a separate identity
+// and data directory. The canonical name/id are reserved for release and the
+// guarded three-piece workflow.
+const IS_ISOLATED_DEV_APP = fs.existsSync(path.join(__dirname, '.llmpet-dev-build'));
+const APP_NAME = IS_ISOLATED_DEV_APP ? 'LLMPET Dev' : 'LLMPET';
+const APP_ID = IS_ISOLATED_DEV_APP ? 'com.octopus.pet.dev' : 'com.octopus.pet';
+try { app.setName(APP_NAME); } catch {}
+try { app.setAppUserModelId(APP_ID); } catch {}
+if (IS_ISOLATED_DEV_APP) {
+  try { app.setPath('userData', path.join(app.getPath('appData'), APP_NAME)); } catch {}
+}
 
 // LLMPET's pet is a continuously animated, click-through transparent window.
 // On macOS the GPU compositor can retain stale tiles while that window moves or
