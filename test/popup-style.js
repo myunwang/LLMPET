@@ -247,6 +247,27 @@ assert(/\.sesslist\s*\{[^}]*box-shadow\s*:\s*inset\b/s.test(css),
   'the resized session surface must use an inner depth cue instead of a detached outer shadow');
 assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
   'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
+assert(/body\.skin-cat #prop\s*\{[^}]*display\s*:\s*none\s*!important\s*;/s.test(css),
+  'cat and whale must hide the redundant tool-prop emoji layer');
+assert(/function playAction[\s\S]{0,700}if \(!isMeme\(\) && icon\)/.test(js),
+  'cat and whale tool actions must not create prop emoji');
+assert(!/body\.skin-cat[^\{]*(?:\.think \.td|#sleep|#sidekick|\.confetti)/.test(css)
+  && !/function confetti\(\)\s*\{\s*if \(isMeme\(\)\) return;/.test(js)
+  && /if \(act === 'summon'\)/.test(js),
+  'cat and whale must keep thought, sleep, sidekick, and confetti feedback');
+assert(!/body\.skin-cat[^\{]*#bubble\s*\{[^}]*display\s*:\s*none/s.test(css)
+  && /function showBubble[\s\S]{0,500}OctoIcons\.setTextWithIcons\(bubbleText, text\)/.test(js),
+  'cat and whale dialogue bubbles and their mapped emoji must remain intact');
+assert(/\.confetti\.error-ribbon\s*\{[^}]*background\s*:\s*#e53935/s.test(css)
+  && /\.confetti\.error-ribbon\.ribbon-bright\s*\{[^}]*#ff5a52/s.test(css)
+  && /\.confetti\.error-ribbon\.ribbon-deep\s*\{[^}]*#a51f2c/s.test(css)
+  && /function syncErrorRibbons\(\)[\s\S]{0,180}skin !== 'whale' \|\| state !== 'error'/.test(js),
+  'whale error state must render a dedicated red ribbon layer');
+assert(/#cat\s*\{[^}]*position\s*:\s*relative/s.test(css)
+  && /function errorRibbonBurst\(\)[\s\S]{0,1400}el\.appendChild\(ribbon\)/.test(js),
+  'whale error ribbons must stay anchored to the pet across edge-layout changes');
+assert(!/\.confetti\.error-ribbon[\s\S]{0,700}(?:\bgreen\b|#(?:0f0|00ff00|008000|22c55e|2ecc71|34c759)\b)/i.test(css),
+  'whale error ribbon palette must not introduce green hues');
 assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubbleMsg, 2600\)\) resetPetSize\(\)/.test(js),
   'permission confirmation must inherit the expanded window without a base-frame resize in between');
 assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHorizontal/.test(js),

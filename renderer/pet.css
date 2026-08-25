@@ -618,6 +618,27 @@ body.skin-whale .sessions { width: 180px; }
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(50deg); }
 }
 
+/* whale 错误态专属红色彩带：用纯 CSS 丝带，不混回工具道具 emoji。 */
+.confetti.error-ribbon {
+  width: 6px;
+  height: 19px;
+  border-radius: 70% 18% 65% 22%;
+  background: #e53935;
+  box-shadow: inset -2px 0 0 rgba(126, 18, 32, 0.28);
+  animation: errorRibbonFly 1.45s cubic-bezier(0.18, 0.72, 0.32, 1) forwards;
+}
+.confetti.error-ribbon.ribbon-bright { background: #ff5a52; }
+.confetti.error-ribbon.ribbon-deep { background: #a51f2c; }
+@keyframes errorRibbonFly {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.35) rotate(0); }
+  16% { opacity: 1; }
+  58% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(1) rotate(var(--turn));
+  }
+}
+
 /* Pointer-down is shared by click and drag. Keep the artwork still here so a
    click cannot briefly trigger a scale/rotate layer and a drag cannot trail it. */
 #pixel.dragging .pixel-sprite { animation: none; }
@@ -663,6 +684,7 @@ body.skin-whale .sessions { width: 180px; }
    每个状态一张 GIF，本体动效由 GIF 自带；这里只加轻微浮动 + 醒目态强调。
    ==================================================================== */
 #cat {
+  position: relative;
   width: 120px; height: 120px;   /* 月薪喵仍按原生 120×120 显示，避免低清放大 */
   cursor: grab; touch-action: none;
   flex-direction: column; align-items: center;
@@ -707,6 +729,11 @@ body.skin-whale #cat { width: 180px; height: 180px; }
   30% { opacity: 1; transform: translate(40px, -10px) scale(1); }
   70% { opacity: 1; transform: translate(70px, -6px) scale(0.95); }
   100% { opacity: 0; transform: translate(96px, 6px) scale(0.7); }
+}
+
+/* cat / whale 的 GIF 已经表达工具动作，只隐藏重复的外围道具 emoji。 */
+body.skin-cat #prop {
+  display: none !important;
 }
 
 /* ── 会话列表 HUD（左键弹出）──────────────────────────────── */
