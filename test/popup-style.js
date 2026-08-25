@@ -247,6 +247,17 @@ assert(/\.sesslist\s*\{[^}]*box-shadow\s*:\s*inset\b/s.test(css),
   'the resized session surface must use an inner depth cue instead of a detached outer shadow');
 assert(/function showBubble[\s\S]*fitPopup\(activeSizedSurface\(\) \|\| bubble\)/.test(js),
   'background status bubbles must not steal BrowserWindow sizing from an open interactive panel');
+assert(/body\.skin-cat #prop\s*\{[^}]*display\s*:\s*none\s*!important\s*;/s.test(css),
+  'cat and whale must hide the redundant tool-prop emoji layer');
+assert(/function playAction[\s\S]{0,700}if \(!isMeme\(\) && icon\)/.test(js),
+  'cat and whale tool actions must not create prop emoji');
+assert(!/body\.skin-cat[^\{]*(?:\.think \.td|#sleep|#sidekick|\.confetti)/.test(css)
+  && !/function confetti\(\)\s*\{\s*if \(isMeme\(\)\) return;/.test(js)
+  && /if \(act === 'summon'\)/.test(js),
+  'cat and whale must keep thought, sleep, sidekick, and confetti feedback');
+assert(!/body\.skin-cat[^\{]*#bubble\s*\{[^}]*display\s*:\s*none/s.test(css)
+  && /function showBubble[\s\S]{0,500}OctoIcons\.setTextWithIcons\(bubbleText, text\)/.test(js),
+  'cat and whale dialogue bubbles and their mapped emoji must remain intact');
 assert(/function finishChoice[\s\S]*hideAsk\(true\)[\s\S]*if \(!showBubble\(bubbleMsg, 2600\)\) resetPetSize\(\)/.test(js),
   'permission confirmation must inherit the expanded window without a base-frame resize in between');
 assert(/function movePetDuringDrag[\s\S]*chooseDragHorizontalLayout[\s\S]*nextHorizontal/.test(js),

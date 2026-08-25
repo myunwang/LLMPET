@@ -33,19 +33,36 @@
 
   // Renderer screenX/screenY can lag one Electron resize transaction. Carry
   // the renderer's own window snapshot with the pet anchor, then translate the
-  // anchor by the difference to the main process' authoritative bounds.
+  // anchor to the main process' authoritative bounds. A right/bottom/centre
+  // aligned pet also moves *inside* the frame when that frame changes size;
+  // compensate that local-layout delta as well as the window-origin delta.
+  // Otherwise a stale compact 320px snapshot arriving just after a 520px
+  // expansion subtracts 200px twice and the visible pet permanently jumps.
   function correctStalePetAnchor(anchor, actualWindow) {
     if (!anchor || typeof anchor !== 'object') return anchor;
     const corrected = { ...anchor };
     const actualX = Number(actualWindow && actualWindow.x);
     const actualY = Number(actualWindow && actualWindow.y);
+    const actualWidth = Number(actualWindow && actualWindow.width);
+    const actualHeight = Number(actualWindow && actualWindow.height);
     const reportedX = Number(anchor.windowX);
     const reportedY = Number(anchor.windowY);
+    const reportedWidth = Number(anchor.windowWidth);
+    const reportedHeight = Number(anchor.windowHeight);
     if (Number.isFinite(corrected.screenX) && Number.isFinite(actualX) && Number.isFinite(reportedX)) {
-      corrected.screenX += actualX - reportedX;
+      let localLayoutDelta = 0;
+      if (Number.isFinite(actualWidth) && Number.isFinite(reportedWidth)) {
+        if (anchor.xAlign === 'right') localLayoutDelta = actualWidth - reportedWidth;
+        else if (anchor.xAlign === 'center') localLayoutDelta = (actualWidth - reportedWidth) / 2;
+      }
+      corrected.screenX += actualX - reportedX + localLayoutDelta;
     }
     if (Number.isFinite(corrected.screenY) && Number.isFinite(actualY) && Number.isFinite(reportedY)) {
-      corrected.screenY += actualY - reportedY;
+      const localLayoutDelta = anchor.yAlign === 'bottom'
+        && Number.isFinite(actualHeight) && Number.isFinite(reportedHeight)
+        ? actualHeight - reportedHeight
+        : 0;
+      corrected.screenY += actualY - reportedY + localLayoutDelta;
     }
     return corrected;
   }

@@ -136,6 +136,44 @@ async function main() {
     });
   }
 
+  console.log('[R0a] cat / whale 外围装饰边界');
+  {
+    const w = world();
+    const stage = w.elements('stage');
+    const stageChildrenBefore = stage.children.length;
+    vm.runInContext("playAction('Bash', '⚙️'); playAction('Task', '🐙'); confetti();", w.sandbox);
+    check('cat 只去掉工具道具，保留分身与彩带', () => {
+      assert.strictEqual(w.elements('prop').textContent, '');
+      assert(!w.elements('prop').classList.contains('on'));
+      assert(w.elements('sidekick').classList.contains('on'));
+      assert.strictEqual(stage.children.length, stageChildrenBefore + 12);
+    });
+
+    w.handlers.config({ skin: 'whale', muted: true });
+    vm.runInContext("playAction('Bash', '⚙️'); playAction('Task', '🐙'); confetti();", w.sandbox);
+    check('whale 同样只去掉工具道具', () => {
+      assert.strictEqual(w.elements('prop').textContent, '');
+      assert(!w.elements('prop').classList.contains('on'));
+      assert(w.elements('sidekick').classList.contains('on'));
+      assert.strictEqual(stage.children.length, stageChildrenBefore + 24);
+    });
+
+    vm.runInContext("showBubble('⚙️ 运行命令', 3200, true)", w.sandbox);
+    check('对话框内容与其中的 emoji 保留', () => {
+      assert.strictEqual(w.elements('bubble-text').textContent, '⚙️ 运行命令');
+      assert(!w.elements('bubble').classList.contains('hidden'));
+    });
+
+    w.handlers.config({ skin: 'mascot', muted: true });
+    vm.runInContext("playAction('Bash', '⚙️'); playAction('Task', '🐙'); confetti();", w.sandbox);
+    check('mascot 原有外围反馈不受影响', () => {
+      assert.strictEqual(w.elements('prop').textContent, '🐙');
+      assert(w.elements('prop').classList.contains('on'));
+      assert(w.elements('sidekick').classList.contains('on'));
+      assert.strictEqual(stage.children.length, stageChildrenBefore + 36);
+    });
+  }
+
   console.log('[R0.1] 透明窗拖拽失败路径');
   {
     const w = world();

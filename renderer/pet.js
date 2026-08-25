@@ -2942,7 +2942,7 @@ function setState(s) {
   if (isMeme()) updateCat(s);
 }
 
-// 按工具播放专属动作 + 头顶道具
+// 按工具播放专属动作；cat / whale 的 GIF 已经表达工具动作，不再叠道具 emoji。
 function playAction(toolName, icon) {
   if (state === 'waiting' || state === 'sleeping') return;
   const act = TOOL_ACT[toolName] || 'work';
@@ -2950,7 +2950,7 @@ function playAction(toolName, icon) {
     el.classList.remove(...ACT_CLASSES);
     el.classList.add('act-' + act); // 通用 work 也有身体动作（不再只闪图标）
   }
-  if (icon) {
+  if (!isMeme() && icon) {
     propEl.textContent = icon;
     propEl.className = 'prop';
     void propEl.offsetWidth; // 重启动画

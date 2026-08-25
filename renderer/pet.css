@@ -709,6 +709,11 @@ body.skin-whale #cat { width: 180px; height: 180px; }
   100% { opacity: 0; transform: translate(96px, 6px) scale(0.7); }
 }
 
+/* cat / whale 的 GIF 已经表达工具动作，只隐藏重复的外围道具 emoji。 */
+body.skin-cat #prop {
+  display: none !important;
+}
+
 /* ── 会话列表 HUD（左键弹出）──────────────────────────────── */
 .sesslist {
   position: absolute; top: 14px; left: 12px; right: 12px;

@@ -49,6 +49,32 @@ assert.deepStrictEqual(
   'a second popup measurement must correct a stale renderer window origin instead of pushing the pet 200px',
 );
 assert.deepStrictEqual(
+  geometry.correctStalePetAnchor({
+    screenX: 1263, screenY: 509, windowX: 1123, windowY: 372,
+    windowWidth: 320, windowHeight: 340,
+    width: 180, height: 180, xAlign: 'right', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  }, { x: 923, y: 372, width: 520, height: 340 }),
+  {
+    screenX: 1263, screenY: 509, windowX: 1123, windowY: 372,
+    windowWidth: 320, windowHeight: 340,
+    width: 180, height: 180, xAlign: 'right', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  },
+  'a stale compact right-aligned snapshot must not double-count the 200px popup expansion',
+);
+assert.deepStrictEqual(
+  geometry.correctStalePetAnchor({
+    screenX: 873, screenY: 620, windowX: 803, windowY: 544,
+    windowWidth: 320, windowHeight: 340,
+    width: 180, height: 180, xAlign: 'center', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  }, { x: 703, y: 260, width: 520, height: 624 }),
+  {
+    screenX: 873, screenY: 620, windowX: 803, windowY: 544,
+    windowWidth: 320, windowHeight: 340,
+    width: 180, height: 180, xAlign: 'center', yAlign: 'bottom', xOffset: 0, yOffset: 23,
+  },
+  'centre/bottom popup expansion must cancel matching origin and inner-layout changes on both axes',
+);
+assert.deepStrictEqual(
   geometry.correctStalePetAnchor({ screenX: 80, screenY: 100 }, { x: 20, y: 30 }),
   { screenX: 80, screenY: 100 },
   'legacy anchors without a renderer window snapshot remain backward compatible',
