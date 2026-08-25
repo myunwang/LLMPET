@@ -600,7 +600,8 @@ async function main() {
     });
     w.handlers.event({ kind: 'loot', phase: 'kick', direction: -1 });
     check('whale 出脚重播不会串回月薪喵素材', () => {
-      assert(/\/whale\/whale-idle\.gif\?loot-kick=\d+$/.test(catSrc(w)));
+      // roam 从占位(借 idle 图)改为专属奔跑素材后，出脚重播应命中 whale-roam。
+      assert(/\/whale\/whale-roam\.gif\?loot-kick=\d+$/.test(catSrc(w)));
       assert(!catSrc(w).includes('/cat/'));
     });
   }

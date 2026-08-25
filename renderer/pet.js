@@ -125,17 +125,34 @@ const WHALE_STATES = {
   loafing: 'whale-loafing.gif',       // 躺着刷手机：间隙摸鱼
   sorry: 'whale-waiting.gif',         // 道歉 → 冒冷汗心虚
   puzzled: 'whale-needsinput.gif',    // 疑惑 → 头顶问号
-  // ↓ 以下状态尚无专属画面，先借语义最近的顶上；有专属图后只改这几行即可。
-  happy: 'whale-idle.gif',            // 占位：完成庆祝 → 转椅上惬意
-  loved: 'whale-idle.gif',            // 占位
-  excited: 'whale-idle.gif',          // 占位
-  roam: 'whale-idle.gif',             // 占位：闲逛 → 待命
-  lookout: 'whale-loafing.gif',       // 占位：趴着望远处 → 躺着刷手机
-  sleeping: 'whale-loafing.gif',      // 占位：睡觉 → 躺着，最接近休息
-  greet: 'whale-attention.gif',       // 占位：新会话上线 → 从工位起身
+  happy: 'whale-happy.gif',           // 摸鲸鱼玩偶的头夸夸：完成庆祝
+  loved: 'whale-happy.gif',           // 被夸 → 摸头开心
+  excited: 'whale-happy.gif',
+  roam: 'whale-roam.gif',             // 原地小跑：闲逛
+  lookout: 'whale-thinking-2.gif',    // 趴着望向「浮云」：掠夺后看战果
+  sleeping: 'whale-sleeping.gif',     // 被窝鼓包随呼吸起伏：睡觉
+  greet: 'whale-greet.gif',           // 飞向工位：新会话火速上线
 };
-// whale 每个状态只有一张图，没有可轮换的姿态，故不设 pool。
-const WHALE_POOLS = {};
+// 与 cat 同构的姿态轮换：working/thinking 是停留最久的两个状态，单张图播几分钟
+// 观感像卡死。thinking 池里的 whale-working-3.gif 是「桌前对着笔记本」那张——
+// thinking 与 working-3 的画面按需求做过对调，故它在池中而不在 thinking 主图位。
+const WHALE_POOLS = {
+  working: [
+    'whale-working.gif',   // 戴耳机猛拍「上号」按钮
+    'whale-working-2.gif', // 熬夜冠军：戴耳机对着显示器
+    'whale-working-3.gif', // 桌前对着笔记本
+    'whale-working-4.gif', // 边吃零食边敲键盘
+  ],
+  sleeping: [
+    'whale-sleeping.gif',   // 被窝鼓包随呼吸起伏
+    'whale-sleeping-2.gif', // 坐椅子上闭眼睡
+  ],
+  loafing: [
+    'whale-loafing.gif',   // 躺着刷手机
+    'whale-loafing-2.gif', // 懒人沙发上点外卖
+    'whale-loafing-3.gif', // 靠着沙发奶瓶+手机
+  ],
+};
 
 // meme 类皮肤共用一条渲染分支，彼此的差别全部收在这张表里。
 const MEME_PACKS = {
