@@ -2867,6 +2867,8 @@ let skin = 'mascot';
 let lastWaiting = 0;
 let lastBgZombie = 0; // 后台疑似僵尸数
 let radialOpen = false;
+let errorRibbonTimer = null;
+const errorRibbonNodes = new Set();
 
 const IDLE_SLEEP_MS = 6 * 60 * 1000;
 const stateEls = [pixel, mascot, cat].filter(Boolean);
@@ -2940,6 +2942,7 @@ function setState(s) {
   // 之前「s!=='waiting' 就 hideAsk」会在聚合态变 working/thinking 时把 needsinput 的面板闪掉。
   if (skin === 'mascot') updateMascotEyes(s);
   if (isMeme()) updateCat(s);
+  syncErrorRibbons();
 }
 
 // 按工具播放专属动作；cat / whale 的 GIF 已经表达工具动作，不再叠道具 emoji。
@@ -3069,6 +3072,46 @@ function confetti() {
     stage.appendChild(s);
     setTimeout(() => s.remove(), 1300);
   }
+}
+
+// whale 的错误 GIF 没有包含红色彩带，因此在错误持续期间补一层独立的
+// CSS 丝带。离开 whale/error 会立即清场，避免效果泄漏到 cat 或普通状态。
+function clearErrorRibbons() {
+  clearTimeout(errorRibbonTimer);
+  errorRibbonTimer = null;
+  for (const node of errorRibbonNodes) node.remove();
+  errorRibbonNodes.clear();
+}
+
+function errorRibbonBurst() {
+  const el = curSkinEl();
+  for (let i = 0; i < 14; i++) {
+    const ribbon = document.createElement('span');
+    ribbon.className = `confetti error-ribbon ${i % 3 === 1 ? 'ribbon-bright' : (i % 3 === 2 ? 'ribbon-deep' : '')}`;
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 2.25;
+    const dist = 56 + Math.random() * 78;
+    // 挂在 pet 容器里而不是 stage 上：透明窗切换 left/right 锚点时，
+    // 彩带会跟着 whale 一起移动，不会留在旧的窗口坐标。
+    ribbon.style.left = '50%';
+    ribbon.style.top = '38%';
+    ribbon.style.setProperty('--dx', Math.cos(ang) * dist + 'px');
+    ribbon.style.setProperty('--dy', Math.sin(ang) * dist + 22 + 'px');
+    ribbon.style.setProperty('--turn', (Math.random() > 0.5 ? 1 : -1) * (180 + Math.random() * 300) + 'deg');
+    ribbon.style.animationDelay = Math.random() * 0.12 + 's';
+    el.appendChild(ribbon);
+    errorRibbonNodes.add(ribbon);
+    setTimeout(() => {
+      ribbon.remove();
+      errorRibbonNodes.delete(ribbon);
+    }, 1600);
+  }
+}
+
+function syncErrorRibbons() {
+  clearErrorRibbons();
+  if (skin !== 'whale' || state !== 'error') return;
+  errorRibbonBurst();
+  errorRibbonTimer = setTimeout(syncErrorRibbons, 1750);
 }
 
 function showBubble(text, holdMs = 3200, force = false) {
@@ -3630,6 +3673,7 @@ function applySkin(s) {
   document.body.classList.toggle('skin-whale', skin === 'whale');
   if (skin === 'mascot') updateMascotEyes(state);
   if (isMeme()) updateCat(state);
+  syncErrorRibbons();
   requestAnimationFrame(reportPetVisualBounds);
 }
 

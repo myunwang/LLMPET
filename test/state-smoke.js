@@ -174,6 +174,29 @@ async function main() {
     });
   }
 
+  console.log('[R0b] whale 错误态红色彩带');
+  {
+    const w = world();
+    const pet = w.elements('cat');
+    const ribbons = () => pet.children.filter((el) => el.classList.contains('error-ribbon'));
+
+    w.handlers.config({ skin: 'whale', muted: true });
+    w.handlers.stats(baseStats({ errorCount: 1 }));
+    check('whale 进入错误态会生成红色彩带层', () => {
+      assert.strictEqual(w.elements('cat').classList.contains('error'), true);
+      assert.strictEqual(ribbons().length, 14);
+      assert(ribbons().every((el) => el.textContent === ''));
+    });
+
+    w.handlers.config({ skin: 'cat', muted: true });
+    check('同一错误态切换为 cat 会立即清掉彩带', () => assert.strictEqual(ribbons().length, 0));
+
+    w.handlers.config({ skin: 'whale', muted: true });
+    check('切回 whale 错误态会恢复彩带', () => assert.strictEqual(ribbons().length, 14));
+    w.handlers.stats(baseStats());
+    check('whale 离开错误态会立即清掉彩带', () => assert.strictEqual(ribbons().length, 0));
+  }
+
   console.log('[R0.1] 透明窗拖拽失败路径');
   {
     const w = world();
