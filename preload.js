@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('pet', {
   // 手动拖动窗口
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
   getWindowMetrics: () => ipcRenderer.invoke('get-window-metrics'),
-  setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
+  setWinPos: (x, y, meta) => ipcRenderer.send('set-win-pos', x, y, meta),
   // 唤起 Claude / Codex / dsh 客户端（dsh 起的是本地 web 界面）
   launchClaude: () => ipcRenderer.send('launch-claude'),
   launchCodex: () => ipcRenderer.send('launch-codex'),
@@ -92,8 +92,11 @@ contextBridge.exposeInMainWorld('pet', {
   blurPet: () => ipcRenderer.send('pet-blur'),
   // 打开日志文件
   openLog: () => ipcRenderer.send('open-log'),
+  openDragLog: () => ipcRenderer.send('open-drag-log'),
   // 渲染端把关键 UI 决策写进日志(便于自检验证，不靠截图)
   petLog: (tag, msg) => ipcRenderer.send('pet-log', tag, msg),
+  // 独立 JSONL 拖动诊断：仅坐标、命中与手势条件，不包含会话正文。
+  petDragTrace: (entry) => ipcRenderer.send('pet-drag-trace', entry),
   // 上报「用户正在交互」(选项面板/右键菜单/记事本)——领地模式据此避战/撤退
   uiBusy: (on) => ipcRenderer.send('ui-busy', on),
   petVisualBounds: (rect) => ipcRenderer.send('pet-visual-bounds', rect),

@@ -81,7 +81,7 @@ function makeElement(tag, id) {
   return el;
 }
 
-function createStubWorld() {
+function createStubWorld(options = {}) {
   const elements = new Map(); // id -> element
   const byId = (id) => {
     if (!elements.has(id)) elements.set(id, makeElement('div', id));
@@ -149,6 +149,7 @@ function createStubWorld() {
     toggleMute: () => calls.push(['toggleMute']),
     openPanel: () => calls.push(['openPanel']),
     openLog: () => calls.push(['openLog']),
+    openDragLog: () => calls.push(['openDragLog']),
     quit: () => calls.push(['quit']),
     launchClaude: () => calls.push(['launchClaude']),
     focusSession: (...a) => calls.push(['focusSession', a]),
@@ -157,6 +158,7 @@ function createStubWorld() {
     blurPet: () => calls.push(['blurPet']),
     decidePermission: (...a) => calls.push(['decidePermission', a]),
     petLog: () => {},
+    petDragTrace: (...a) => calls.push(['petDragTrace', a]),
   };
 
   // Controllable clock: advance() shifts Date.now() so transient windows can be
@@ -167,13 +169,19 @@ function createStubWorld() {
     static now() { return RealDate.now() + clock.offset; }
   }
 
+  const windowListeners = {};
   const window = {
     pet,
     OctoIcons: undefined,
     AudioContext: undefined,
     webkitAudioContext: undefined,
-    addEventListener: () => {},
+    addEventListener: (ev, fn) => { (windowListeners[ev] = windowListeners[ev] || []).push(fn); },
+    ...(options.window || {}),
   };
+
+  for (const [id, rect] of Object.entries(options.elementRects || {})) {
+    byId(id).getBoundingClientRect = () => ({ ...rect });
+  }
 
   const sandbox = {
     document,
@@ -203,13 +211,16 @@ function createStubWorld() {
     location: { search: '' },
   };
   sandbox.globalThis = sandbox;
-  return { sandbox, elements: byId, handlers, calls, clock, document, window };
+  const dispatchWindow = (ev, payload = {}) => {
+    for (const fn of windowListeners[ev] || []) fn({ type: ev, ...payload });
+  };
+  return { sandbox, elements: byId, handlers, calls, clock, document, window, dispatchWindow };
 }
 
 // Load renderer/pet.js (and anything else, e.g. a future shared module) into
 // the stub world. Returns the world for driving + assertions.
 function loadRenderer(files, options = {}) {
-  const world = createStubWorld();
+  const world = createStubWorld(options);
   if (typeof options.search === 'string') world.sandbox.location.search = options.search;
   vm.createContext(world.sandbox);
   for (const f of files) {

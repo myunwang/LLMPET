@@ -9,6 +9,46 @@
   if (root) root.PetGeometry = api;
 })(typeof window !== 'undefined' ? window : globalThis, () => {
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  // Electron ultimately converts BrowserWindow positions to signed native
+  // integers. A Chromium pointer event can briefly expose a finite sentinel
+  // outside that range while a transparent window crosses a screen edge.
+  const NATIVE_WINDOW_COORD_MIN = -2147483648;
+  const NATIVE_WINDOW_COORD_MAX = 2147483647;
+
+  function safeNativeWindowPoint({ x, y, current = null, maxStep = Infinity }) {
+    const point = { x: Math.round(Number(x)), y: Math.round(Number(y)) };
+    if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y)) return null;
+    if (point.x < NATIVE_WINDOW_COORD_MIN || point.x > NATIVE_WINDOW_COORD_MAX
+      || point.y < NATIVE_WINDOW_COORD_MIN || point.y > NATIVE_WINDOW_COORD_MAX) return null;
+
+    const limit = Number(maxStep);
+    if (current && Number.isFinite(limit) && limit >= 0) {
+      const currentX = Number(current.x);
+      const currentY = Number(current.y);
+      if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) return null;
+      if (Math.abs(point.x - currentX) > limit || Math.abs(point.y - currentY) > limit) return null;
+    }
+    return point;
+  }
+
+  // Renderer screenX/screenY can lag one Electron resize transaction. Carry
+  // the renderer's own window snapshot with the pet anchor, then translate the
+  // anchor by the difference to the main process' authoritative bounds.
+  function correctStalePetAnchor(anchor, actualWindow) {
+    if (!anchor || typeof anchor !== 'object') return anchor;
+    const corrected = { ...anchor };
+    const actualX = Number(actualWindow && actualWindow.x);
+    const actualY = Number(actualWindow && actualWindow.y);
+    const reportedX = Number(anchor.windowX);
+    const reportedY = Number(anchor.windowY);
+    if (Number.isFinite(corrected.screenX) && Number.isFinite(actualX) && Number.isFinite(reportedX)) {
+      corrected.screenX += actualX - reportedX;
+    }
+    if (Number.isFinite(corrected.screenY) && Number.isFinite(actualY) && Number.isFinite(reportedY)) {
+      corrected.screenY += actualY - reportedY;
+    }
+    return corrected;
+  }
 
   function normalizeRect(rect) {
     const x = Number(rect && rect.x) || 0;
@@ -248,6 +288,8 @@
   }
 
   return {
+    safeNativeWindowPoint,
+    correctStalePetAnchor,
     chooseRestingLayout,
     choosePopupLayout,
     chooseDragVerticalLayout,

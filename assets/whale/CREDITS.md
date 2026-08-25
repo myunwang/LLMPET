@@ -26,19 +26,12 @@
 
 ## 状态覆盖
 
-12 个画面覆盖 21 个状态键。以下状态**尚无专属画面**，当前借语义最近的顶替，
-有专属图后只需替换 `renderer/pet.js` 里 `WHALE_STATES` 的对应行：
+23 个画面覆盖 21 个状态键，另有 3 组姿态轮换池（working 4 张 / loafing 3 张 / sleeping 2 张），
+与 cat 皮肤同构。历史上曾有 5 个状态借图顶替，现已全部补齐专属画面：
 
-| 状态 | 当前借用 | 说明 |
-|---|---|---|
-| `happy` / `loved` / `excited` | `whale-idle.gif` | 完成庆祝 → 转椅上惬意 |
-| `roam` | `whale-idle.gif` | 闲逛 → 待命 |
-| `lookout` | `whale-loafing.gif` | 趴着望远处 → 躺着刷手机 |
-| `sleeping` | `whale-loafing.gif` | 睡觉 → 躺着，最接近休息 |
-| `greet` | `whale-attention.gif` | 新会话上线 → 从工位起身 |
 
-另外 `working` 与 `thinking` 的画面按需求做过对调：桌前对着笔记本的那张作
-`working`，按太阳穴配压力符号的那张作 `thinking`。
+`thinking` 与 `working-3` 的画面按需求做过对调：按太阳穴配压力符号的那张作 `thinking`
+主图，桌前对着笔记本的那张改名为 `whale-working-3.gif` 放进 working 轮换池。
 
-cat 皮肤为 `working` / `thinking` / `sleeping` / `loafing` 准备了多张姿态轮换
-（`CAT_POOLS`），whale 每状态只有一张，因此 `WHALE_POOLS` 为空、不轮换。
+2026-08-19 返工：全部关键帧按安全区规范重出（float 主体高占比降到 60–69%、
+四边留白 17–33%），并补齐轮换池素材。

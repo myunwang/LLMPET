@@ -289,7 +289,9 @@ body.skin-cat #cat { display: flex; }
   touch-action: none;
 }
 .pixel-sprite {
-  filter: drop-shadow(0 5px 7px rgba(120, 50, 30, 0.4));
+  /* Alpha-filter shadows on an animated layer can be retained by the macOS
+     compositor when its transparent BrowserWindow moves or changes size. */
+  filter: none;
   animation: bob 3.2s ease-in-out infinite;
 }
 .pixel-sprite svg { display: block; image-rendering: pixelated; }
@@ -323,7 +325,7 @@ body.skin-cat #cat { display: flex; }
    ==================================================================== */
 #pixel.waiting .pixel-sprite {
   animation: attn 0.55s ease-in-out infinite;
-  filter: drop-shadow(0 0 9px rgba(255, 190, 80, 0.95));
+  filter: none;
 }
 @keyframes attn {
   0%, 100% { transform: translateX(0) rotate(0); }
@@ -500,7 +502,7 @@ body.skin-cat .sessions { width: 120px; }
   25% { transform: translateX(-5px) rotate(-2deg); }
   75% { transform: translateX(5px) rotate(2deg); }
 }
-#pixel.error .pixel-sprite { filter: drop-shadow(0 0 9px rgba(232, 80, 55, 0.95)); }
+#pixel.error .pixel-sprite { filter: none; }
 
 /* ====================================================================
    空闲小动作：东张西望 / 蹦一下
@@ -611,12 +613,9 @@ body.skin-cat .sessions { width: 120px; }
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(50deg); }
 }
 
-/* ---- 被抓起来时的反应（更像活宠物） ---- */
-#pixel.dragging .pixel-sprite { animation: grabbed 0.45s ease-in-out infinite; }
-@keyframes grabbed {
-  0%, 100% { transform: scale(1.06) rotate(-3deg); }
-  50% { transform: scale(1.1) rotate(3deg); }
-}
+/* Pointer-down is shared by click and drag. Keep the artwork still here so a
+   click cannot briefly trigger a scale/rotate layer and a drag cannot trail it. */
+#pixel.dragging .pixel-sprite { animation: none; }
 
 /* ====================================================================
    图标款小章鱼（mascot）—— 复用已有 keyframes
@@ -625,7 +624,7 @@ body.skin-cat .sessions { width: 120px; }
   width: 252px; height: 188px;   /* 跟统一画布 841×628 同比例；头显示 ~125px，与旧版一致 */
   cursor: grab; touch-action: none;
   flex-direction: column; align-items: center;
-  filter: drop-shadow(0 6px 10px rgba(150, 70, 40, 0.3));
+  filter: none;
 }
 #mascot img { width: 100%; height: 100%; object-fit: contain; -webkit-user-drag: none; }
 
@@ -637,12 +636,12 @@ body.skin-cat .sessions { width: 120px; }
 #mascot.happy #mascot-img { animation: happyJump 0.55s ease-in-out 3; }
 #mascot.sleeping #mascot-img { animation: breathe 4.5s ease-in-out infinite; }
 #mascot.sleeping #teyes { transform: scaleY(0.12); transform-origin: center 84px; }
-#mascot.waiting { filter: drop-shadow(0 0 10px rgba(255,190,80,0.95)) drop-shadow(0 6px 10px rgba(150,70,40,0.3)); }
+#mascot.waiting { filter: none; }
 #mascot.waiting #mascot-img { animation: attn 0.55s ease-in-out infinite; }
 #mascot.error #mascot-img { animation: errShake 0.42s ease-in-out 3; }
 #mascot.error #mascot-body { fill: #c9381a; }
 #mascot.greet #mascot-img { animation: greetWave 0.5s ease-in-out 4; transform-origin: bottom center; }
-#mascot.dragging #mascot-img { animation: grabbed 0.45s ease-in-out infinite; }
+#mascot.dragging #mascot-img { animation: none; }
 #mascot.blink #teyes { transform: scaleY(0.12); transform-origin: center 84px; }
 #mascot.glance #teyes { animation: glance 1.6s ease-in-out; }
 #mascot.act-type #mascot-img { animation: actType 0.22s ease-in-out infinite; }
@@ -662,7 +661,7 @@ body.skin-cat .sessions { width: 120px; }
   width: 120px; height: 120px;   /* GIF 原生 120×120，1:1 显示最清晰，放大会糊 */
   cursor: grab; touch-action: none;
   flex-direction: column; align-items: center;
-  filter: drop-shadow(0 6px 9px rgba(120, 90, 60, 0.28));
+  filter: none;
 }
 #cat img { width: 100%; height: 100%; object-fit: contain; -webkit-user-drag: none; }
 
@@ -674,10 +673,10 @@ body.skin-cat .sessions { width: 120px; }
 /* GIF 自带动效，容器不加任何位移动画；只保留「需要你出手」的发光提示 */
 #cat.waiting,
 #cat.needsinput {
-  filter: drop-shadow(0 0 10px rgba(255, 190, 80, 0.95)) drop-shadow(0 6px 9px rgba(120, 90, 60, 0.28));
+  filter: none;
 }
 #cat.error {
-  filter: drop-shadow(0 0 9px rgba(232, 80, 55, 0.85)) drop-shadow(0 6px 9px rgba(120, 90, 60, 0.28));
+  filter: none;
 }
 
 /* ---- 召唤小分身 ---- */
@@ -706,7 +705,9 @@ body.skin-cat .sessions { width: 120px; }
   background: rgba(38, 38, 43, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 16px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  /* This surface is resized into the same transparent native window. An outer
+     blur can flash as a detached rectangle while macOS swaps window tiles. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   padding: 8px;
   display: flex; flex-direction: column;
   color: #f2f2f5;

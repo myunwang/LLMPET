@@ -125,17 +125,34 @@ const WHALE_STATES = {
   loafing: 'whale-loafing.gif',       // 躺着刷手机：间隙摸鱼
   sorry: 'whale-waiting.gif',         // 道歉 → 冒冷汗心虚
   puzzled: 'whale-needsinput.gif',    // 疑惑 → 头顶问号
-  // ↓ 以下状态尚无专属画面，先借语义最近的顶上；有专属图后只改这几行即可。
-  happy: 'whale-idle.gif',            // 占位：完成庆祝 → 转椅上惬意
-  loved: 'whale-idle.gif',            // 占位
-  excited: 'whale-idle.gif',          // 占位
-  roam: 'whale-idle.gif',             // 占位：闲逛 → 待命
-  lookout: 'whale-loafing.gif',       // 占位：趴着望远处 → 躺着刷手机
-  sleeping: 'whale-loafing.gif',      // 占位：睡觉 → 躺着，最接近休息
-  greet: 'whale-attention.gif',       // 占位：新会话上线 → 从工位起身
+  happy: 'whale-happy.gif',           // 摸鲸鱼玩偶的头夸夸：完成庆祝
+  loved: 'whale-happy.gif',           // 被夸 → 摸头开心
+  excited: 'whale-happy.gif',
+  roam: 'whale-roam.gif',             // 原地小跑：闲逛
+  lookout: 'whale-thinking-2.gif',    // 趴着望向「浮云」：掠夺后看战果
+  sleeping: 'whale-sleeping.gif',     // 被窝鼓包随呼吸起伏：睡觉
+  greet: 'whale-greet.gif',           // 飞向工位：新会话火速上线
 };
-// whale 每个状态只有一张图，没有可轮换的姿态，故不设 pool。
-const WHALE_POOLS = {};
+// 与 cat 同构的姿态轮换：working/thinking 是停留最久的两个状态，单张图播几分钟
+// 观感像卡死。thinking 池里的 whale-working-3.gif 是「桌前对着笔记本」那张——
+// thinking 与 working-3 的画面按需求做过对调，故它在池中而不在 thinking 主图位。
+const WHALE_POOLS = {
+  working: [
+    'whale-working.gif',   // 戴耳机猛拍「上号」按钮
+    'whale-working-2.gif', // 熬夜冠军：戴耳机对着显示器
+    'whale-working-3.gif', // 桌前对着笔记本
+    'whale-working-4.gif', // 边吃零食边敲键盘
+  ],
+  sleeping: [
+    'whale-sleeping.gif',   // 被窝鼓包随呼吸起伏
+    'whale-sleeping-2.gif', // 坐椅子上闭眼睡
+  ],
+  loafing: [
+    'whale-loafing.gif',   // 躺着刷手机
+    'whale-loafing-2.gif', // 懒人沙发上点外卖
+    'whale-loafing-3.gif', // 靠着沙发奶瓶+手机
+  ],
+};
 
 // meme 类皮肤共用一条渲染分支，彼此的差别全部收在这张表里。
 const MEME_PACKS = {
@@ -403,6 +420,14 @@ const isInteracting = () => askActive && (askHover || document.activeElement ===
 
 // 把 UI 决策写日志，便于自检；双宠模式给 tag 带上身份前缀（claude:state / codex:state）
 const rlog = (tag, msg) => { try { window.pet.petLog((AGENT === 'all' ? '' : AGENT + ':') + tag, msg); } catch {} };
+let dragTraceCounter = 0;
+const dragRect = (rect) => rect && ({
+  x: rect.x, y: rect.y, left: rect.left, top: rect.top,
+  right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
+});
+const traceDrag = (event, details = {}) => {
+  try { window.pet.petDragTrace({ event, at: Date.now(), ...details }); } catch {}
+};
 // i18n: shared/i18n.js is loaded as a <script> before this file.
 const t = (key, vars) => window.OctoI18n.t(key, vars);
 // A reason arrives as a stable key ('reply'|'plan'|'perm'); older payloads may
@@ -435,12 +460,12 @@ const MEME_WINDOW_H = 340;
 const MEME_MEDIA_W = 260;
 const MEME_GAP = 14;
 const MEME_EDGE_PAD = 10;
+const BASE_PET_FRAME_W = 320;
 const BASE_PET_FRAME_H = 340;
 const RESTING_FRAME_MAX_W = 360;
 const RESTING_FRAME_MAX_H = 360;
 let memeLayoutActive = false;
 let fitPopupSeq = 0;
-let lastPetSizeRequestSig = '';
 let edgeLayout = { vertical: 'above', horizontal: 'center' };
 
 function browserWorkArea() {
@@ -523,6 +548,8 @@ function anchoredLayoutPayload(next) {
   const yOffset = yAlign === 'top' ? rect.top : viewportH - rect.bottom;
   return {
     screenX, screenY,
+    windowX: wr.x, windowY: wr.y,
+    windowWidth: wr.width, windowHeight: wr.height,
     width: rect.width, height: rect.height,
     xAlign, yAlign, xOffset, yOffset,
   };
@@ -566,11 +593,11 @@ function popupEdgeLayout(height, popupHeight) {
   });
 }
 
-function popupFrameAlreadySettled(width, height, nextLayout) {
-  if (!(width > 0) || !(height > 0) || !nextLayout) return false;
+function petFrameAlreadySettled(width, height, nextLayout) {
+  if (!nextLayout) return false;
   const wa = browserWorkArea();
-  const targetWidth = Math.min(width, wa.width);
-  const targetHeight = Math.min(height, wa.height);
+  const targetWidth = Math.min(width > 0 ? width : BASE_PET_FRAME_W, wa.width);
+  const targetHeight = Math.min(height > 0 ? height : BASE_PET_FRAME_H, wa.height);
   const frame = {
     x: Number(window.screenX) || 0,
     y: Number(window.screenY) || 0,
@@ -603,20 +630,14 @@ function setRequestedPetSize(w, h, options = {}) {
   // viewport and edge direction, a changing DOM anchor is not a resize request.
   // Reapplying the same BrowserWindow bounds makes macOS briefly repaint only
   // half of the transparent window, which looks like the panel lost its top.
-  if (options.popup && popupFrameAlreadySettled(width, height, nextLayout)) return false;
+  if ((options.popup || options.settle) && petFrameAlreadySettled(width, height, nextLayout)) return false;
   const anchor = anchoredLayoutPayload(nextLayout);
-  // Stats arrive continuously. Re-sending an identical BrowserWindow resize
-  // makes the transparent window briefly repaint even when nothing visible
-  // changed, which reads as a flash around every open panel.
-  const requestSig = JSON.stringify({ width, height, anchor });
-  // For popups the real BrowserWindow is authoritative. A drag/native clamp can
-  // leave it at 520x340 even though our last *requested* signature says
-  // 520x544. popupFrameAlreadySettled() already proved the live frame is wrong,
-  // so never let this historical signature swallow the repair request.
-  if (!options.popup && requestSig === lastPetSizeRequestSig) return false;
+  // Never dedupe a resting-frame or meme transition. Renderer innerWidth can
+  // lag the main-process BrowserWindow by a frame, so even a live-size check can
+  // falsely call a 520/760px frame "already reset". Close/hide paths are sparse;
+  // sending their 320x340 reset every time is both cheaper and correctness-safe.
   try {
     window.pet.setPetSize(width, height, anchor);
-    lastPetSizeRequestSig = requestSig;
     return true;
   } catch {
     return false;
@@ -697,7 +718,11 @@ function settleEdgeLayout() {
   // session list / question card / speech bubble was still open. The DOM kept
   // rendering, but Electron clipped it to that smaller transparent frame.
   if (surface) fitPopup(surface);
-  else setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
+  else setRequestedPetSize(
+    memeLayoutActive ? MEME_WINDOW_W : 0,
+    memeLayoutActive ? MEME_WINDOW_H : 0,
+    { settle: true },
+  );
   requestAnimationFrame(reportPetVisualBounds);
 }
 
@@ -708,9 +733,16 @@ function settleEdgeLayout() {
 // jump. Returning from the top probes the normal layout first and restores it
 // as soon as the whole frame can fit on-screen again.
 function movePetDuringDrag(gesture, e, targetX, targetY) {
+  const frame = ++gesture.frame;
   const el = curSkinEl();
   if (!el) {
-    window.pet.setWinPos(targetX, targetY);
+    const meta = {
+      dragId: gesture.traceId, frame, trigger: 'pointermove-no-skin',
+      pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+      target: { x: targetX, y: targetY },
+    };
+    traceDrag('position-request', meta);
+    window.pet.setWinPos(targetX, targetY, meta);
     return;
   }
   const before = el.getBoundingClientRect();
@@ -719,6 +751,7 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const wa = browserWorkArea();
   let nextVertical = edgeLayout.vertical;
   let nextHorizontal = edgeLayout.horizontal;
+  const previousLayout = { ...edgeLayout };
 
   if (edgeLayout.vertical === 'above') {
     nextVertical = window.PetGeometry
@@ -770,12 +803,29 @@ function movePetDuringDrag(gesture, e, targetX, targetY) {
   const anchoredX = petScreenX - after.left;
   const anchoredY = petScreenY - after.top;
 
-  if (Math.abs(anchoredX - targetX) > 0.5 || Math.abs(anchoredY - targetY) > 0.5) {
+  const rebased = Math.abs(anchoredX - targetX) > 0.5 || Math.abs(anchoredY - targetY) > 0.5;
+  if (rebased) {
     gesture.win = [anchoredX, anchoredY];
     gesture.sx = e.screenX;
     gesture.sy = e.screenY;
   }
-  window.pet.setWinPos(anchoredX, anchoredY);
+  const meta = {
+    dragId: gesture.traceId,
+    frame,
+    trigger: rebased ? 'pointermove-layout-rebase' : 'pointermove',
+    pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+    target: { x: targetX, y: targetY },
+    anchored: { x: anchoredX, y: anchoredY },
+    window: { x: window.screenX, y: window.screenY, width: window.innerWidth, height: window.innerHeight },
+    petBefore: dragRect(before),
+    petAfter: dragRect(after),
+    layoutBefore: previousLayout,
+    layoutAfter: { ...edgeLayout },
+    layoutChanged: previousLayout.vertical !== edgeLayout.vertical || previousLayout.horizontal !== edgeLayout.horizontal,
+    rebased,
+  };
+  traceDrag('position-request', meta);
+  window.pet.setWinPos(anchoredX, anchoredY, meta);
 }
 
 // 从快照重建队列（多任务都在、且标明项目）
@@ -3592,8 +3642,14 @@ function reportPetVisualBounds() {
 // 拖动 + 点击（短按=泡泡菜单 / 拖动=移动窗口）
 // ====================================================================
 let g = null; // 当前手势（同步建立，保证快速点击也能识别）
-function clearDragGesture(gesture, settle = true) {
+function clearDragGesture(gesture, settle = true, reason = 'clear') {
   if (!gesture || g !== gesture) return false;
+  traceDrag('gesture-end', {
+    dragId: gesture.traceId, reason, moved: gesture.moved, frame: gesture.frame,
+    settle: !!settle, pointerOrigin: { x: gesture.sx, y: gesture.sy },
+    windowOrigin: gesture.win && { x: gesture.win[0], y: gesture.win[1] },
+    edgeLayout: { ...edgeLayout }, mouseIgnoring,
+  });
   // Clear the global owner before releasePointerCapture(): Chromium may emit
   // lostpointercapture synchronously, and that event must not finish a newer
   // gesture or run the cleanup twice.
@@ -3604,50 +3660,99 @@ function clearDragGesture(gesture, settle = true) {
   return true;
 }
 
-function cancelActiveDrag(settle = true) {
+function cancelActiveDrag(settle = true, reason = 'cancel-active') {
   const gesture = g;
-  if (gesture) clearDragGesture(gesture, settle);
+  if (gesture) clearDragGesture(gesture, settle, reason);
 }
 
 function attachDrag(el) {
   el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0) {
+      traceDrag('pointerdown-ignored', { reason: 'non-primary-button', button: e.button, buttons: e.buttons, pointerId: e.pointerId });
+      return;
+    }
     // A missed pointerup/lost-capture must never leak ownership into the next
     // press. This is especially important for a moving transparent window.
-    cancelActiveDrag(false);
+    cancelActiveDrag(false, 'superseded-by-pointerdown');
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
-    const gesture = { el, pid: e.pointerId, sx: e.screenX, sy: e.screenY, moved: false, win: null };
+    // BrowserWindow screen coordinates are already available synchronously in
+    // the renderer. Starting with null made quick drags wait for an IPC round
+    // trip, then apply the accumulated delta all at once — the visible one-frame
+    // kick reported by users. The IPC read remains a pre-move calibration only.
+    const liveOrigin = Number.isFinite(window.screenX) && Number.isFinite(window.screenY)
+      ? [window.screenX, window.screenY]
+      : null;
+    const gesture = {
+      el, pid: e.pointerId, sx: e.screenX, sy: e.screenY,
+      moved: false, win: liveOrigin,
+      traceId: `${Date.now().toString(36)}-${++dragTraceCounter}`,
+      frame: 0,
+    };
     g = gesture;
+    traceDrag('pointerdown', {
+      dragId: gesture.traceId,
+      element: el.id || el.className || el.tagName,
+      pointer: { id: e.pointerId, button: e.button, buttons: e.buttons, x: e.screenX, y: e.screenY },
+      client: { x: e.clientX, y: e.clientY },
+      liveOrigin: liveOrigin && { x: liveOrigin[0], y: liveOrigin[1] },
+      window: { x: window.screenX, y: window.screenY, width: window.innerWidth, height: window.innerHeight },
+      petRect: dragRect(el.getBoundingClientRect()),
+      edgeLayout: { ...edgeLayout },
+      mouseIgnoring,
+    });
     window.pet.getWinPos().then(([wx, wy]) => {
       // IPC from an earlier click may resolve after a new pointerdown. Binding
       // that stale window origin to the new gesture produces a large jump.
-      if (g === gesture) gesture.win = [wx, wy];
-    }).catch(() => {});
+      // It must also not overwrite the live origin after this gesture has begun
+      // moving, or its delayed reply reintroduces the same kick one frame later.
+      const accepted = g === gesture && (!gesture.moved || !gesture.win)
+        && Number.isFinite(wx) && Number.isFinite(wy);
+      traceDrag('origin-resolved', {
+        dragId: gesture.traceId, resolved: { x: wx, y: wy }, accepted,
+        stillActive: g === gesture, moved: gesture.moved, alreadyHadOrigin: !!gesture.win,
+      });
+      if (accepted
+        && Number.isFinite(wx) && Number.isFinite(wy)) {
+        gesture.win = [wx, wy];
+      }
+    }).catch((error) => traceDrag('origin-error', { dragId: gesture.traceId, error: error && (error.message || String(error)) }));
   });
   el.addEventListener('pointermove', (e) => {
     const gesture = g;
     if (!gesture) return;
-    if (e.pointerId != null && e.pointerId !== gesture.pid) return;
+    if (e.pointerId != null && e.pointerId !== gesture.pid) {
+      traceDrag('pointermove-ignored', { dragId: gesture.traceId, reason: 'pointer-id-mismatch', expected: gesture.pid, actual: e.pointerId });
+      return;
+    }
     // Transparent BrowserWindows can lose pointerup while they move. A later
     // hover has buttons=0; treat it as stale-capture cleanup, never as a drag.
     if (Number.isFinite(e.buttons) && (e.buttons & 1) === 0) {
-      clearDragGesture(gesture);
+      clearDragGesture(gesture, true, 'buttons-released-during-move');
       return;
     }
     const dx = e.screenX - gesture.sx;
     const dy = e.screenY - gesture.sy;
-    if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) gesture.moved = true;
+    if (!gesture.moved && Math.abs(dx) + Math.abs(dy) > 4) {
+      gesture.moved = true;
+      traceDrag('drag-threshold-crossed', {
+        dragId: gesture.traceId, delta: { x: dx, y: dy },
+        pointer: { x: e.screenX, y: e.screenY, buttons: e.buttons },
+        windowOrigin: gesture.win && { x: gesture.win[0], y: gesture.win[1] },
+      });
+    }
     if (gesture.moved && gesture.win) {
       if (radialOpen) closeRadial();
       movePetDuringDrag(gesture, e, gesture.win[0] + dx, gesture.win[1] + dy);
+    } else if (gesture.moved) {
+      traceDrag('pointermove-blocked', { dragId: gesture.traceId, reason: 'no-window-origin', delta: { x: dx, y: dy } });
     }
   });
   el.addEventListener('pointerup', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
     const wasMove = gesture.moved;
-    if (!clearDragGesture(gesture, wasMove)) return;
+    if (!clearDragGesture(gesture, wasMove, 'pointerup')) return;
     if (wasMove) {
       // clearDragGesture schedules the final top/bottom or left/right anchor
       // exchange after the last setBounds has landed.
@@ -3661,12 +3766,12 @@ function attachDrag(el) {
   el.addEventListener('pointercancel', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
-    clearDragGesture(gesture);
+    clearDragGesture(gesture, true, 'pointercancel');
   });
   el.addEventListener('lostpointercapture', (e) => {
     const gesture = g;
     if (!gesture || (e.pointerId != null && e.pointerId !== gesture.pid)) return;
-    clearDragGesture(gesture);
+    clearDragGesture(gesture, true, 'lostpointercapture');
   });
   // 右键 = 泡泡菜单
   el.addEventListener('contextmenu', (e) => {
@@ -3675,7 +3780,7 @@ function attachDrag(el) {
   });
 }
 stateEls.forEach(attachDrag);
-window.addEventListener('blur', cancelActiveDrag);
+window.addEventListener('blur', () => cancelActiveDrag(true, 'window-blur'));
 
 // 卡片按钮：Submit/Next、Back、Go to Terminal、Other 输入
 askSubmit.addEventListener('click', () => { const c = askQueue[askIdx]; if (c && c.kind === 'ask') elicNextOrSubmit(c); });
@@ -4076,25 +4181,38 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
 // 因此一旦光标回到内容上即可恢复可点。拖动中(g)始终保持可点。
 const HIT_SEL = '#pixel,#mascot,#cat,#radial,#notepad,#todopop,#ask,#sesslist';
 let mouseIgnoring = false;
-function setMouseIgnore(on) {
+function setMouseIgnore(on, reason = 'unknown', details = {}) {
   if (on === mouseIgnoring) return;
   mouseIgnoring = on;
+  traceDrag('mouse-ignore-change', { ignore: on, reason, hasGesture: !!g, ...details });
   try { window.pet.setIgnoreMouse(on); } catch {}
 }
 window.addEventListener('mousemove', (e) => {
-  // A stale gesture may currently own the whole transparent BrowserWindow, so
-  // the hover can land outside the original pet element and never reach its
-  // pointermove handler. Clean it up at window scope as well.
-  if (g && Number.isFinite(e.buttons) && (e.buttons & 1) === 0) cancelActiveDrag();
-  if (g) { setMouseIgnore(false); return; } // 拖动中保持可点
+  // macOS can forward a window-level mousemove with buttons=0 in the same
+  // frame as pointerdown on a transparent BrowserWindow. It is not proof of a
+  // release: cancelling here makes the pet impossible to drag. Pointerup,
+  // pointercancel, lostpointercapture and the element's pointermove own cleanup.
+  if (g) {
+    if (Number.isFinite(e.buttons) && (e.buttons & 1) === 0 && !g.loggedZeroButtonMousemove) {
+      g.loggedZeroButtonMousemove = true;
+      traceDrag('window-mousemove-buttons-zero', {
+        dragId: g.traceId, client: { x: e.clientX, y: e.clientY }, frame: g.frame,
+      });
+    }
+    setMouseIgnore(false, 'active-gesture');
+    return;
+  }
   const el = document.elementFromPoint(e.clientX, e.clientY);
   // 命中测试权威同步悬停态：穿透切换时 pointerleave 可能漏发，会把 askHover 卡在 true，
   // 进而让 isInteracting() 永远为真、refreshAsk 永不对账（旧卡片冻结、新卡片进不来）。
   askHover = !!(el && el.closest('#ask'));
-  setMouseIgnore(!(el && el.closest(HIT_SEL)));
+  const hit = el && el.closest(HIT_SEL);
+  setMouseIgnore(!hit, hit ? 'hit-interactive-surface' : 'transparent-area', {
+    client: { x: e.clientX, y: e.clientY }, hit: hit && (hit.id || hit.className || hit.tagName),
+  });
 }, true);
 // 启动即默认穿透（透明区不挡），光标移到内容上时由上面的命中测试恢复
-setMouseIgnore(true);
+setMouseIgnore(true, 'renderer-startup');
 
 // ---------- 交互状态上报(领地模式避战用) ----------
 // 主进程无法区分「气泡 fitPopup 撑大的窗口」和「用户真的开着面板」,由渲染端

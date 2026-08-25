@@ -199,6 +199,92 @@ async function main() {
     cat.dispatch('pointercancel', { pointerId: 52 });
   }
 
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    let resolveOrigin;
+    w.window.pet.getWinPos = () => new Promise((resolve) => { resolveOrigin = resolve; });
+
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 53, screenX: 100, screenY: 100,
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 53, screenX: 125, screenY: 120,
+    });
+    check('首个 pointermove 不等待异步窗口坐标，直接连续移动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][0] === 325 && c[1][1] === 220));
+    });
+
+    resolveOrigin([900, 700]);
+    await sleep(0);
+    w.calls.length = 0;
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 53, screenX: 130, screenY: 125,
+    });
+    check('迟到的 IPC 坐标不会让已开始的拖动突然跳位', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][0] === 330 && c[1][1] === 225));
+    });
+    cat.dispatch('pointerup', { pointerId: 53 });
+  }
+
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 54, screenX: 100, screenY: 100,
+    });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 54, screenX: 125, screenY: 120,
+    });
+    cat.dispatch('pointerup', { pointerId: 54, screenX: 125, screenY: 120 });
+    const traceEntries = w.calls
+      .filter((c) => c[0] === 'petDragTrace')
+      .map((c) => c[1][0]);
+    const pointerdown = traceEntries.find((entry) => entry.event === 'pointerdown');
+    const request = traceEntries.find((entry) => entry.event === 'position-request');
+    const ended = traceEntries.find((entry) => entry.event === 'gesture-end');
+    check('一次拖动可用同一 dragId 串起触发、位置请求和结束原因', () => {
+      assert(pointerdown && pointerdown.dragId);
+      assert.strictEqual(request && request.dragId, pointerdown.dragId);
+      assert.strictEqual(ended && ended.dragId, pointerdown.dragId);
+      assert.strictEqual(ended.reason, 'pointerup');
+      assert(w.calls.some((c) => c[0] === 'setWinPos'
+        && c[1][2] && c[1][2].dragId === pointerdown.dragId));
+    });
+  }
+
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      { window: { screenX: 300, screenY: 200 } },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    const cat = w.elements('cat');
+    cat.dispatch('pointerdown', {
+      button: 0, buttons: 1, pointerId: 55, screenX: 100, screenY: 100,
+    });
+    w.dispatchWindow('mousemove', { buttons: 0, clientX: 140, clientY: 140 });
+    cat.dispatch('pointermove', {
+      buttons: 1, pointerId: 55, screenX: 125, screenY: 120,
+    });
+    check('透明窗同帧转发的 window mousemove(buttons=0) 不会抢先取消拖动', () => {
+      assert(w.calls.some((c) => c[0] === 'setWinPos'));
+      assert(w.calls.some((c) => c[0] === 'petDragTrace'
+        && c[1][0].event === 'window-mousemove-buttons-zero'));
+    });
+    cat.dispatch('pointerup', { pointerId: 55 });
+  }
+
   console.log('[R0.2] 权限卡到确认气泡的尺寸交接');
   {
     const w = world();
@@ -230,6 +316,81 @@ async function main() {
         'unexpected intermediate collapse: ' + JSON.stringify(transitionSizes));
       assert(w.calls.slice(callsBeforeAllow).some((c) => c[0] === 'decidePermission'));
       assert(!w.elements('bubble').classList.contains('hidden'));
+    });
+  }
+
+  console.log('[R0.3] 弹层关闭必须修复真实窗口尺寸');
+  {
+    const catRect = { left: 100, top: 160, right: 220, bottom: 280, width: 120, height: 120 };
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      {
+        window: {
+          screenX: 996,
+          screenY: 230,
+          innerWidth: 320,
+          innerHeight: 340,
+          screen: { availLeft: 0, availTop: 0, availWidth: 1440, availHeight: 900 },
+        },
+        elementRects: { cat: catRect },
+      },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    await sleep(20);
+
+    // Send one ordinary reset while the real frame is resting. A later reset
+    // must still reach the main process even though its payload is identical.
+    vm.runInContext('setRequestedPetSize(0, 0)', w.sandbox);
+    w.calls.length = 0;
+
+    // A popup has widened the real BrowserWindow, but the visible cat is still
+    // on the same screen pixel. Signature-only dedupe used to swallow this
+    // second reset and leave 520/760px frames behind.
+    w.window.screenX = 896;
+    w.window.innerWidth = 520;
+    catRect.left = 200;
+    catRect.right = 320;
+    const repaired = vm.runInContext('setRequestedPetSize(0, 0)', w.sandbox);
+    check('前一次相同 reset 不能吞掉仍为 520px 的真实窗口修复', () => {
+      assert.strictEqual(repaired, true);
+      assert(w.calls.some((c) => c[0] === 'setPetSize'
+        && c[1][0] === 0 && c[1][1] === 0));
+    });
+  }
+
+  console.log('[R0.4] 拖动收尾不重复提交已稳定窗口');
+  {
+    const w = loadRenderer(
+      ['shared/i18n.js', 'shared/states.js', 'shared/pet-geometry.js', 'renderer/pet.js'],
+      {
+        window: {
+          screenX: 600,
+          screenY: 300,
+          innerWidth: 320,
+          innerHeight: 340,
+          screen: { availLeft: 0, availTop: 0, availWidth: 1440, availHeight: 900 },
+        },
+        elementRects: {
+          cat: { left: 100, top: 160, right: 220, bottom: 280, width: 120, height: 120 },
+        },
+      },
+    );
+    w.handlers.config({ skin: 'cat', muted: true });
+    await sleep(20);
+    w.calls.length = 0;
+
+    const skipped = vm.runInContext('setRequestedPetSize(0, 0, { settle: true })', w.sandbox);
+    check('基础窗已经稳定时，拖动结束不再触发一次 setBounds', () => {
+      assert.strictEqual(skipped, false);
+      assert(!w.calls.some((c) => c[0] === 'setPetSize'));
+    });
+
+    w.window.innerWidth = 520;
+    const repaired = vm.runInContext('setRequestedPetSize(0, 0, { settle: true })', w.sandbox);
+    check('拖动结束遇到残留大窗口时仍会修复', () => {
+      assert.strictEqual(repaired, true);
+      assert(w.calls.some((c) => c[0] === 'setPetSize'
+        && c[1][0] === 0 && c[1][1] === 0));
     });
   }
 
@@ -439,7 +600,8 @@ async function main() {
     });
     w.handlers.event({ kind: 'loot', phase: 'kick', direction: -1 });
     check('whale 出脚重播不会串回月薪喵素材', () => {
-      assert(/\/whale\/whale-idle\.gif\?loot-kick=\d+$/.test(catSrc(w)));
+      // roam 从占位(借 idle 图)改为专属奔跑素材后，出脚重播应命中 whale-roam。
+      assert(/\/whale\/whale-roam\.gif\?loot-kick=\d+$/.test(catSrc(w)));
       assert(!catSrc(w).includes('/cat/'));
     });
   }
