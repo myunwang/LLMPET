@@ -349,11 +349,9 @@ body.skin-cat #cat { display: flex; }
    so matching their widths also matches their centres. */
 body.skin-pixel .sessions { width: 200px; }
 body.skin-mascot .sessions { width: 252px; }
-body.skin-cat .sessions { width: 120px; }
-/* The whale skin ships at 360px and is presented at exactly half size so a
-   Retina display gets a real 2x source instead of stretching the old 120px
-   sprite. Keep the legacy cat pack at its native size: enlarging that source
-   would only make it softer. */
+body.skin-cat .sessions { width: 180px; }
+/* Cat and whale both ship at 360px and are presented at exactly half size so
+   a Retina display gets a real 2x source. */
 body.skin-whale .sessions { width: 180px; }
 .sess-dot {
   width: 9px; height: 9px;
@@ -685,7 +683,7 @@ body.skin-whale .sessions { width: 180px; }
    ==================================================================== */
 #cat {
   position: relative;
-  width: 120px; height: 120px;   /* 月薪喵仍按原生 120×120 显示，避免低清放大 */
+  width: 180px; height: 180px;   /* 月薪喵与鲸鱼统一使用 360px Retina 源 */
   cursor: grab; touch-action: none;
   flex-direction: column; align-items: center;
   filter: none;
@@ -695,8 +693,8 @@ body.skin-whale .sessions { width: 180px; }
   image-rendering: auto;
   -webkit-user-drag: none;
 }
-/* DeepSeek 鲸鱼女仆：360×360 源图按 180×180 逻辑像素显示。相比旧版
-   120×120，画面放大 50%，同时在 Retina 屏上维持逐设备像素供图。 */
+/* 360×360 源图按 180×180 逻辑像素显示。相比旧版 120×120，画面放大
+   50%，同时在 Retina 屏上维持逐设备像素供图。 */
 body.skin-whale #cat { width: 180px; height: 180px; }
 
 /* 掠夺素材的原生朝向不一致：attention 朝右，飞踢/看战果朝左。
