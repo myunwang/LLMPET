@@ -141,10 +141,13 @@ if [[ "${LLMPET_SKIP_TESTS:-0}" != "1" ]]; then
 fi
 
 note '2/3 Building and replacing the local LLMPET.app'
-npm --prefix "$INTEGRATION_WORKTREE" run package:mac:dev
+LLMPET_MAC_CANONICAL_BUILD=1 npm --prefix "$INTEGRATION_WORKTREE" run package:mac:dev
 BUILT_APP="$INTEGRATION_WORKTREE/dist/LLMPET.app"
 [[ -d "$BUILT_APP" ]] || die "Packaging completed without producing $BUILT_APP"
 /usr/bin/codesign --verify --deep --strict "$BUILT_APP"
+BUILT_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$BUILT_APP/Contents/Info.plist")"
+[[ "$BUILT_ID" == 'com.octopus.pet' ]] \
+  || die "Refusing to install a non-canonical build: $BUILT_ID"
 
 INSTALL_PARENT="$(dirname "$INSTALL_APP")"
 INSTALL_STAGE="$INSTALL_PARENT/.LLMPET.app.new.$STAMP"

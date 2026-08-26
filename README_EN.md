@@ -76,7 +76,7 @@ Useful commands:
 
 ```bash
 npm test                 # full headless regression suite
-npm run package:mac:dev  # local ad-hoc-signed macOS package
+npm run package:mac:dev  # isolated LLMPET Dev.app (ad-hoc signed)
 npm run package:win      # Windows installer + portable ZIP
 npm run uninstall:hooks  # remove LLMPET's Claude hooks safely
 ```

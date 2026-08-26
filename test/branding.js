@@ -33,7 +33,9 @@ assert(/--publish never(?:\s|$)/.test(pkg.scripts['package:win']), 'Windows pack
 assert(/LLMPET \$\{GITHUB_REF_NAME#v\}/.test(read('.github/workflows/release.yml')), 'release title must follow the pushed version tag');
 assert.strictEqual(lock.name, 'llmpet');
 assert.strictEqual(lock.packages[''].name, 'llmpet');
-assert(/app\.setName\('LLMPET'\)/.test(main), 'Electron app name must use the public brand');
+assert(/APP_NAME = IS_ISOLATED_DEV_APP \? 'LLMPET Dev' : 'LLMPET'/.test(main), 'Electron app name must isolate ordinary development builds');
+assert(/app\.setName\(APP_NAME\)/.test(main), 'Electron app must apply the selected public/development identity');
+assert(/app\.setPath\('userData'.*APP_NAME/.test(main), 'development app must not share canonical user data');
 // The tooltip moved into the i18n dictionary — assert the string itself in every
 // locale rather than one hard-coded literal in main.js.
 assert(/tray\.setToolTip\(t\('tray\.tooltip'\)\)/.test(main), 'tray tooltip must come from the i18n dictionary');
@@ -45,9 +47,12 @@ for (const lang of i18n.LANGS) {
 assert(/<title>LLMPET · 详情<\/title>/.test(read('renderer/panel.html')), 'detail window title must use LLMPET');
 assert(/LLMPET_NO_CODEX/.test(main) && /LLMPET_CODEX_DIR/.test(main), 'new Codex controls must use the LLMPET namespace');
 assert(!/OCTOPUS_(?:NO_CODEX|CODEX_DIR)/.test(main), 'new Codex controls must not reintroduce the retired namespace');
-assert(/APP="\$DIST\/LLMPET\.app"/.test(mac), 'macOS app bundle must be named LLMPET.app');
+assert(/APP="\$DIST\/LLMPET\.app"/.test(mac), 'canonical macOS app bundle must be named LLMPET.app');
+assert(/APP="\$DIST\/LLMPET Dev\.app"/.test(mac), 'local development app must use an isolated bundle name');
+assert(/BUNDLE_ID="com\.octopus\.pet\.dev"/.test(mac), 'local development app must use an isolated bundle id');
 assert(/LLMPET-\$VERSION-mac-\$ARCH\.zip/.test(mac), 'macOS archive must use the LLMPET brand');
-assert(/identifier "com\.octopus\.pet"/.test(mac), 'stable designated requirement must remain for upgrade permissions');
+assert(/BUNDLE_ID="com\.octopus\.pet"/.test(mac), 'canonical bundle id must remain stable for upgrade permissions');
+assert(/requirements .*BUNDLE_ID/s.test(mac), 'designated requirement must follow the selected isolated bundle id');
 assert(/产品名称和所有对外发布物统一使用 \*\*LLMPET\*\*/.test(readme), 'README must explain the compatibility namespace');
 
 for (const file of publicFiles) {

@@ -112,12 +112,13 @@ assert(/\.sessions\s*\{[^}]*justify-content\s*:\s*center\s*;/s.test(css),
   'session dots must be centred inside the pet-width anchor');
 assert(/body\.skin-pixel \.sessions\s*\{[^}]*width\s*:\s*200px\s*;[^}]*\}/s.test(css)
   && /body\.skin-mascot \.sessions\s*\{[^}]*width\s*:\s*252px\s*;[^}]*\}/s.test(css)
-  && /body\.skin-cat \.sessions\s*\{[^}]*width\s*:\s*120px\s*;[^}]*\}/s.test(css)
+  && /body\.skin-cat \.sessions\s*\{[^}]*width\s*:\s*180px\s*;[^}]*\}/s.test(css)
   && /body\.skin-whale \.sessions\s*\{[^}]*width\s*:\s*180px\s*;[^}]*\}/s.test(css),
   'each skin must align the session-dot box to its visible pet width');
-assert(/body\.skin-whale #cat\s*\{[^}]*width\s*:\s*180px\s*;[^}]*height\s*:\s*180px\s*;[^}]*\}/s.test(css)
+assert(/#cat\s*\{[^}]*width\s*:\s*180px\s*;[^}]*height\s*:\s*180px\s*;[^}]*\}/s.test(css)
+  && /body\.skin-whale #cat\s*\{[^}]*width\s*:\s*180px\s*;[^}]*height\s*:\s*180px\s*;[^}]*\}/s.test(css)
   && /classList\.toggle\('skin-whale',\s*skin === 'whale'\)/s.test(js),
-  'whale skin must use its 180px Retina presentation without enlarging the legacy cat pack');
+  'cat and whale must both use their 180px Retina presentation');
 const whaleDir = path.join(__dirname, '..', 'assets', 'whale');
 const whaleGifs = fs.readdirSync(whaleDir).filter((name) => name.endsWith('.gif'));
 assert.strictEqual(whaleGifs.length, 23, 'the whale pack must keep all 23 production animations');

@@ -108,11 +108,11 @@ npm run package:mac:dev
 产物：
 
 ```text
-dist/LLMPET.app
-dist/LLMPET-<version>-mac-<arch>-unsigned.zip
+dist/LLMPET Dev.app
+dist/LLMPET-<version>-mac-<arch>-dev-unsigned.zip
 ```
 
-`package:mac:dev` 使用 ad-hoc 签名，只供本机开发验证，不作为公开分发包。
+`package:mac:dev` 使用 ad-hoc 签名，只供本机开发验证，不作为公开分发包。它会使用独立的 `LLMPET Dev` 名称和 `com.octopus.pet.dev` bundle id，避免开发分支构建物覆盖正式的 `/Applications/LLMPET.app`。正式 App 只能通过三件套的受检路径更新。
 
 不要把 `npm run package:mac` 当成本地普通打包命令。它是正式发布路径，会在缺少 Apple Developer ID 证书或公证凭据时主动失败，详见 [macOS 正式签名与公证](MACOS_RELEASE.md)。
 
