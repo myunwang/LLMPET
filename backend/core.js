@@ -172,10 +172,18 @@ function createCore(options = {}) {
     let resolvedState = VALID_STATES.has(incomingState) ? incomingState : 'idle';
     let realCompletion = false;
 
-    // Subagent juggling: hold the "juggling" state through the subagent's tool
-    // calls instead of letting the next working event overwrite it after one
-    // step. Released by SubagentStop/UserPromptSubmit/Stop (non-tool events).
-    if (prevState === 'juggling' && (event === 'PreToolUse' || event === 'PostToolUse')) {
+    // Subagent juggling: hold the "juggling" state through nested tool calls and
+    // reasoning rows. Codex/dsh keep writing these while child agents are alive;
+    // letting one row overwrite the state made the dedicated expression vanish.
+    // Older Claude Code may expose only PreToolUse(Task|Agent) + matching
+    // PostToolUse, without SubagentStop, so that matching successful result is
+    // also a release boundary when the provider explicitly reports `working`.
+    const fallbackSubagentDone = event === 'PostToolUse'
+      && incomingState === 'working'
+      && (f.toolName === 'Task' || f.toolName === 'Agent');
+    if (prevState === 'juggling'
+        && !fallbackSubagentDone
+        && (event === 'PreToolUse' || event === 'PostToolUse' || event === 'Reasoning')) {
       resolvedState = 'juggling';
     }
 

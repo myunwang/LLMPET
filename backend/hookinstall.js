@@ -39,7 +39,7 @@ const COMMAND_EVENTS = [
   'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'StopFailure',
   'SubagentStart', 'SubagentStop',
   'PreCompact', 'PostCompact',
-  'Notification', 'Elicitation',
+  'Notification', 'Elicitation', 'ElicitationResult',
 ];
 
 function readSettings() {
@@ -118,20 +118,44 @@ function syncEvent(hooks, event, desired, match) {
     const existing = hooks[event];
     hooks[event] = existing && typeof existing === 'object' ? [existing] : [];
   }
+  let kept = null;
+  let changed = false;
+  let duplicateCount = 0;
+  const groups = [];
   for (const group of hooks[event]) {
-    if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) continue;
-    for (const h of group.hooks) {
-      if (match(h)) {
-        let changed = false;
-        for (const k of Object.keys(desired)) {
-          if (h[k] !== desired[k]) { h[k] = desired[k]; changed = true; }
-        }
-        return changed ? 'updated' : 'skipped';
-      }
+    if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) {
+      groups.push(group);
+      continue;
     }
+    const nextHooks = [];
+    let matchedInGroup = 0;
+    for (const h of group.hooks) {
+      if (!match(h)) {
+        nextHooks.push(h);
+        continue;
+      }
+      matchedInGroup++;
+      if (kept) {
+        duplicateCount++;
+        continue;
+      }
+      kept = h;
+      for (const k of Object.keys(desired)) {
+        if (h[k] !== desired[k]) { h[k] = desired[k]; changed = true; }
+      }
+      nextHooks.push(h);
+    }
+    // Removing an ours-only duplicate group is safe; other apps' groups and
+    // malformed entries are preserved byte-for-byte in spirit.
+    if (nextHooks.length || matchedInGroup === 0) groups.push({ ...group, hooks: nextHooks });
   }
-  hooks[event].push({ matcher: '', hooks: [desired] });
-  return 'added';
+  if (!kept) {
+    groups.push({ matcher: '', hooks: [desired] });
+    hooks[event] = groups;
+    return 'added';
+  }
+  hooks[event] = groups;
+  return changed || duplicateCount ? 'updated' : 'skipped';
 }
 
 function registerHooks(port, token) {
@@ -195,13 +219,21 @@ function hooksCurrent(port, token) {
   try {
     const settings = readSettings();
     const hooks = settings.hooks || {};
-    const commandsOk = COMMAND_EVENTS.every((event) =>
-      Array.isArray(hooks[event]) &&
-      hooks[event].some((group) => Array.isArray(group && group.hooks) && group.hooks.some(isOurCommand)));
+    const commandsOk = COMMAND_EVENTS.every((event) => {
+      const ours = Array.isArray(hooks[event])
+        ? hooks[event].flatMap((group) => Array.isArray(group && group.hooks) ? group.hooks : []).filter(isOurCommand)
+        : [];
+      // Count duplicates, but deliberately accept another live LLMPET build's
+      // command path. Requiring this process's exact app path makes a dev build
+      // and the installed app rewrite settings.json back and forth forever.
+      return ours.length === 1;
+    });
     const desiredUrl = buildPermissionUrl(port || BASE_PORT, token);
-    const permissionOk = Array.isArray(hooks.PermissionRequest) &&
-      hooks.PermissionRequest.some((group) => Array.isArray(group && group.hooks) &&
-        group.hooks.some((hook) => isOurHttp(hook) && hook.url === desiredUrl));
+    const permissionHooks = Array.isArray(hooks.PermissionRequest)
+      ? hooks.PermissionRequest.flatMap((group) => Array.isArray(group && group.hooks) ? group.hooks : []).filter(isOurHttp)
+      : [];
+    const permissionOk = permissionHooks.length === 1
+      && permissionHooks[0].url === desiredUrl;
     return commandsOk && permissionOk;
   } catch {
     return false;
@@ -221,6 +253,7 @@ module.exports = {
   HOOK_SCRIPT,
   MARKER,
   COMMAND_EVENTS,
+  syncEvent,
 };
 
 // CLI: `node backend/hookinstall.js` installs; `--uninstall` removes.

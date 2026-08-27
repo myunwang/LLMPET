@@ -579,54 +579,69 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 
 // ── pet:event derivation ──────────────────────────────────────────────────────
 // Diff one activity into zero+ discrete events the frontend animates on.
-// 每个项目 30 分钟内只欢迎一次：宿主 app（ccd/openloomi）「点击进入会话」
-// 可能用一次性目录拉起全新 claude（新 id/新 cwd/无历史/source=startup），
-// 与真·新对话在 hook 层面无法区分——频控是最后一道保险。
-const GREET_DEBOUNCE_MS = 30 * 60 * 1000;
-const lastGreetAt = new Map(); // project -> ts
+// Session identity is the debounce boundary. Project-level throttling hid every
+// second real session in the same repository, which is precisely where users
+// commonly open parallel tasks. Hidden one-shot host directories remain the
+// narrow false-positive filter.
+const TASK_VISUAL_DEDUPE_MS = 3000;
+
+function isOneShotHostSessionCwd(cwd) {
+  // Known host launchers create disposable entry sessions under a hidden app
+  // data root such as ~/.openloomi/sessions/<id>. A blanket `/\/.` check also
+  // matched legitimate projects like ~/.dotfiles and Codex worktrees under
+  // ~/.codex/worktrees, suppressing their real SessionStart greeting.
+  return /(?:^|\/)\.[^/]+\/sessions\/[^/]+(?:\/|$)/.test(String(cwd || ''));
+}
 
 function activityToEvents(act) {
-  const { session, event, isNew, realCompletion, assistantChanged, cwdActive } = act;
+  const { session, event, isNew, realCompletion, assistantChanged } = act;
   if (!session || session.headless) return []; // background sessions: no bubbles
   const project = projectName(session);
   const out = [];
 
   switch (event) {
     case 'SessionStart': {
-      // 「进入新对话」的判定（用户定义的两种情形，欢迎都延迟到首条 prompt）：
-      //  a) 全新会话的创建——首条 prompt 时欢迎；
-      //  b) 看板上没有的会话被进入（resume 回来）——桌宠世界里它就是新出现的，
-      //     同样欢迎。所以 source 不参与资格判定，只看 isNew。
-      // 排除项：
-      //  - cwdActive：该项目已有忙碌/近期会话 → 是进入执行中的任务，不是新对话
-      //  - toolSpawned：~/.xxx/sessions/<uuid> 一次性目录 → 宿主 app 拉起的入口进程
-      // 入口/巡检类会话永远等不到 prompt，自然静默。
-      const toolSpawned = /\/\./.test(session.cwd || '');
-      session.greetPending = (isNew && !cwdActive && !toolSpawned) ? Date.now() : null;
+      // SessionStart itself is the observable activation event. Waiting for the
+      // first prompt meant a newly opened/resumed session with no immediate text
+      // never showed its greet expression at all.
+      const toolSpawned = isOneShotHostSessionCwd(session.cwd);
+      if (isNew && !toolSpawned && !session.greetedAt) {
+        session.greetedAt = Date.now();
+        out.push({ kind: 'greet', project, ts: Date.now() });
+      }
       break;
     }
+    case 'TaskStarted':
+      // Codex and dsh both have an explicit turn-start row. Some Codex Desktop
+      // runs no longer emit the legacy user_message row, so this is the reliable
+      // fallback that makes every new task visibly enter thinking.
+      session.taskVisualAt = Date.now();
+      out.push({ kind: 'user-turn', project, taskStarted: true, ts: Date.now() });
+      break;
     case 'UserPromptSubmit': {
-      // 新会话资格预审通过 + 第一条 prompt 在 5 分钟内 + 同项目 30 分钟频控
-      // → 此刻才欢迎（弹射上线 2s，随后聚合态自然接管为 thinking）。
-      const pendingAt = session.greetPending || 0;
-      const recentlyGreeted = (Date.now() - (lastGreetAt.get(project) || 0)) < GREET_DEBOUNCE_MS;
-      session.greetPending = null;
-      if (pendingAt && Date.now() - pendingAt < 5 * 60 * 1000 && !recentlyGreeted) {
-        lastGreetAt.set(project, Date.now());
-        out.push({ kind: 'greet', project, ts: Date.now() });
-        break; // 欢迎已含「收到任务」之意，不再叠 user-turn（避免短暂态互抢）
-      }
       const emo = session.pendingUserEmotion || null;
+      const taskVisualAt = Number(session.taskVisualAt) || 0;
+      session.taskVisualAt = 0;
+      // turn/start commonly lands 1-2s before the corresponding user row. The
+      // fallback above already showed thinking; suppress only the duplicate
+      // neutral animation, never an emotion-bearing prompt.
+      if (!emo && taskVisualAt && Date.now() - taskVisualAt < TASK_VISUAL_DEDUPE_MS) break;
       out.push({ kind: 'user-turn', project, emotion: emo, ts: Date.now() });
       break;
     }
     case 'PreToolUse': {
       const tool = session.lastEventTool || '';
-      out.push({ kind: 'operation', tool, icon: toolIcon(tool), detail: toolLabel(tool), file: '', project, ts: Date.now() });
+      out.push({
+        kind: 'operation', tool, icon: toolIcon(tool), detail: toolLabel(tool),
+        visualState: mapState(session.state), file: '', project, ts: Date.now(),
+      });
       break;
     }
     case 'SubagentStart':
-      out.push({ kind: 'operation', tool: 'Task', icon: toolIcon('Task'), detail: toolLabel('Task'), file: '', project, ts: Date.now() });
+      out.push({
+        kind: 'operation', tool: 'Task', icon: toolIcon('Task'), detail: toolLabel('Task'),
+        visualState: 'juggling', file: '', project, ts: Date.now(),
+      });
       break;
     case 'PostToolUseFailure':
     case 'StopFailure':
@@ -671,7 +686,7 @@ function countRecentOps(session) {
   let n = 0;
   for (let i = ev.length - 1; i >= 0; i--) {
     const e = ev[i];
-    if (e.event === 'UserPromptSubmit') break;
+    if (e.event === 'UserPromptSubmit' || e.event === 'TaskStarted') break;
     if (e.event === 'PreToolUse' || e.event === 'PostToolUse' || e.event === 'SubagentStart') n++;
   }
   return n;

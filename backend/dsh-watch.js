@@ -21,8 +21,9 @@
 //   turn/start                → TaskStarted(thinking) 清完成徽标、开启本轮
 //   user/message(source.user) → UserPromptSubmit(thinking) + 情绪嗅探 + 首条兜底标题
 //   step/start                → 本轮首个工具前 thinking，之后保持 working
-//   tool/call, tool/code-dispatch-start → PreToolUse(working)
-//   tool/result               → PostToolUse(working)；带 error → PostToolUseFailure(error)
+//   tool/call, tool/code-dispatch-start → PreToolUse(working)；子 agent → SubagentStart(juggling)
+//   tool/result               → PostToolUse(working)；子 agent → SubagentStop(working)
+//                               带 error → PostToolUseFailure(error)
 //   assistant/message         → 记正文（回合结束当气泡）+ usage → 上下文用量
 //   turn/end completed        → Stop(attention) → 庆祝 + 气泡
 //   turn/end error            → ApiError(error)
@@ -72,8 +73,9 @@ const TOOL_MAP = {
   fs_search: 'Grep', grep: 'Grep', search: 'Grep', glob: 'Glob', find: 'Glob',
   web_search: 'WebSearch', web_fetch: 'WebFetch', web: 'WebSearch',
   todo: 'TodoWrite', todo_write: 'TodoWrite', update_plan: 'TodoWrite',
-  task: 'Task', subagent: 'Task', subagent_report: 'Task', workflow: 'Task',
-  run_code: 'Js', js: 'Js', jobs: 'Wait',
+  task: 'Task', agent: 'Task', subagent: 'Task', spawn_agent: 'Task', delegate: 'Task',
+  subagent_report: 'Task', workflow: 'Task', followup_task: 'Task', send_message: 'Task',
+  run_code: 'Js', js: 'Js', jobs: 'Wait', wait_agent: 'Wait', wait_agents: 'Wait',
 };
 function mapTool(name) {
   const raw = String(name || '').trim();
@@ -504,6 +506,7 @@ function createDshWatch(deps) {
     t.turnActive = true;
     t.didWorkThisTurn = false;
     t.lastTool = null;
+    t.subagentActive = false;
   }
 
   function markWork(t) {
@@ -514,6 +517,7 @@ function createDshWatch(deps) {
   // 本轮已经开过工具 → 后续推理仍属于「在执行」；首个工具之前才是纯思考。
   // （与 codex-watch 同一套判断，避免同一份状态语义在两个后端里漂移。）
   function activeTurnState(t) {
+    if (t.subagentActive) return 'juggling';
     return t.didWorkThisTurn ? 'working' : 'thinking';
   }
 
@@ -554,7 +558,12 @@ function createDshWatch(deps) {
       case 'tool/code-dispatch-start':
         markWork(t);
         t.lastTool = mapTool(data.name);
-        update(t, 'working', 'PreToolUse', { toolName: t.lastTool });
+        if (t.lastTool === 'Task') {
+          t.subagentActive = true;
+          update(t, 'juggling', 'SubagentStart', { toolName: 'Task' });
+        } else {
+          update(t, 'working', 'PreToolUse', { toolName: t.lastTool });
+        }
         break;
 
       case 'tool/result':
@@ -563,7 +572,9 @@ function createDshWatch(deps) {
         const failed = !!data.error || (data.message && data.message.isError === true)
           || data.isError === true;
         const toolName = data.name ? mapTool(data.name) : (t.lastTool || null);
+        if (toolName === 'Task') t.subagentActive = false;
         if (failed) update(t, 'error', 'PostToolUseFailure', { toolName });
+        else if (toolName === 'Task') update(t, 'working', 'SubagentStop', { toolName });
         else update(t, 'working', 'PostToolUse', { toolName });
         break;
       }
@@ -580,6 +591,7 @@ function createDshWatch(deps) {
         const kind = data.reason && typeof data.reason === 'object' ? data.reason.kind : null;
         t.turnActive = false;
         t.didWorkThisTurn = false;
+        t.subagentActive = false;
         if (kind === 'error') {
           update(t, 'error', 'ApiError', { errorType: 'api_error' });
           break;
@@ -663,7 +675,7 @@ function createDshWatch(deps) {
     t.sid = String(header.id);
     if (typeof header.cwd === 'string' && header.cwd) t.cwd = header.cwd;
     if (isSubagentHeader(header)) { t.ignored = true; return; }
-    // 运行期间新出现的会话：SessionStart 进欢迎判定（真正的欢迎等首条 prompt）
+    // 运行期间新出现的会话：SessionStart 立即进欢迎表情判定。
     if (live) update(t, 'idle', 'SessionStart', { sessionSource: 'startup' });
   }
 
@@ -782,6 +794,8 @@ function createDshWatch(deps) {
     let foldedState = 'idle';
     let turnActive = false;
     let didWork = false;
+    let lastTool = null;
+    let subagentActive = false;
     for (const line of text.split('\n')) {
       const obj = parseLine(line);
       if (!obj) continue;
@@ -799,16 +813,31 @@ function createDshWatch(deps) {
         continue;
       }
       switch (obj.type) {
-        case 'turn/start': turnActive = true; didWork = false; foldedState = 'thinking'; break;
-        case 'step/start': if (turnActive) foldedState = didWork ? 'working' : 'thinking'; break;
+        case 'turn/start': turnActive = true; didWork = false; subagentActive = false; foldedState = 'thinking'; break;
+        case 'step/start': if (turnActive) foldedState = subagentActive ? 'juggling' : (didWork ? 'working' : 'thinking'); break;
         case 'tool/call':
-        case 'tool/code-dispatch-start':
-          turnActive = true; didWork = true; foldedState = 'working'; break;
-        case 'tool/result':
-        case 'tool/code-dispatch':
-          turnActive = true; didWork = true;
-          foldedState = obj.data && (obj.data.error || obj.data.isError || (obj.data.message && obj.data.message.isError)) ? 'error' : 'working';
+        case 'tool/code-dispatch-start': {
+          turnActive = true;
+          didWork = true;
+          lastTool = mapTool(obj.data && obj.data.name);
+          if (lastTool === 'Task') subagentActive = true;
+          foldedState = lastTool === 'Task' ? 'juggling' : 'working';
           break;
+        }
+        case 'tool/result':
+        case 'tool/code-dispatch': {
+          turnActive = true;
+          didWork = true;
+          const toolName = obj.data && obj.data.name ? mapTool(obj.data.name) : lastTool;
+          foldedState = obj.data && (obj.data.error || obj.data.isError || (obj.data.message && obj.data.message.isError))
+            ? 'error'
+            : 'working';
+          if (toolName === 'Task') {
+            subagentActive = false;
+            if (foldedState !== 'error') lastTool = null;
+          }
+          break;
+        }
         case 'session/title':
           if (obj.data && typeof obj.data.title === 'string' && obj.data.title.trim()) {
             title = obj.data.title.trim();
@@ -832,10 +861,12 @@ function createDshWatch(deps) {
         case 'approval/asked': pending++; foldedState = 'notification'; break;
         case 'approval/decided':
           pending = Math.max(0, pending - 1);
-          if (!pending) foldedState = turnActive ? (didWork ? 'working' : 'thinking') : 'idle';
+          if (!pending) foldedState = turnActive
+            ? (subagentActive ? 'juggling' : (didWork ? 'working' : 'thinking'))
+            : 'idle';
           break;
         case 'turn/end': {
-          turnActive = false; didWork = false;
+          turnActive = false; didWork = false; subagentActive = false;
           const reason = obj.data && obj.data.reason;
           const kind = reason && typeof reason === 'object' ? reason.kind : null;
           foldedState = kind === 'error' ? 'error' : 'idle';
@@ -907,6 +938,7 @@ function createDshWatch(deps) {
       titleSet: false,
       turnActive: false,
       didWorkThisTurn: false,
+      subagentActive: false,
       pendingApprovals: 0,
     };
   }
