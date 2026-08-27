@@ -10,9 +10,10 @@
 //
 // 事件映射（rollout → core 状态机，词汇表完全复用 Claude 路径）：
 //   session_meta            → SessionStart(idle)   仅运行期间新建的文件
-//   user_message            → UserPromptSubmit(thinking) + 情绪嗅探
+//   user_message / item_completed(UserMessage) → UserPromptSubmit(thinking) + 情绪嗅探
 //   task_started            → TaskStarted(thinking) 清完成徽标/开启本轮
 //   function_call / custom_tool_call / web_search_call → PreToolUse(working=工具在跑)
+//   spawn_agent / item_completed(SubAgentActivity) → SubagentStart|Stop(juggling)
 //   *_output / patch_apply_end / mcp_tool_call_end     → PostToolUse(working=任务仍在执行)
 //   reasoning / agent_reasoning → 首个工具前 thinking；首个工具后保持 working
 //   task_complete            → Stop(attention) + assistant_last_output → 庆祝+气泡
@@ -53,11 +54,28 @@ const TOOL_MAP = {
   exec_command: 'Bash', exec: 'Bash', write_stdin: 'Bash',
   apply_patch: 'Edit',
   js: 'Js', wait: 'Wait',
+  wait_agent: 'Wait', wait_threads: 'Wait',
+  spawn_agent: 'Task', followup_task: 'Task', send_message: 'Task',
+  interrupt_agent: 'Task', list_agents: 'Task',
   update_plan: 'TodoWrite',
   view_image: 'Read',
   web_search: 'WebSearch',
 };
 const mapTool = (name) => TOOL_MAP[name] || String(name || 'Tool');
+const SUBAGENT_START_TOOLS = new Set(['spawn_agent']);
+function isSubagentStartTool(name) {
+  const raw = String(name || '').trim();
+  const leaf = raw.split(/[.:/]/).pop();
+  return SUBAGENT_START_TOOLS.has(leaf);
+}
+
+function itemText(item) {
+  if (!item || !Array.isArray(item.content)) return '';
+  return item.content
+    .map((block) => (block && typeof block.text === 'string' ? block.text : ''))
+    .filter(Boolean)
+    .join('\n');
+}
 
 function fileSessionId(fp, metaId) {
   if (metaId) return String(metaId);
@@ -293,6 +311,9 @@ function createCodexWatch(deps) {
     t.turnActive = true;
     t.didWorkThisTurn = false;
     t.lastTool = null;
+    t.subagentActive = false;
+    t.activeSubagents.clear();
+    t.pendingSubagentCallIds.clear();
   }
 
   function markWork(t) {
@@ -301,7 +322,62 @@ function createCodexWatch(deps) {
   }
 
   function activeTurnState(t) {
+    if (t.subagentActive || t.activeSubagents.size > 0) return 'juggling';
     return t.didWorkThisTurn ? 'working' : 'thinking';
+  }
+
+  function handleUserMessage(t, text, observedAt) {
+    const msg = String(text || '');
+    const at = Number(observedAt) || Date.now();
+    if (msg && t.lastUserMessage === msg && at - t.lastUserMessageAt < 10000) return;
+    t.lastUserMessage = msg;
+    t.lastUserMessageAt = at;
+    beginTurn(t);
+    const extra = {};
+    if (!t.titleSet) {
+      const title = promptTitle(msg);
+      if (title) { extra.sessionTitle = title; t.titleSet = true; }
+    }
+    const emo = detectEmotion(msg, 'user');
+    if (emo) extra.userEmotion = emo;
+    update(t, 'thinking', 'UserPromptSubmit', extra);
+  }
+
+  function handleSubagentActivity(t, item) {
+    const kind = String(item && item.kind || '');
+    const agentId = String(item && (item.agent_thread_id || item.agent_path) || 'unknown');
+    if (kind === 'started') {
+      const wasActive = t.activeSubagents.has(agentId);
+      const callId = String(item && item.id || '');
+      const alreadyAnnounced = callId ? t.pendingSubagentCallIds.delete(callId) : false;
+      t.activeSubagents.add(agentId);
+      t.subagentActive = true;
+      markWork(t);
+      t.lastTool = 'Task';
+      // spawn_agent's response_item arrives first and already owns the visual
+      // entrance. The following SubAgentActivity(started) confirms identity and
+      // lifetime but must not play the same juggling entrance a second time.
+      if (!alreadyAnnounced && !wasActive) {
+        update(t, 'juggling', 'SubagentStart', { toolName: 'Task' });
+      }
+      return;
+    }
+    if (kind === 'interacted') {
+      // `interacted` is the completion item for an instantaneous send_message
+      // call (started_at_ms === completed_at_ms), not a subagent lifetime edge.
+      // The preceding function_call already emits its Task operation. Treating
+      // this as started left the parent falsely stuck in juggling until Stop.
+      return;
+    }
+    if (kind === 'completed') {
+      t.activeSubagents.delete(agentId);
+      if (t.activeSubagents.size > 0) {
+        update(t, 'juggling', 'Reasoning', { toolName: 'Task' });
+      } else {
+        t.subagentActive = false;
+        update(t, t.didWorkThisTurn ? 'working' : 'thinking', 'SubagentStop', { toolName: 'Task' });
+      }
+    }
   }
 
   // ── 逐行事件处理（仅 live 流量；backfill 不走这里） ─────────────────────────
@@ -316,7 +392,7 @@ function createCodexWatch(deps) {
       // 新版 Codex 会在同一个长寿 rollout 的后续回合再次写 session_meta。
       // 它只是元数据刷新，不能把已经 task_started 的回合重置成 idle。
       if (!alreadyKnown) {
-        // 运行期间新出现的会话：SessionStart 进欢迎判定（真正的欢迎等首条 prompt）
+        // 运行期间新出现的会话：SessionStart 立即进欢迎表情判定。
         update(t, 'idle', 'SessionStart', { sessionSource: 'startup' });
       }
       return;
@@ -353,14 +429,21 @@ function createCodexWatch(deps) {
         }
         markWork(t);
         t.lastTool = mapTool(p.name);
-        update(t, 'working', 'PreToolUse', { toolName: t.lastTool });
+        if (isSubagentStartTool(p.name)) {
+          t.subagentActive = true;
+          const callId = String(p.call_id || p.id || '');
+          if (callId) t.pendingSubagentCallIds.add(callId);
+          update(t, 'juggling', 'SubagentStart', { toolName: 'Task' });
+        } else {
+          update(t, activeTurnState(t), 'PreToolUse', { toolName: t.lastTool });
+        }
       } else if (pt === 'web_search_call') {
         markWork(t);
         t.lastTool = 'WebSearch';
         update(t, 'working', 'PreToolUse', { toolName: 'WebSearch' });
       } else if (pt === 'function_call_output' || pt === 'custom_tool_call_output') {
         markWork(t); // watcher 若在工具执行中恢复，只有 output 也足以确认本轮已开工
-        update(t, 'working', 'PostToolUse', { toolName: t.lastTool || null });
+        update(t, activeTurnState(t), 'PostToolUse', { toolName: t.lastTool || null });
       } else if (pt === 'reasoning') {
         update(t, activeTurnState(t), 'Reasoning');
       }
@@ -370,18 +453,25 @@ function createCodexWatch(deps) {
     if (type !== 'event_msg') return;
     const et = p.type;
 
+    // Codex Desktop's current rollout schema mirrors user text and collaboration
+    // lifecycle as typed item_completed rows. Older builds use the legacy rows
+    // below; both must normalize to the same core events.
+    if (et === 'item_completed' && p.item && typeof p.item === 'object') {
+      const item = p.item;
+      if (item.type === 'UserMessage') {
+        handleUserMessage(t, itemText(item), Date.parse(obj.timestamp));
+      } else if (item.type === 'AgentMessage' && item.phase === 'final_answer') {
+        const text = itemText(item);
+        if (text) t.lastAgentMessage = text;
+      } else if (item.type === 'SubAgentActivity') {
+        handleSubagentActivity(t, item);
+      }
+      return;
+    }
+
     switch (et) {
       case 'user_message': {
-        beginTurn(t);
-        const msg = typeof p.message === 'string' ? p.message : '';
-        const extra = {};
-        if (!t.titleSet) {
-          const title = promptTitle(msg);
-          if (title) { extra.sessionTitle = title; t.titleSet = true; }
-        }
-        const emo = detectEmotion(msg, 'user');
-        if (emo) extra.userEmotion = emo;
-        update(t, 'thinking', 'UserPromptSubmit', extra);
+        handleUserMessage(t, typeof p.message === 'string' ? p.message : '', Date.parse(obj.timestamp));
         break;
       }
       case 'task_started':
@@ -408,12 +498,18 @@ function createCodexWatch(deps) {
         update(t, 'attention', 'Stop', extra);
         t.turnActive = false;
         t.didWorkThisTurn = false;
+        t.subagentActive = false;
+        t.activeSubagents.clear();
+        t.pendingSubagentCallIds.clear();
         break;
       }
       case 'turn_aborted':
         update(t, 'idle', 'TurnAborted');
         t.turnActive = false;
         t.didWorkThisTurn = false;
+        t.subagentActive = false;
+        t.activeSubagents.clear();
+        t.pendingSubagentCallIds.clear();
         break;
       case 'context_compacted':
         update(t, 'sweeping', 'PreCompact');
@@ -506,6 +602,15 @@ function createCodexWatch(deps) {
     let title = t.sessionTitle || null;
     let contextUsage = null;
     const pendingChoices = new Map();
+    // A host can restart in the middle of a long-lived Codex turn. Backfill
+    // must stay silent (no welcome/completion events), but it cannot flatten an
+    // unfinished turn to idle or the physical device will hide real work until
+    // another recognizable rollout line happens to arrive.
+    let turnActive = false;
+    let didWorkThisTurn = false;
+    const activeSubagents = new Set();
+    let subagentActive = false;
+    let inferredState = 'idle';
     const start = Math.max(0, size - TAIL_PROBE_BYTES);
     const tail = readBytes(t.fp, start, size - start);
     if (tail) {
@@ -518,14 +623,96 @@ function createCodexWatch(deps) {
         if (obj.type === 'response_item') {
           if ((p.type === 'function_call' || p.type === 'custom_tool_call') && p.name === 'request_user_input') {
             const questions = parseRequestUserInput(p.arguments);
-            if (questions.length) pendingChoices.set(String(p.call_id || p.id || ''), { id: String(p.call_id || p.id || ''), questions });
+            if (questions.length) {
+              pendingChoices.set(String(p.call_id || p.id || ''), { id: String(p.call_id || p.id || ''), questions });
+              turnActive = true;
+              inferredState = 'notification';
+            }
+          } else if (p.type === 'function_call' || p.type === 'custom_tool_call'
+              || p.type === 'web_search_call') {
+            turnActive = true;
+            didWorkThisTurn = true;
+            if (isSubagentStartTool(p.name)) subagentActive = true;
+            inferredState = subagentActive ? 'juggling' : 'working';
           } else if ((p.type === 'function_call_output' || p.type === 'custom_tool_call_output') && p.call_id) {
             pendingChoices.delete(String(p.call_id));
+            turnActive = true;
+            didWorkThisTurn = true;
+            inferredState = subagentActive ? 'juggling' : 'working';
+          } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
+            turnActive = true;
+            didWorkThisTurn = true;
+            inferredState = subagentActive ? 'juggling' : 'working';
+          } else if (p.type === 'reasoning') {
+            turnActive = true;
+            inferredState = subagentActive ? 'juggling' : (didWorkThisTurn ? 'working' : 'thinking');
           }
           continue;
         }
         if (obj.type !== 'event_msg') continue;
-        if (p.type === 'user_message' && !title) title = promptTitle(String(p.message || ''));
+        if (p.type === 'item_completed' && p.item && typeof p.item === 'object') {
+          const item = p.item;
+          if (item.type === 'UserMessage') {
+            if (!title) title = promptTitle(itemText(item));
+            turnActive = true;
+            didWorkThisTurn = false;
+            inferredState = 'thinking';
+          } else if (item.type === 'SubAgentActivity') {
+            const agentId = String(item.agent_thread_id || item.agent_path || 'unknown');
+            if (item.kind === 'started') activeSubagents.add(agentId);
+            else if (item.kind === 'completed') activeSubagents.delete(agentId);
+            subagentActive = activeSubagents.size > 0;
+            if (subagentActive) {
+              turnActive = true;
+              didWorkThisTurn = true;
+              inferredState = 'juggling';
+            } else if (turnActive) {
+              inferredState = didWorkThisTurn ? 'working' : 'thinking';
+            }
+          }
+          continue;
+        }
+        if (p.type === 'user_message') {
+          if (!title) title = promptTitle(String(p.message || ''));
+          pendingChoices.clear();
+          turnActive = true;
+          didWorkThisTurn = false;
+          subagentActive = false;
+          activeSubagents.clear();
+          inferredState = 'thinking';
+        } else if (p.type === 'task_started') {
+          pendingChoices.clear();
+          turnActive = true;
+          didWorkThisTurn = false;
+          subagentActive = false;
+          activeSubagents.clear();
+          inferredState = 'thinking';
+        } else if (p.type === 'task_complete' || p.type === 'turn_aborted') {
+          pendingChoices.clear();
+          turnActive = false;
+          didWorkThisTurn = false;
+          subagentActive = false;
+          activeSubagents.clear();
+          inferredState = 'idle';
+        } else if (p.type === 'patch_apply_end' || p.type === 'mcp_tool_call_end'
+            || p.type === 'web_search_end') {
+          turnActive = true;
+          didWorkThisTurn = true;
+          inferredState = subagentActive ? 'juggling' : 'working';
+        } else if (p.type === 'agent_reasoning') {
+          turnActive = true;
+          inferredState = subagentActive ? 'juggling' : (didWorkThisTurn ? 'working' : 'thinking');
+        } else if (p.type === 'context_compacted') {
+          turnActive = true;
+          inferredState = 'sweeping';
+        } else if (p.type === 'error' || p.type === 'stream_error') {
+          turnActive = true;
+          inferredState = 'error';
+        } else if (/approval_request$/.test(String(p.type || ''))
+            || p.type === 'request_user_input' || p.type === 'elicitation_request') {
+          turnActive = true;
+          inferredState = 'notification';
+        }
         if (p.type === 'token_count') {
           const cu = toContextUsage(p.info);
           if (cu) contextUsage = cu;
@@ -535,6 +722,11 @@ function createCodexWatch(deps) {
       }
     }
     const pendingChoice = [...pendingChoices.values()].pop() || null;
+    if (pendingChoice) inferredState = 'notification';
+    t.turnActive = turnActive;
+    t.didWorkThisTurn = didWorkThisTurn;
+    t.subagentActive = subagentActive;
+    t.activeSubagents = activeSubagents;
     core.seedSession({
       id: t.sid,
       agentId: 'codex',
@@ -545,7 +737,7 @@ function createCodexWatch(deps) {
       originator: t.originator || null,
       sourcePid: null,
       headless: false,
-      state: pendingChoice ? 'notification' : 'idle',
+      state: inferredState,
       codexChoice: pendingChoice,
       createdAt: mtimeMs,
       updatedAt: mtimeMs,
@@ -580,6 +772,9 @@ function createCodexWatch(deps) {
           if (!obj || obj.type !== 'event_msg') continue;
           const p = obj.payload || {};
           if (p.type === 'user_message') title = promptTitle(String(p.message || '')) || title;
+          if (p.type === 'item_completed' && p.item && p.item.type === 'UserMessage') {
+            title = promptTitle(itemText(p.item)) || title;
+          }
           if (p.type === 'token_count') contextUsage = toContextUsage(p.info) || contextUsage;
         }
       }
@@ -627,7 +822,9 @@ function createCodexWatch(deps) {
       fp, sid: null, offset: cursor ? cursor.offset : 0, carry: cursor ? cursor.carry : '',
       ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null,
       lastAgentMessage: null, sessionTitle: null, titleSet: false,
-      turnActive: false, didWorkThisTurn: false,
+      turnActive: false, didWorkThisTurn: false, subagentActive: false,
+      activeSubagents: new Set(), pendingSubagentCallIds: new Set(),
+      lastUserMessage: null, lastUserMessageAt: 0,
     };
   }
 
@@ -726,4 +923,7 @@ function createCodexWatch(deps) {
   };
 }
 
-module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool, parseRequestUserInput };
+module.exports = {
+  createCodexWatch, toContextUsage, toRateLimits, mapTool,
+  isSubagentStartTool, itemText, parseRequestUserInput,
+};

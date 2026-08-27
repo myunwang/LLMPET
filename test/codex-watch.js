@@ -73,6 +73,8 @@ check('mapTool：codex 工具名 → 既有词汇', () => {
   assert.strictEqual(mapTool('exec'), 'Bash');
   assert.strictEqual(mapTool('apply_patch'), 'Edit');
   assert.strictEqual(mapTool('js'), 'Js');
+  assert.strictEqual(mapTool('spawn_agent'), 'Task');
+  assert.strictEqual(mapTool('wait_agent'), 'Wait');
   assert.strictEqual(mapTool('unknown_tool'), 'unknown_tool');
 });
 check('parseRequestUserInput：Codex function_call arguments 保留问题/选项', () => {
@@ -105,7 +107,87 @@ check('meta+尾部 user_message/token_count → seedSession(不发事件)', () =
   assert.strictEqual(core.seeds[0].cwd, '/tmp/proj');
   assert.strictEqual(core.seeds[0].sessionTitle, '帮我修个 bug');
   assert.strictEqual(core.seeds[0].contextUsage.percent, 10);
+  assert.strictEqual(core.seeds[0].state, 'thinking');
   assert.strictEqual(core.updates.length, 0, 'backfill 不应发 updateSession');
+});
+check('宿主在未结束回合中重启 → 静默恢复 thinking/working，终止后才 idle', () => {
+  const cases = [
+    {
+      name: 'thinking',
+      events: line({ type: 'event_msg', payload: { type: 'task_started' } })
+        + line({ type: 'response_item', payload: { type: 'reasoning' } }),
+      state: 'thinking',
+    },
+    {
+      name: 'working',
+      events: line({ type: 'event_msg', payload: { type: 'task_started' } })
+        + line({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command' } })
+        + line({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'tool-1' } })
+        + line({ type: 'response_item', payload: { type: 'reasoning' } }),
+      state: 'working',
+    },
+    {
+      name: 'terminal',
+      events: line({ type: 'event_msg', payload: { type: 'task_started' } })
+        + line({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command' } })
+        + line({ type: 'event_msg', payload: { type: 'task_complete' } }),
+      state: 'idle',
+    },
+  ];
+  for (const entry of cases) {
+    const { root, dir } = mkSessions();
+    const fp = path.join(dir, `rollout-backfill-${entry.name}-${UUID_A}.jsonl`);
+    fs.writeFileSync(fp, meta(UUID_A) + entry.events);
+    const core = fakeCore();
+    const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+    w.tick();
+    assert.strictEqual(core.seeds.length, 1, entry.name);
+    assert.strictEqual(core.seeds[0].state, entry.state, entry.name);
+    assert.strictEqual(core.updates.length, 0, `${entry.name} must stay silent`);
+    w.stop();
+  }
+});
+check('启动回填时仍有 Codex 子 agent → 静默恢复 juggling', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-backfill-subagent-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp,
+    meta(UUID_A)
+    + line({ type: 'event_msg', payload: { type: 'task_started' } })
+    + line({ type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', call_id: 'call_spawn_1' } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'SubAgentActivity', kind: 'started', agent_thread_id: UUID_B, agent_path: '/root/audit',
+    } } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].state, 'juggling');
+  assert.strictEqual(core.updates.length, 0, 'backfill 不应回放子 agent 动画');
+  w.stop();
+});
+check('启动回填的 send_message/interacted 不伪造存活子 agent', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-backfill-interacted-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp,
+    meta(UUID_A)
+    + line({ type: 'event_msg', payload: { type: 'task_started' } })
+    + line({ type: 'response_item', payload: {
+      type: 'function_call', name: 'send_message', call_id: 'call_message_1', arguments: '{}',
+    } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'SubAgentActivity', id: 'call_message_1', kind: 'interacted',
+      agent_thread_id: UUID_B, agent_path: '/root/existing-agent',
+    } } })
+    + line({ type: 'response_item', payload: {
+      type: 'function_call_output', call_id: 'call_message_1', output: 'delivered',
+    } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].state, 'working');
+  assert.strictEqual(core.updates.length, 0);
+  w.stop();
 });
 check('Codex session_index 的正式标题覆盖 prompt 猜名', () => {
   const { root, dir } = mkSessions();
@@ -205,6 +287,73 @@ check('SessionStart→prompt→tool→complete 全链路', () => {
   assert.strictEqual(core.ctx.length, 1);
   assert.strictEqual(core.ctx[0].cu.percent, 10);
   assert.strictEqual(limits.usedPercent, 12);
+});
+
+check('当前 Codex Desktop item_completed schema：用户新任务与子 agent 都可见', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-current-schema-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B));
+  w.tick();
+  fs.appendFileSync(fp,
+    line({ type: 'event_msg', payload: { type: 'task_started' } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'UserMessage', content: [{ type: 'text', text: '排查新任务表情' }],
+    } } })
+    + line({ type: 'response_item', payload: {
+      type: 'function_call', name: 'spawn_agent', call_id: 'call_spawn_1', arguments: '{}',
+    } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'SubAgentActivity', id: 'call_spawn_1', kind: 'started', agent_thread_id: UUID_A, agent_path: '/root/audit',
+    } } })
+    + line({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_spawn_1' } })
+    + line({ type: 'response_item', payload: { type: 'reasoning' } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'SubAgentActivity', kind: 'completed', agent_thread_id: UUID_A, agent_path: '/root/audit',
+    } } }));
+  w.tick();
+
+  const mapped = core.updates.slice(1); // 掐掉 SessionStart
+  assert.ok(mapped.some((u) => u.event === 'UserPromptSubmit'
+    && u.fields.sessionTitle === '排查新任务表情'));
+  assert.strictEqual(mapped.filter((u) => u.event === 'SubagentStart' && u.state === 'juggling').length, 1,
+    'spawn_agent + SubAgentActivity(started) 只能播放一次子 agent 入场');
+  const between = mapped.filter((u) => ['PostToolUse', 'Reasoning'].includes(u.event));
+  assert.ok(between.length >= 2 && between.every((u) => u.state === 'juggling'),
+    '子 agent 存活时 output/reasoning 不得压回 working');
+  assert.strictEqual(mapped.at(-1).event, 'SubagentStop');
+  assert.strictEqual(mapped.at(-1).state, 'working');
+  w.stop();
+});
+
+check('Codex send_message 的 interacted 不是子 agent 生命周期起点', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-interacted-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_A));
+  w.tick();
+  fs.appendFileSync(fp,
+    line({ type: 'event_msg', payload: { type: 'task_started' } })
+    + line({ type: 'response_item', payload: {
+      type: 'function_call', name: 'send_message', call_id: 'call_message_1', arguments: '{}',
+    } })
+    + line({ type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'SubAgentActivity', id: 'call_message_1', kind: 'interacted',
+      agent_thread_id: UUID_B, agent_path: '/root/existing-agent',
+    } } })
+    + line({ type: 'response_item', payload: {
+      type: 'function_call_output', call_id: 'call_message_1', output: 'delivered',
+    } })
+    + line({ type: 'response_item', payload: { type: 'reasoning' } }));
+  w.tick();
+  const live = core.updates.slice(1);
+  assert.ok(!live.some((u) => u.event === 'SubagentStart'));
+  assert.strictEqual(live.at(-1).state, 'working');
+  w.stop();
 });
 
 check('运行中新增/重命名的 Codex 正式标题会刷新到现有会话', () => {

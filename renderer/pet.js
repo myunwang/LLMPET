@@ -3244,7 +3244,10 @@ window.pet.onEvent((ev) => {
       const startingWork = transientState === 'thinking' && perfNow() < transientUntil;
       if (!hold && (startingWork || perfNow() >= transientUntil)) {
         if (startingWork) clearTransient();
-        setState('working');
+        // Subagent operations own a distinct expression. Previously every
+        // operation forced working even when the backend had correctly emitted
+        // juggling, so the dedicated GIF was immediately hidden.
+        setState(ev.visualState === 'juggling' ? 'juggling' : 'working');
         playAction(ev.tool, ev.icon);
       }
       showBubble(`${ev.icon || '🔧'} ${ev.detail}`);
@@ -3270,6 +3273,9 @@ window.pet.onEvent((ev) => {
       }
       break;
     case 'user-turn':
+      // A live SessionStart greet must get its short entrance before the task's
+      // immediately-following TaskStarted/UserMessage rows take over.
+      if (transientState === 'greet' && perfNow() < transientUntil) break;
       // 你的输入里带情绪（loved/sad/excited）→ 章鱼即时反应；否则像以前一样进 thinking
       if (ev.emotion && state !== 'waiting') {
         const tip = ev.emotion === 'loved' ? t('bub.loved') : ev.emotion === 'sad' ? t('bub.sad') : t('bub.ack');

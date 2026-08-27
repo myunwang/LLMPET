@@ -28,6 +28,10 @@ const EVENT_STATE = {
   PostCompact: 'thinking',
   Notification: 'notification',
   Elicitation: 'notification',
+  // Current Claude Code emits this paired edge after the user answers an MCP
+  // elicitation. Without it a quiet session can stay stuck in needsinput until
+  // some unrelated later tool event happens to clear the state.
+  ElicitationResult: 'working',
 };
 const FOCUS_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
 
@@ -55,7 +59,7 @@ function buildBody(event, p) {
   let state = EVENT_STATE[event];
   if (!state) return null;
   // A subagent launch may surface as PreToolUse(Task) without SubagentStart.
-  if (event === 'PreToolUse' && p.tool_name === 'Task') state = 'juggling';
+  if (event === 'PreToolUse' && (p.tool_name === 'Task' || p.tool_name === 'Agent')) state = 'juggling';
   // /clear shows up as SessionEnd(source=clear) → context sweep, not sleep.
   if (event === 'SessionEnd' && (p.source === 'clear' || p.reason === 'clear')) state = 'sweeping';
   // Manual /compact ends a turn (settle to idle); auto-compact keeps working.
@@ -86,9 +90,9 @@ function buildBody(event, p) {
   // Transcript-derived enrichment (read the tail once).
   const entries = transcript.readTail(p.transcript_path);
 
-  // SessionStart 来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
-  // resume/compact 进入已有任务不该触发「新会话欢迎」。有的环境（ccd）不带
-  // source —— 用 transcript 是否已有正式对话兜底判定。
+  // SessionStart 来源（startup/resume/clear/compact）保留作为诊断元数据。
+  // 欢迎是否可见由 core/adapter 以 session 身份判定；新激活的 resume
+  // 同样需要表情，不能在 hook 层用 source 静默。
   if (event === 'SessionStart') {
     body.session_source = (typeof p.source === 'string' && p.source)
       ? p.source

@@ -84,6 +84,9 @@ check('mapTool：dsh 工具名 → 既有词汇（认不出的原样透传）', 
   assert.strictEqual(mapTool('web_search'), 'WebSearch');
   assert.strictEqual(mapTool('run_code'), 'Js');
   assert.strictEqual(mapTool('subagent_spawn'), 'Task');
+  assert.strictEqual(mapTool('spawn_agent'), 'Task');
+  assert.strictEqual(mapTool('agent'), 'Task');
+  assert.strictEqual(mapTool('wait_agent'), 'Wait');
   assert.strictEqual(mapTool('grep_files'), 'Grep');   // 形状规则兜底
   assert.strictEqual(mapTool('quantum_thing'), 'quantum_thing');
 });
@@ -162,6 +165,21 @@ check('backfill 停在 tool/call → 恢复为 working，不误报空闲', () =>
   assert.strictEqual(core.seeds[0].state, 'working');
   assert.strictEqual(core.updates.length, 0, 'backfill 仍需保持静默');
 });
+check('backfill 停在子 agent 工具 → 恢复为 juggling', () => {
+  const root = mkRoot();
+  fs.writeFileSync(sessionPath(root, ID_A),
+    header(ID_A)
+    + L({ type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } })
+    + L({ type: 'tool/call', seq: 2, time: Date.now(), data: {
+      turn: 1, step: 1, callId: 'sub-1', name: 'spawn_agent',
+    } })
+    + L({ type: 'step/start', seq: 3, time: Date.now(), data: { turn: 1, step: 2 } }));
+  const core = fakeCore();
+  createDshWatch({ core, sessionsDir: root, pollMs: 999999 }).tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].state, 'juggling');
+  assert.strictEqual(core.updates.length, 0);
+});
 check('未知 session 日志版本 fail closed，不猜测解析', () => {
   const root = mkRoot();
   fs.writeFileSync(sessionPath(root, ID_A), header(ID_A, { version: 99 }) + userMsg('未来协议'));
@@ -219,6 +237,31 @@ check('工具后的 step/start 保持 working（不掉回 thinking）', () => {
   w.tick();
   const states = core.updates.map((u) => u.state);
   assert.deepStrictEqual(states, ['idle', 'thinking', 'working', 'working']);
+});
+
+check('DSH 子 agent 工具：启动 juggling，结束后回 working', () => {
+  const root = mkRoot();
+  const core = fakeCore();
+  const w = createDshWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = sessionPath(root, ID_B);
+  fs.writeFileSync(fp, header(ID_B));
+  fs.appendFileSync(fp,
+    L({ type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } })
+    + L({ type: 'tool/call', seq: 2, time: Date.now(), data: {
+      turn: 1, step: 1, callId: 'sub-1', name: 'spawn_agent',
+    } })
+    + L({ type: 'step/start', seq: 3, time: Date.now(), data: { turn: 1, step: 2 } })
+    + L({ type: 'tool/result', seq: 4, time: Date.now(), data: {
+      turn: 1, step: 1, callId: 'sub-1', name: 'spawn_agent',
+      message: { role: 'tool', content: 'started' },
+    } }));
+  w.tick();
+  assert.deepStrictEqual(core.updates.slice(1).map((u) => `${u.event}:${u.state}`), [
+    'TaskStarted:thinking', 'SubagentStart:juggling', 'Reasoning:juggling', 'SubagentStop:working',
+  ]);
+  assert.strictEqual(core.updates[2].fields.toolName, 'Task');
+  w.stop();
 });
 
 check('工具失败 → PostToolUseFailure(error)', () => {

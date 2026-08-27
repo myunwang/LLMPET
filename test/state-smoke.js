@@ -6,6 +6,8 @@
 // Run: node test/state-smoke.js
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
 const { loadRenderer } = require('./dom-stub');
 const States = require('../shared/states');
@@ -133,6 +135,25 @@ async function main() {
       const oi = world().window.OctoStates;
       assert(oi && Array.isArray(oi.RENDER_STATE_WORDS));
       assert.deepStrictEqual(oi.RENDER_STATE_WORDS, States.RENDER_STATE_WORDS);
+    });
+    check('cat/whale 每个可见表情状态都有真实 GIF', () => {
+      const w = world();
+      const packs = vm.runInContext('({ cat: { states: CAT_STATES, pools: CAT_POOLS }, whale: { states: WHALE_STATES, pools: WHALE_POOLS } })', w.sandbox);
+      const required = [
+        'idle', 'roam', 'working', 'thinking', 'talking', 'juggling', 'sweeping',
+        'waiting', 'needsinput', 'happy', 'greet', 'attention', 'sleeping', 'error',
+        'loafing', 'loved', 'excited', 'sad', 'sorry', 'puzzled', 'lookout',
+      ];
+      for (const [skin, pack] of Object.entries(packs)) {
+        assert.deepStrictEqual(required.filter((state) => !pack.states[state]), [], `${skin} missing state mapping`);
+        const files = [...Object.values(pack.states), ...Object.values(pack.pools).flat()];
+        for (const file of new Set(files)) {
+          const fp = path.join(__dirname, '..', 'assets', skin, file);
+          assert(fs.existsSync(fp), `${skin} missing ${file}`);
+          assert(fs.statSync(fp).size > 0, `${skin} empty ${file}`);
+          assert.strictEqual(fs.readFileSync(fp).subarray(0, 3).toString('ascii'), 'GIF', `${skin} invalid ${file}`);
+        }
+      }
     });
   }
 
@@ -487,6 +508,14 @@ async function main() {
     w.handlers.stats(baseStats({ workingCount: 2 }));
     check('transient 到期后回落 working', () => assert(cat.classList.contains('working')));
   }
+  {
+    const w = world();
+    const cat = w.elements('cat');
+    w.handlers.event({ kind: 'greet', project: 'new-session' });
+    check('SessionStart greet 进入上线表情', () => assert(cat.classList.contains('greet')));
+    w.handlers.event({ kind: 'user-turn', project: 'new-session' });
+    check('紧随的新任务事件不会秒盖 greet', () => assert(cat.classList.contains('greet')));
+  }
 
   console.log('[R3] operation 事件的守卫');
   {
@@ -511,6 +540,15 @@ async function main() {
     w3.handlers.stats(baseStats({ errorCount: 1, workingCount: 1 }));
     w3.handlers.event({ kind: 'operation', tool: 'Read', icon: '📖', detail: '读取文件' });
     check('error 稳态不被 operation 打断', () => assert(cat3.classList.contains('error')));
+    // 子 agent 动作不能被 operation 分支强制折叠成 working。
+    const w4 = world();
+    const cat4 = w4.elements('cat');
+    w4.handlers.event({
+      kind: 'operation', tool: 'Task', icon: '🤹', detail: '启动子任务', visualState: 'juggling',
+    });
+    check('子 agent operation 显示 juggling 类', () => assert(cat4.classList.contains('juggling')));
+    check('子 agent operation 真实选中 cat-juggling.gif', () =>
+      assert(catSrc(w4).endsWith('cat-juggling.gif')));
   }
 
   console.log('[R4] happy 庆祝不被同批 say 秒盖，say 接棒');
