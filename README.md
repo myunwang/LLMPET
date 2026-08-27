@@ -1,4 +1,4 @@
-# 🐙 LLMPET — 本地多 Agent 桌面工作台
+# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness 桌宠工作台
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -13,11 +13,48 @@ LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**。�
 
 > **跨 Agent 的准确边界：** Claude 与 Codex 之间不是共享一份原生 transcript。LLMPET 会在本地提取最近对话和当前 Git 工作区摘要，做密钥脱敏后生成临时交接单，再启动目标 Agent；交接单明确要求目标 Agent 重新核查文件、运行状态和失败路径。同一 Agent 内则使用官方 resume / fork。DeepSeek Harness 目前可作为交接来源，暂不作为接管目标。
 
+## DeepSeek Harness（dsh）已接入：给它一只鲸鱼娘桌宠
+
+LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（CLI：`dsh`）。它会**只读监听 dsh 自己的本机会话日志**，把思考、工具调用、等待回复、完成、报错和上下文整理映射成桌宠状态；不要求安装 dsh 插件，也不会修改 Harness profile。
+
+- **零配置监听 dsh**：支持 zstd 分帧的 `session.jsonl.zstd` 与纯文本 `session.jsonl`，未知日志版本会 fail-closed，不猜格式。
+- **独立 dsh 桌宠**：托盘勾选 **🌊 dsh 桌宠**，就能给 Harness 单独一只宠物、皮肤、位置和名牌；不打开分身时，主宠也能监看 dsh。
+- **鲸鱼女仆（whale）皮肤**：可用于主宠、Codex 宠或 dsh 宠；23 张动画覆盖完整工作流，不再只有一张静态形象。
+- **会话可见、可搜索、可交接**：dsh 会话进入统一会话列表与本机档案馆，也可作为来源交给 Claude Code 或 Codex 继续。当前不把 dsh 宣称为接管目标，准确边界见后文。
+
+> 从 DeepSeek Harness / dsh 搜过来的？安装 LLMPET 后启动一次 dsh 会话即可被感知。觉得这只会汇报进度的鲸鱼娘有用，欢迎点一下页面顶部的 **Star** ⭐
+
+### 鲸鱼女仆（whale）× 全部表情状态
+
+23 张 GIF 覆盖 21 个状态键；`working`、`loafing`、`sleeping` 会在多张姿态间轮换。以下动画就是桌宠实际使用的仓库素材：
+
+| 表情 | 状态 | 什么时候出现 |
+|:---:|:---|:---|
+| <img src="assets/whale/whale-working.gif" width="72" alt="猛拍上号按钮"> <img src="assets/whale/whale-working-2.gif" width="72" alt="熬夜工作"> <img src="assets/whale/whale-working-3.gif" width="72" alt="笔记本工作"> <img src="assets/whale/whale-working-4.gif" width="72" alt="吃薯片工作"> | 🛠️ **working 干活** | dsh / Claude / Codex 正在调用工具、执行命令或修改文件 |
+| <img src="assets/whale/whale-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 一轮开始或首次工具调用前的推理 |
+| <img src="assets/whale/whale-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Agent 正在输出回复文本 |
+| <img src="assets/whale/whale-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 多个 subagent 同时工作 |
+| <img src="assets/whale/whale-sweeping.gif" width="72" alt="清理上下文"> | 🧹 **sweeping 清理** | 压缩或整理上下文 |
+| <img src="assets/whale/whale-waiting.gif" width="72" alt="等待授权"> | ✋ **waiting 等待授权** | 需要用户处理授权；也用于 `sorry` 的心虚状态 |
+| <img src="assets/whale/whale-needsinput.gif" width="72" alt="等待输入"> | ❓ **needsinput 等待回复** | Agent 需要用户选择或输入；也用于 `puzzled` |
+| <img src="assets/whale/whale-attention.gif" width="72" alt="需要注意"> | 🔔 **attention 看一眼** | 任务刚结束，需要用户查看 |
+| <img src="assets/whale/whale-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮顺利完成；也承载 `loved / excited` |
+| <img src="assets/whale/whale-greet.gif" width="72" alt="打招呼"> | 👋 **greet 打招呼** | 新会话启动 |
+| <img src="assets/whale/whale-error.gif" width="72" alt="执行出错"> | 💥 **error 出错** | 工具、命令或 API 执行失败 |
+| <img src="assets/whale/whale-sad.gif" width="72" alt="难过"> | 😭 **sad 难过** | 负面反馈或失败情绪 |
+| <img src="assets/whale/whale-loafing.gif" width="72" alt="躺着摸鱼"> <img src="assets/whale/whale-loafing-2.gif" width="72" alt="沙发点外卖"> <img src="assets/whale/whale-loafing-3.gif" width="72" alt="奶瓶和手机"> | 🍟 **loafing 摸鱼** | 上一步结束、下一步还没开始的间隙 |
+| <img src="assets/whale/whale-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 当前没有任务 |
+| <img src="assets/whale/whale-roam.gif" width="72" alt="旅行"> | 🧳 **roam 旅行** | 只读项目探索正在进行 |
+| <img src="assets/whale/whale-thinking-2.gif" width="72" alt="查看探索结果"> | 👀 **lookout 看战果** | 探索完成后查看结果 |
+| <img src="assets/whale/whale-sleeping.gif" width="72" alt="被窝睡觉"> <img src="assets/whale/whale-sleeping-2.gif" width="72" alt="椅子上睡觉"> | 😴 **sleeping 睡觉** | 会话结束或长时间没有活动 |
+
+鲸鱼女仆是本项目的原创角色，与 DeepSeek 官方无隶属或代言关系。素材来源、制作流程与规格见 [`assets/whale/CREDITS.md`](assets/whale/CREDITS.md)。
+
 ## 不只是桌宠
 
 | 能力层 | LLMPET 现在能做什么 |
 |---|---|
-| **桌面感知** | 用章鱼 🐙、像素怪兽 👾、月薪喵 🐱 三款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
+| **桌面感知** | 用章鱼 🐙、像素怪兽 👾、月薪喵 🐱、鲸鱼女仆 🌊 四款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
 | **统一会话层** | 汇总 Claude Code、Codex、dsh 的实时会话与本机历史；支持搜索、筛选、置顶、归档和回到原窗口 |
 | **跨 Agent 接管** | Claude ↔ Codex 双向交接；dsh → Claude / Codex 单向交接；同代理使用原生 resume / fork |
 | **本机档案馆** | 统一索引三类 Agent 的用户会话，过滤内部 subagent；可选增量备份，恢复时不覆盖仍存在的源文件 |
@@ -150,7 +187,7 @@ dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项
 **前置条件**
 - macOS 或 Windows（状态显示、授权气泡、计量计费、「去回复」终端聚焦全都可用；「领地模式」目前仅 macOS）
 - Node.js ≥ 18（含 npm）
-- 至少安装并使用过一个受支持的 agent：[Claude Code](https://claude.com/claude-code) 或 [OpenAI Codex](https://github.com/openai/codex)
+- 至少安装并使用过一个受支持的 agent：[Claude Code](https://claude.com/claude-code)、[OpenAI Codex](https://github.com/openai/codex) 或 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
@@ -159,7 +196,7 @@ npm ci               # 按 package-lock.json 安装（国内网络慢可加：EL
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
 
-启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切三款皮肤，并分别开关 Codex / dsh 分身。
+启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切四款皮肤，并分别开关 Codex / dsh 分身。
 
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
@@ -168,7 +205,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
-- **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
+- **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / DSH / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
 - 会话面板底部的 **📚 档案** = 打开独立的**会话档案馆**，统一查看 Claude Code / Codex / dsh 在客户端、CLI 或 Harness 日志中留下的全部用户会话（子代理会话会被过滤），并可使用已支持 provider 的官方 resume，或生成本地交接单交给另一个代理接管。macOS 上 LLMPET 会保留一个 Dock 入口，点击即可重新显示或聚焦档案馆，不会创建第二个实例。
 - 档案馆的**定期本机备份默认关闭**。用户主动开启后，会增量备份 Claude、Codex 与 DSH 会话到 `~/.octopus/session-vault`；恢复只补回已经丢失的 transcript，绝不覆盖仍存在的源文件。它能应对 provider 重装或记录被删，但不是云同步，也不能防止整块硬盘损坏。
 - 会话右侧的 **🧳** = 打开青蛙旅行：让对应 agent 在该项目中执行一次独立、只读探索，回来后展示明信片并累计成长 token。
@@ -274,7 +311,7 @@ test/zstd.js            zstd 分帧读取（完整帧 / 半帧 / 坏数据）
 ---
 
 ## 未做 / 后续
-- 其它 agent（Gemini / Copilot…）尚未适配；当前支持 Claude Code 与 OpenAI Codex。
+- 其它 agent（Gemini / Copilot…）尚未适配；当前支持 Claude Code、OpenAI Codex 与 DeepSeek Harness（dsh 的接管边界见前文）。
 - Linux 的会话定位（Windows 已支持）、Windows 领地模式、远程审批、自动更新：本项目暂未实现。
 
 ---

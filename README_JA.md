@@ -1,4 +1,4 @@
-# 🐙 LLMPET — ローカル・マルチ Agent デスクトップワークスペース
+# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness デスクトップペット
 
 [简体中文](README.md) | [English](README_EN.md) | **日本語**
 
@@ -7,6 +7,43 @@ LLMPET は、**デスクトップペットを入口にした、ローカル優�
 ペットは今も最も直感的なインターフェースです。思考中、ツール実行中、ユーザー待ち、完了、エラー、休憩中といった状態に合わせて表情が変わり、最新の返答を吹き出しで表示します。一方、LLMPET の範囲は監視だけでなく、統合 Session 管理、Agent 間の引き継ぎ、ローカル保管庫と任意バックアップ、利用状況の診断、ユーザーが明示的に開始する Agent 行動へ広がっています。
 
 > **Agent 間引き継ぎの正確な範囲：** Claude と Codex がネイティブ transcript を共有するわけではありません。LLMPET が直近の会話と Git ワークツリー要約をローカルで取り出し、一般的な秘密情報をマスクした一時引き継ぎ資料を作成して、受け側 Agent を起動します。同じ provider 内では公式 resume / fork を使います。DeepSeek Harness は現在、引き継ぎ元としてのみ利用でき、接管先にはなりません。
+
+## DeepSeek Harness（dsh）対応：クジラメイドを専用ペットに
+
+LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（CLI：`dsh`）に対応しています。**dsh 自身のローカル Session ログを読み取り専用で監視**し、思考、ツール実行、ユーザー待ち、完了、エラー、コンテキスト整理をペットの状態へ変換します。dsh プラグインはインストールせず、Harness profile も変更しません。
+
+- **設定不要の dsh 監視** — zstd フレーム形式の `session.jsonl.zstd` とプレーンな `session.jsonl` に対応し、未知のログ version は推測せず fail-closed で扱います。
+- **独立した dsh ペット** — トレイで **🌊 dsh ペット** を有効にすると、専用のペット、スキン、位置、名札を使えます。分身をオフにした場合も本体ペットが dsh を監視できます。
+- **クジラメイド（`whale`）スキン** — 本体、Codex、dsh のどのペットにも選択でき、静止画一枚ではなく 23 個のアニメーションで作業全体を表現します。
+- **検索・保管・引き継ぎ** — dsh Session は統合ワークスペースとローカル保管庫に表示され、Claude Code または Codex への引き継ぎ元にできます。現在 dsh は接管先としては案内していません。正確な範囲は後述します。
+
+> DeepSeek Harness / dsh を検索して来ましたか？LLMPET の導入後に dsh Session を一度起動すれば、ペットが検出します。進捗を知らせるクジラが役に立ちそうなら、ぜひ **Star** ⭐ をお願いします。
+
+### クジラメイド（`whale`）の全アニメーション状態
+
+23 個の GIF が 21 個の状態キーをカバーします。`working`、`loafing`、`sleeping` は複数のポーズを切り替えます。以下は実際にデスクトップペットが使用する素材です。
+
+| アニメーション | 状態 | 表示されるタイミング |
+|:---:|:---|:---|
+| <img src="assets/whale/whale-working.gif" width="72" alt="作業ボタン"> <img src="assets/whale/whale-working-2.gif" width="72" alt="深夜作業"> <img src="assets/whale/whale-working-3.gif" width="72" alt="ノート PC で作業"> <img src="assets/whale/whale-working-4.gif" width="72" alt="ポテトチップスを食べながら作業"> | 🛠️ **作業中** | dsh / Claude / Codex がツール、コマンド、ファイル編集を実行中 |
+| <img src="assets/whale/whale-thinking.gif" width="72" alt="思考中"> | 🤔 **思考中** | ターン開始後、最初のツール実行前に考えているとき |
+| <img src="assets/whale/whale-talking.gif" width="72" alt="返答中"> | 💬 **返答中** | Agent が返答を生成しているとき |
+| <img src="assets/whale/whale-juggling.gif" width="72" alt="並列タスク"> | 🤹 **並列タスク** | 複数の subagent が同時に作業しているとき |
+| <img src="assets/whale/whale-sweeping.gif" width="72" alt="コンテキスト整理"> | 🧹 **コンテキスト整理** | コンテキストを圧縮または整理しているとき |
+| <img src="assets/whale/whale-waiting.gif" width="72" alt="許可待ち"> | ✋ **許可待ち** | ユーザーの許可が必要なとき。`sorry` にも使用 |
+| <img src="assets/whale/whale-needsinput.gif" width="72" alt="入力待ち"> | ❓ **入力待ち** | 回答や選択が必要なとき。`puzzled` にも使用 |
+| <img src="assets/whale/whale-attention.gif" width="72" alt="要確認"> | 🔔 **要確認** | 完了したタスクを確認してほしいとき |
+| <img src="assets/whale/whale-happy.gif" width="72" alt="完了"> | 🎉 **完了** | ターンが成功したとき。`loved / excited` にも使用 |
+| <img src="assets/whale/whale-greet.gif" width="72" alt="挨拶"> | 👋 **挨拶** | 新しい Session が始まったとき |
+| <img src="assets/whale/whale-error.gif" width="72" alt="エラー"> | 💥 **エラー** | ツール、コマンド、API リクエストが失敗したとき |
+| <img src="assets/whale/whale-sad.gif" width="72" alt="悲しい"> | 😭 **悲しい** | 否定的なフィードバックや失敗感情 |
+| <img src="assets/whale/whale-loafing.gif" width="72" alt="スマホで休憩"> <img src="assets/whale/whale-loafing-2.gif" width="72" alt="ソファで注文"> <img src="assets/whale/whale-loafing-3.gif" width="72" alt="ボトルとスマホ"> | 🍟 **小休止** | 前の処理が終わり、次の動作がまだ始まっていないとき |
+| <img src="assets/whale/whale-idle.gif" width="72" alt="待機中"> | 🪑 **待機中** | 実行中のタスクがないとき |
+| <img src="assets/whale/whale-roam.gif" width="72" alt="旅行中"> | 🧳 **旅行中** | 読み取り専用のプロジェクト探索を実行中 |
+| <img src="assets/whale/whale-thinking-2.gif" width="72" alt="探索結果を見る"> | 👀 **結果確認** | 探索結果を確認しているとき |
+| <img src="assets/whale/whale-sleeping.gif" width="72" alt="布団で睡眠"> <img src="assets/whale/whale-sleeping-2.gif" width="72" alt="椅子で睡眠"> | 😴 **睡眠中** | Session 終了後、または長時間操作がないとき |
+
+クジラメイドは本プロジェクトのオリジナルキャラクターであり、DeepSeek との提携または公式な推奨を示すものではありません。出典、制作工程、素材仕様は [`assets/whale/CREDITS.md`](assets/whale/CREDITS.md) を参照してください。
 
 画面表示は **簡体字中国語、英語、日本語** に対応しています。トレイメニューの `設定 → 言語` から、再起動せずに切り替えられます。
 
@@ -21,7 +58,7 @@ LLMPET は、**デスクトップペットを入口にした、ローカル優�
 - **ミームアクション** — GIF と音声を再生しながら、対応する構造化 Prompt を選択中のセッションへ送れます。
 - **旅するカエル** — 選択した Claude / Codex を独立した読み取り専用の探索へ送り、帰還後にローカルの旅便りを受け取れます。
 - **利用状況パネル** — 実 token 推移、モデル別内訳、Claude の API 公開価格換算、Codex のローカル token 台帳、レート制限、診断情報、現在の操作を確認できます。
-- **3 種類のスキン** — タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱。
+- **4 種類のスキン** — タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱、クジラメイド 🌊。
 - **macOS のパトロールモード** — 対応する他のデスクトップペットを検出し、最前面を維持しながら相手を画面端へ押し出します。
 
 状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex と DeepSeek Harness は各自のローカル Session ファイルを読み取り専用で監視します。Agent の設定は変更しません。
@@ -63,7 +100,7 @@ LLMPET は、**デスクトップペットを入口にした、ローカル優�
 
 - macOS または Windows
 - Node.js 18 以上
-- Claude Code または OpenAI Codex（少なくとも一度は利用済み）
+- 対応 Agent のいずれかをインストールし、一度は利用済み：Claude Code、OpenAI Codex、または DeepSeek Harness
 
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
@@ -159,7 +196,7 @@ assets/memes/<meme-id>/
 
 - HTTP サーバーは `127.0.0.1` のみにバインドし、loopback / Host / browser-origin の検証に加えて、書き込み API に起動ごとのランダム token を要求します。
 - セッション情報、設定、利用履歴はローカル端末内に保存されます。
-- Codex rollout へのアクセスは読み取り専用です。
+- Codex rollout と DeepSeek Harness の Session ログへのアクセスは読み取り専用です。
 - バックグラウンド通信は、任意の LiteLLM 公開価格表の日次取得だけです。「旅するカエル」はユーザーが **出発**を押した場合にだけ Anthropic / OpenAI へ接続します。`OCTOPUS_NO_NET=1` は LLMPET の価格取得を止めますが、明示的に開始した CLI 旅行までは無効化しません。
 - Electron は `contextIsolation` を有効、`nodeIntegration` を無効にしています。
 - Claude hook の追加は既存設定を上書きせず、原子的かつ取り消し可能で、削除前にはバックアップを作成します。

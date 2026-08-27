@@ -1,4 +1,4 @@
-# 🐙 LLMPET — A Local Multi-Agent Desktop Workspace
+# 🐙 LLMPET — A Claude Code, Codex & DeepSeek Harness Desktop Pet Workspace
 
 [简体中文](README.md) | **English** | [日本語](README_JA.md)
 
@@ -7,6 +7,43 @@ LLMPET is a **local-first multi-agent workspace with a desktop pet as its front 
 The pet remains the most immediate interface: it reacts while an agent is thinking, using tools, waiting for you, finishing, failing, or resting, and it surfaces the latest reply in a speech bubble. LLMPET now goes beyond observation with unified session management, cross-agent takeover, a local archive and optional backup, usage diagnostics, and explicit user-triggered agent actions.
 
 > **Exact cross-agent boundary:** Claude and Codex do not share a native transcript. LLMPET locally extracts a bounded recent conversation and Git worktree summary, redacts common secrets, writes a temporary handoff packet, and launches the receiving agent with instructions to verify the files, runtime state, and failure paths. Same-provider actions use the official resume or fork flow. DeepSeek Harness is currently a handoff source, not a takeover target.
+
+## DeepSeek Harness (dsh) support is live — give it a Whale Maid pet
+
+LLMPET now supports [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (CLI: `dsh`). It **read-only tails dsh's own local session logs** and maps thinking, tool calls, user waits, completion, errors, and compaction to pet states. No dsh plugin is installed and no Harness profile is modified.
+
+- **Zero-config dsh monitoring** — supports framed zstd `session.jsonl.zstd` and plain `session.jsonl`; unknown log versions fail closed instead of being guessed.
+- **A separate dsh pet** — enable **🌊 dsh pet** in the tray for its own pet, skin, position, and name tag. The main pet can monitor dsh when the split pet is off.
+- **Whale Maid (`whale`) skin** — selectable for the main, Codex, or dsh pet, with 23 animations covering the full workflow rather than one static mascot.
+- **Searchable and handoff-ready sessions** — dsh sessions appear in the unified workspace and local archive, and can be handed to Claude Code or Codex as a source. dsh is not currently advertised as a takeover target; see the exact boundary below.
+
+> Arrived here while searching for DeepSeek Harness or dsh? Start one dsh session after installing LLMPET and the pet will pick it up. If a whale that reports your agent's progress sounds useful, please leave a **Star** ⭐
+
+### Whale Maid (`whale`) — every animated state
+
+The 23 GIFs cover 21 state keys. `working`, `loafing`, and `sleeping` rotate through multiple poses. These are the actual assets used by the desktop pet:
+
+| Animation | State | When it appears |
+|:---:|:---|:---|
+| <img src="assets/whale/whale-working.gif" width="72" alt="Pressing the work button"> <img src="assets/whale/whale-working-2.gif" width="72" alt="Late-night work"> <img src="assets/whale/whale-working-3.gif" width="72" alt="Working on a laptop"> <img src="assets/whale/whale-working-4.gif" width="72" alt="Working while eating chips"> | 🛠️ **Working** | dsh, Claude, or Codex is using tools, running commands, or editing files |
+| <img src="assets/whale/whale-thinking.gif" width="72" alt="Thinking"> | 🤔 **Thinking** | A turn has started and is reasoning before its first tool call |
+| <img src="assets/whale/whale-talking.gif" width="72" alt="Replying"> | 💬 **Replying** | The agent is producing its response |
+| <img src="assets/whale/whale-juggling.gif" width="72" alt="Parallel tasks"> | 🤹 **Parallel tasks** | Multiple subagents are working at once |
+| <img src="assets/whale/whale-sweeping.gif" width="72" alt="Cleaning context"> | 🧹 **Compacting** | Context is being compressed or cleaned up |
+| <img src="assets/whale/whale-waiting.gif" width="72" alt="Waiting for approval"> | ✋ **Waiting** | User approval is needed; also used for the `sorry` state |
+| <img src="assets/whale/whale-needsinput.gif" width="72" alt="Waiting for input"> | ❓ **Needs input** | The agent needs an answer or selection; also used for `puzzled` |
+| <img src="assets/whale/whale-attention.gif" width="72" alt="Needs attention"> | 🔔 **Attention** | A finished task needs a look |
+| <img src="assets/whale/whale-happy.gif" width="72" alt="Completed"> | 🎉 **Completed** | A turn finished successfully; also used for `loved` and `excited` |
+| <img src="assets/whale/whale-greet.gif" width="72" alt="Greeting"> | 👋 **Greeting** | A new session starts |
+| <img src="assets/whale/whale-error.gif" width="72" alt="Error"> | 💥 **Error** | A tool, command, or API request failed |
+| <img src="assets/whale/whale-sad.gif" width="72" alt="Sad"> | 😭 **Sad** | Negative feedback or failure emotion |
+| <img src="assets/whale/whale-loafing.gif" width="72" alt="Loafing with a phone"> <img src="assets/whale/whale-loafing-2.gif" width="72" alt="Ordering food from a sofa"> <img src="assets/whale/whale-loafing-3.gif" width="72" alt="Bottle and phone break"> | 🍟 **Loafing** | The previous step ended and the next one has not started |
+| <img src="assets/whale/whale-idle.gif" width="72" alt="Idle"> | 🪑 **Idle** | There is no active task |
+| <img src="assets/whale/whale-roam.gif" width="72" alt="Traveling"> | 🧳 **Traveling** | A read-only project expedition is running |
+| <img src="assets/whale/whale-thinking-2.gif" width="72" alt="Reviewing expedition results"> | 👀 **Lookout** | Reviewing the result of an expedition |
+| <img src="assets/whale/whale-sleeping.gif" width="72" alt="Sleeping in bed"> <img src="assets/whale/whale-sleeping-2.gif" width="72" alt="Sleeping in a chair"> | 😴 **Sleeping** | The session ended or has been inactive for a while |
+
+Whale Maid is an original character from this project and is not affiliated with or endorsed by DeepSeek. See [`assets/whale/CREDITS.md`](assets/whale/CREDITS.md) for provenance, production notes, and asset specifications.
 
 The interface is available in **Simplified Chinese, English, and Japanese**. Switch languages instantly from the tray menu under `Settings → Language`; no restart is required.
 
@@ -21,7 +58,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
-- **Three skins** — Octopus 🐙, Pixel Monster 👾, and Salary Cat 🐱.
+- **Four skins** — Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
 LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.
@@ -63,7 +100,7 @@ Requirements:
 
 - macOS or Windows
 - Node.js 18 or newer
-- Claude Code and/or OpenAI Codex installed and used at least once
+- At least one supported agent installed and used once: Claude Code, OpenAI Codex, or DeepSeek Harness
 
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
@@ -159,7 +196,7 @@ Scheduled local backup is **off by default**. When the user explicitly enables i
 
 - The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
-- Codex rollout access is read-only.
+- Codex rollout and DeepSeek Harness session-log access are read-only.
 - Background network access is limited to the optional daily LiteLLM pricing download. A Travel Frog run contacts Anthropic or OpenAI only after you explicitly press **Depart**; `OCTOPUS_NO_NET=1` disables LLMPET's pricing fetch, but does not override a CLI trip you explicitly start.
 - Electron runs with `contextIsolation` enabled and `nodeIntegration` disabled.
 - Claude hook installation is merge-safe, atomic, reversible, and backed up before uninstall.
