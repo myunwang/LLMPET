@@ -564,6 +564,82 @@ async function main() {
     check('happy 结束后 talking 接棒', () => assert(cat.classList.contains('talking')));
   }
 
+  console.log('[R4b] ending 常驻、按会话折叠与逐会话确认');
+  {
+    const w = world();
+    w.handlers.config({ skin: 'cat', muted: false });
+    const bubble = w.elements('bubble');
+    const first = {
+      kind: 'say', sessionId: 'ending-session-a', project: 'alpha', agent: 'codex',
+      text: '第一段完成信息会保留在桌宠上。',
+    };
+    const second = {
+      kind: 'say', sessionId: 'ending-session-b', project: 'alpha', agent: 'codex',
+      text: '第二段完成信息作为最新摘要显示。',
+    };
+    w.handlers.event(first);
+    vm.runInContext('hideBubble()', w.sandbox);
+    check('单条 ending 不受旧自动隐藏路径影响', () => {
+      assert(!bubble.classList.contains('hidden'));
+      assert(bubble.classList.contains('ending'));
+      assert(w.elements('bubble-text').textContent.includes('第一段完成信息'));
+    });
+
+    w.handlers.event(second);
+    check('两个同项目也按 sessionId 算作两个对话并默认折叠', () => {
+      assert(bubble.classList.contains('collapsed'));
+      assert.strictEqual(w.elements('bubble-count').textContent, '2 个对话');
+      assert(w.elements('bubble-text').textContent.includes('第二段完成信息'));
+      assert(!w.elements('bubble-toggle').classList.contains('hidden'));
+    });
+
+    w.handlers.event({ kind: 'operation', sessionId: 'work-c', tool: 'Read', icon: '📖', detail: '读取文件' });
+    check('普通状态可临时覆盖 ending', () => assert(!bubble.classList.contains('ending')));
+    vm.runInContext('hideBubble()', w.sandbox);
+    check('普通状态结束后恢复常驻 ending', () => {
+      assert(bubble.classList.contains('ending'));
+      assert.strictEqual(w.elements('bubble-count').textContent, '2 个对话');
+    });
+
+    w.elements('bubble-toggle').dispatch('click');
+    check('点击计数可展开其余完成信息', () => {
+      assert(bubble.classList.contains('expanded'));
+      assert.strictEqual(w.elements('bubble-toggle').getAttribute('aria-expanded'), 'true');
+      assert.strictEqual(w.elements('bubble-stack').children.length, 1);
+      assert(w.elements('bubble-stack').children[0].children[1].textContent.includes('第一段完成信息'));
+    });
+
+    w.handlers.event({ kind: 'user-turn', sessionId: second.sessionId, project: second.project, agent: 'codex' });
+    vm.runInContext('hideBubble()', w.sandbox);
+    check('新一轮的短提示结束后，其他对话的 ending 继续常驻', () => {
+      assert(bubble.classList.contains('ending'));
+      assert(w.elements('bubble-text').textContent.includes('第一段完成信息'));
+      assert(w.elements('bubble-toggle').classList.contains('hidden'));
+    });
+
+    w.elements('bubble-dismiss').dispatch('click');
+    check('用户可主动关闭全部完成信息', () => assert(bubble.classList.contains('hidden')));
+  }
+  {
+    const w = world();
+    const bubble = w.elements('bubble');
+    w.handlers.stats(baseStats({ waitingCount: 1 }));
+    vm.runInContext('hideBubble(true)', w.sandbox);
+    w.handlers.event({
+      kind: 'say', sessionId: 'ending-while-waiting', project: 'parallel', agent: 'codex',
+      text: '另一个并行对话已完成。',
+    });
+    check('等待用户操作时 ending 入箱但不覆盖 waiting', () => {
+      assert.strictEqual(vm.runInContext('endingMessages.size', w.sandbox), 1);
+      assert(bubble.classList.contains('hidden'));
+    });
+    w.handlers.stats(baseStats({ waitingCount: 0 }));
+    check('waiting 解除后自动恢复期间收到的 ending', () => {
+      assert(bubble.classList.contains('ending'));
+      assert(w.elements('bubble-text').textContent.includes('另一个并行对话已完成'));
+    });
+  }
+
   console.log('[R5] needsinput / waiting 清残留 transient');
   {
     const w = world();
