@@ -257,7 +257,7 @@ assert(!/body\.skin-cat[^\{]*(?:\.think \.td|#sleep|#sidekick|\.confetti)/.test(
   && /if \(act === 'summon'\)/.test(js),
   'cat and whale must keep thought, sleep, sidekick, and confetti feedback');
 assert(!/body\.skin-cat[^\{]*#bubble\s*\{[^}]*display\s*:\s*none/s.test(css)
-  && /function showBubble[\s\S]{0,500}OctoIcons\.setTextWithIcons\(bubbleText, text\)/.test(js),
+  && /function setBubbleText[\s\S]{0,500}OctoIcons\.setTextWithIcons\(bubbleText, text\)/.test(js),
   'cat and whale dialogue bubbles and their mapped emoji must remain intact');
 assert(/\.confetti\.error-ribbon\s*\{[^}]*background\s*:\s*#e53935/s.test(css)
   && /\.confetti\.error-ribbon\.ribbon-bright\s*\{[^}]*#ff5a52/s.test(css)
@@ -282,8 +282,12 @@ assert(/const liveOrigin = Number\.isFinite\(window\.screenX\)[\s\S]*\[window\.s
   'drag must start from live screen coordinates and ignore a late IPC origin after movement');
 assert(/function openSessList[\s\S]*closeTodoPop\(true\)[\s\S]*hideAsk\(true\)/.test(js)
   && /function openTodoPop[\s\S]*hideAsk\(true\)[\s\S]*closeSessList\(true\)/.test(js)
-  && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize\) resetPetSize\(\)/.test(js),
+  && /function closeSessList\(preserveSize = false\)[\s\S]*if \(!preserveSize && !restoreEndingBubble\(\)\) resetPetSize\(\)/.test(js),
   'switching popup surfaces must not collapse through the 340px resting frame');
+assert(/function renderEndingBubble[\s\S]*endingMessages\.size[\s\S]*bubble\.classList\.add\('ending'\)/.test(js)
+  && /function hideBubble[\s\S]*restoreEndingBubble\(\)/.test(js)
+  && /#bubble:not\(\.ending\)/.test(css),
+  'completed-conversation bubbles must persist, restore after transient status, and remain clickable');
 assert(/function resetPetSize\(\)\s*\{[\s\S]{0,500}if \(sessListOpen \|\| askActive \|\| todoPopOpen\) return false;/.test(js),
   'stale delayed callbacks must not collapse a popup that still owns the BrowserWindow');
 assert(/lastSessListRenderSig/.test(js)

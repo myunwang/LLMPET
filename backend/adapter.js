@@ -675,9 +675,13 @@ function activityToEvents(act) {
     default:
       break;
   }
-  // 每个事件都带上来源 agent：双宠模式按它把事件路由到对应的桌宠窗口
+  // 每个事件都带上来源 agent 和稳定会话 ID：双宠模式按 agent 路由；
+  // renderer 按 sessionId 聚合完成信息，不能把同目录的并行对话误折叠。
   const agent = agentOf(session);
-  for (const ev of out) ev.agent = agent;
+  for (const ev of out) {
+    ev.agent = agent;
+    ev.sessionId = session.id;
+  }
   return out;
 }
 

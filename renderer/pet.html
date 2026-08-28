@@ -9,8 +9,17 @@
   <body>
     <div id="stage">
       <!-- 气泡播报 -->
-      <div id="bubble" class="bubble hidden">
+      <div id="bubble" class="bubble hidden" role="status" aria-live="polite">
+        <div id="bubble-head" class="bubble-head hidden">
+          <span id="bubble-project" class="bubble-project"></span>
+          <button id="bubble-dismiss" class="bubble-dismiss" type="button" aria-label="关闭完成信息">×</button>
+        </div>
         <span id="bubble-text"></span>
+        <div id="bubble-stack" class="bubble-stack hidden"></div>
+        <button id="bubble-toggle" class="bubble-toggle hidden" type="button" aria-expanded="false">
+          <span id="bubble-count"></span>
+          <span id="bubble-chevron" aria-hidden="true">⌄</span>
+        </button>
       </div>
 
       <!-- Needs Input / 授权卡片：Claude 要选择/授权/输入时在这处理 -->

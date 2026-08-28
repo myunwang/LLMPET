@@ -139,6 +139,7 @@ async function main() {
   });
   check('turn-done event emitted', () => assert(events.some((e) => e.kind === 'turn-done')));
   check('say event carries Claude message', () => assert(events.some((e) => e.kind === 'say' && /修好/.test(e.text))));
+  check('ending event carries stable session ID', () => assert(events.some((e) => e.kind === 'say' && e.sessionId === SID)));
   check('session requiresCompletionAck after Stop', () => assert.strictEqual(core.getSession(SID).requiresCompletionAck, true));
 
   console.log('\n[3] unknown state rejected');

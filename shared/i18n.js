@@ -325,6 +325,10 @@
     'bub.onlineClaude': '🐙 小章鱼上线，盯 Claude 任务啦！',
     'bub.onlineCodex': '🛰️ 小章鱼上线，盯 Codex 任务啦！',
     'bub.onlineDsh': '🌊 小章鱼上线，盯 dsh 任务啦！',
+    'bub.conversationCount': '{count} 个对话',
+    'bub.expandEndings': '展开完成信息',
+    'bub.collapseEndings': '收起完成信息',
+    'bub.dismissEndings': '关闭完成信息',
 
     // ── territory patrol ────────────────────────────────────────────────────
     'terr.spotted': '👀 咦？「{rival}」闯进我的地盘！',
@@ -756,6 +760,10 @@
     'bub.onlineClaude': '🐙 I’m up — watching Claude!',
     'bub.onlineCodex': '🛰️ I’m up — watching Codex!',
     'bub.onlineDsh': '🌊 I’m up — watching dsh!',
+    'bub.conversationCount': '{count} conversations',
+    'bub.expandEndings': 'Expand completed conversations',
+    'bub.collapseEndings': 'Collapse completed conversations',
+    'bub.dismissEndings': 'Dismiss completed conversations',
 
     'terr.spotted': '👀 Hey! "{rival}" wandered into my turf!',
     'terr.unknownRival': 'some creature',
@@ -1182,6 +1190,10 @@
     'bub.onlineClaude': '🐙 タコ参上、Claude を見張るよ！',
     'bub.onlineCodex': '🛰️ タコ参上、Codex を見張るよ！',
     'bub.onlineDsh': '🌊 タコ参上、dsh を見張るよ！',
+    'bub.conversationCount': '{count} 件の会話',
+    'bub.expandEndings': '完了メッセージを展開',
+    'bub.collapseEndings': '完了メッセージを折りたたむ',
+    'bub.dismissEndings': '完了メッセージを閉じる',
 
     'terr.spotted': '👀 あれ？「{rival}」が縄張りに入ってきた！',
     'terr.unknownRival': '謎の生き物',

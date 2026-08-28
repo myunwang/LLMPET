@@ -228,6 +228,90 @@ html, body {
   border-color: rgba(255, 255, 255, 0.97) transparent transparent transparent;
 }
 .bubble.hidden { opacity: 0; transform: translateY(8px) scale(0.96); pointer-events: none; }
+.bubble.ending {
+  width: min(340px, calc(100vw - 16px));
+  cursor: default;
+  pointer-events: auto;
+}
+.bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.bubble-head.hidden, .bubble-stack.hidden, .bubble-toggle.hidden { display: none; }
+.bubble-project {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #a45e42;
+  font-size: 10.5px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bubble-dismiss {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(86, 60, 47, 0.08);
+  color: #76594b;
+  cursor: pointer;
+  font: 600 15px/20px -apple-system, "PingFang SC", sans-serif;
+  -webkit-app-region: no-drag;
+}
+.bubble-dismiss:hover { background: rgba(217, 119, 87, 0.18); color: #8e412d; }
+.bubble.ending.collapsed #bubble-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.bubble-stack {
+  display: flex;
+  max-height: min(44vh, 300px);
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.bubble-ending-item {
+  padding-top: 7px;
+  border-top: 1px solid rgba(217, 119, 87, 0.18);
+}
+.bubble-ending-project {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 2px;
+  color: #a45e42;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bubble-ending-text {
+  display: block;
+  white-space: pre-wrap;
+}
+.bubble-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+  padding: 6px 1px 0;
+  border: 0;
+  border-top: 1px solid rgba(217, 119, 87, 0.2);
+  background: transparent;
+  color: #8e4c36;
+  cursor: pointer;
+  font: 700 11px/1.2 -apple-system, "PingFang SC", sans-serif;
+  -webkit-app-region: no-drag;
+}
+.bubble-toggle:hover { color: #c45f3f; }
 
 /* ---------- 额度小条 ---------- */
 .chip {
@@ -1449,7 +1533,7 @@ body.skin-cat #prop {
 .ask-opt.act.deny:hover { background: rgba(255, 90, 82, 0.2); }
 
 /* 装饰/非交互元素不拦截鼠标 → 命中测试看穿它们，透明区可点击穿透 */
-#bubble, #think, #sleep, #prop, #sidekick, #chip { pointer-events: none; }
+#bubble:not(.ending), #think, #sleep, #prop, #sidekick, #chip { pointer-events: none; }
 
 /* 弹层贴着 pet 上方：窗口底部对齐增高，pet(168px)+额度条占底部约 200px，
    所以从 bottom:200 起向上展开，紧挨小章鱼，而不是钉在很远的顶部。 */

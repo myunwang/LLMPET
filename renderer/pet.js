@@ -319,6 +319,13 @@ function applyDeliveredMemeWorkReaction(meme, result) {
 }
 const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');
+const bubbleHead = document.getElementById('bubble-head');
+const bubbleProject = document.getElementById('bubble-project');
+const bubbleDismiss = document.getElementById('bubble-dismiss');
+const bubbleStack = document.getElementById('bubble-stack');
+const bubbleToggle = document.getElementById('bubble-toggle');
+const bubbleCount = document.getElementById('bubble-count');
+const bubbleChevron = document.getElementById('bubble-chevron');
 const chipCost = document.getElementById('chip-cost');
 const chipWindow = document.getElementById('chip-window');
 const chipSep = document.getElementById('chip-sep');
@@ -1180,7 +1187,7 @@ function hideAsk(preserveSize = false) {
   if (askText) askText.value = ''; // 清掉草稿，避免关闭后仍被判为「交互中」冻住状态
   if (askActive) {
     askActive = false;
-    if (!preserveSize) resetPetSize();
+    if (!preserveSize && !restoreEndingBubble()) resetPetSize();
     window.pet.blurPet();
   }
 }
@@ -1335,6 +1342,7 @@ function openTodoPop() {
   if (askActive) hideAsk(true); // 直接交给新面板接管尺寸，不经过 340px 中间帧
   if (sessListOpen) closeSessList(true);
   renderTodoPop();
+  bubble.classList.add('hidden');
   todopop.classList.remove('hidden');
   todoPopOpen = true;
   rlog('pop', `open acts=${actionableItems().length} todos=${curTodos.length}`);
@@ -1345,7 +1353,7 @@ function closeTodoPop(preserveSize = false) {
   todoPopOpen = false;
   rlog('pop', 'close');
   window.pet.blurPet();
-  if (!preserveSize) resetPetSize();
+  if (!preserveSize && !restoreEndingBubble()) resetPetSize();
 }
 
 // ---------- 会话列表 HUD（左键弹出）----------
@@ -1385,7 +1393,10 @@ function beginLootPerformance() {
 
 function endLootPerformance(delay = 0) {
   clearTimeout(lootPerformanceTimer);
-  lootPerformanceTimer = setTimeout(() => { lootPerformanceActive = false; }, delay);
+  lootPerformanceTimer = setTimeout(() => {
+    lootPerformanceActive = false;
+    restoreEndingBubble();
+  }, delay);
 }
 // Claude 橙色 burst（小图标）
 const CLAUDE_ICON =
@@ -2733,6 +2744,7 @@ function openSessList() {
   hideAsk(true);
   resetSessionListOrder();
   showSessionPage();
+  bubble.classList.add('hidden');
   sesslist.classList.remove('hidden');
   sessListOpen = true;
   rlog('sesslist', 'open ' + visibleSessions().length);
@@ -2746,7 +2758,7 @@ function closeSessList(preserveSize = false) {
   takeoverTarget = null;
   travelTarget = null;
   rlog('sesslist', 'close');
-  if (!preserveSize) resetPetSize();
+  if (!preserveSize && !restoreEndingBubble()) resetPetSize();
 }
 
 function alignMemePlayer() {
@@ -2785,6 +2797,7 @@ function restoreSizeAfterMeme() {
   if (askActive) fitPopup(askEl);
   else if (sessListOpen) fitPopup(sesslist);
   else if (todoPopOpen) fitPopup(todopop);
+  else if (restoreEndingBubble()) return;
   else if (!bubble.classList.contains('hidden')) fitPopup(bubble);
   else resetPetSize();
 }
@@ -2859,6 +2872,9 @@ let actTimer = null;
 
 let state = 'idle';
 let bubbleTimer = null;
+let bubbleMode = 'transient';
+let endingExpanded = false;
+const endingMessages = new Map();
 let blinkTimer = null;
 let transientUntil = 0;   // 短暂状态（happy/error）持续到的时间
 let transientState = null;
@@ -2930,7 +2946,9 @@ function setState(s) {
   rlog('state', s);
   thinkEl.classList.toggle('on', s === 'thinking');
   sleepEl.classList.toggle('on', s === 'sleeping');
-  if (s === 'thinking' || s === 'sleeping') bubble.classList.add('hidden');
+  // A final response is an inbox item, not a transient animation. Thinking or
+  // sleeping may hide ordinary chatter, but must not erase an unread ending.
+  if ((s === 'thinking' || s === 'sleeping') && bubbleMode !== 'ending') bubble.classList.add('hidden');
   if (s === 'working') {
     // 进入干活态 → 立刻挂上「持续忙碌」基线动作，不等具体 tool 事件，
     // 任何时刻都显得在忙（具体 tool 动作会在它之上叠加，结束后回落到这里）。
@@ -3114,14 +3132,136 @@ function syncErrorRibbons() {
   errorRibbonTimer = setTimeout(syncErrorRibbons, 1750);
 }
 
-function showBubble(text, holdMs = 3200, force = false) {
-  if (!force && (muted || radialOpen || askActive)) return false; // 选项面板开着时不弹气泡盖住它(force=重要提示强制显示)
+function setBubbleText(text) {
   // emoji → 内联 SVG（OctoIcons 在 emoji 字符与 SVG 之间做安全替换；不可识别字符原样保留）
   if (window.OctoIcons && window.OctoIcons.hasMappedEmoji(text)) {
     window.OctoIcons.setTextWithIcons(bubbleText, text);
   } else {
     bubbleText.textContent = text;
   }
+}
+
+function clearEndingPresentation() {
+  bubble.classList.remove('ending', 'collapsed', 'expanded');
+  bubbleHead.classList.add('hidden');
+  bubbleStack.classList.add('hidden');
+  bubbleStack.innerHTML = '';
+  bubbleToggle.classList.add('hidden');
+  bubbleToggle.setAttribute('aria-expanded', 'false');
+}
+
+function endingKey(ev) {
+  if (ev && ev.sessionId) return `session:${ev.sessionId}`;
+  return `project:${String(ev && ev.agent || AGENT)}:${String(ev && ev.project || '')}`;
+}
+
+function endingEntries() {
+  return [...endingMessages.values()].reverse();
+}
+
+function renderEndingBubble() {
+  if (!endingMessages.size) return false;
+  const entries = endingEntries();
+  const latest = entries[0];
+  const multiple = entries.length > 1;
+  clearTimeout(bubbleTimer);
+  bubbleMode = 'ending';
+  bubble.classList.add('ending');
+  bubble.classList.toggle('collapsed', multiple && !endingExpanded);
+  bubble.classList.toggle('expanded', multiple && endingExpanded);
+  bubbleHead.classList.remove('hidden');
+  bubbleProject.textContent = latest.project || latest.agent || t('sess.fallbackName');
+  bubbleDismiss.setAttribute('aria-label', t('bub.dismissEndings'));
+  setBubbleText(`💬 ${latest.text}`);
+  bubbleStack.innerHTML = '';
+
+  if (multiple) {
+    bubbleCount.textContent = t('bub.conversationCount', { count: entries.length });
+    bubbleChevron.textContent = endingExpanded ? '⌃' : '⌄';
+    bubbleToggle.setAttribute('aria-expanded', endingExpanded ? 'true' : 'false');
+    bubbleToggle.setAttribute('aria-label', t(endingExpanded ? 'bub.collapseEndings' : 'bub.expandEndings'));
+    bubbleToggle.classList.remove('hidden');
+  } else {
+    endingExpanded = false;
+    bubbleToggle.classList.add('hidden');
+    bubbleToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  if (multiple && endingExpanded) {
+    for (const entry of entries.slice(1)) {
+      const item = document.createElement('div');
+      item.className = 'bubble-ending-item';
+      const project = document.createElement('span');
+      project.className = 'bubble-ending-project';
+      project.textContent = entry.project || entry.agent || t('sess.fallbackName');
+      const text = document.createElement('span');
+      text.className = 'bubble-ending-text';
+      text.textContent = `💬 ${entry.text}`;
+      item.appendChild(project);
+      item.appendChild(text);
+      bubbleStack.appendChild(item);
+    }
+    bubbleStack.classList.remove('hidden');
+  } else {
+    bubbleStack.classList.add('hidden');
+  }
+
+  // Interactive cards temporarily own the window. Keep the ending in memory
+  // and restore it as soon as that surface closes.
+  if (askActive || sessListOpen || todoPopOpen || radialOpen) return true;
+  bubble.classList.remove('hidden');
+  bubble.scrollTop = 0;
+  fitPopup(bubble);
+  return true;
+}
+
+function rememberEnding(ev, deferDisplay = false) {
+  const text = String(ev && ev.text || '').trim();
+  if (!text) return false;
+  const key = endingKey(ev);
+  if (endingMessages.has(key)) endingMessages.delete(key);
+  endingMessages.set(key, {
+    key,
+    sessionId: ev.sessionId || '',
+    project: ev.project || '',
+    agent: ev.agent || AGENT,
+    text,
+  });
+  // A newly arriving ending follows Codex's compact notification behaviour:
+  // show the newest excerpt and the conversation count, not an ever-growing wall.
+  endingExpanded = false;
+  return deferDisplay ? true : renderEndingBubble();
+}
+
+function forgetEnding(ev) {
+  const key = endingKey(ev);
+  if (!endingMessages.delete(key)) return false;
+  if (endingMessages.size < 2) endingExpanded = false;
+  if (bubbleMode === 'ending') {
+    if (endingMessages.size) renderEndingBubble();
+    // The user-turn handler immediately replaces this with its acknowledgement
+    // bubble. Preserve the expanded frame across that hand-off to avoid a
+    // 340px collapse/expand pair and the visible anchor jump it can cause.
+    else hideBubble(true, true);
+  }
+  return true;
+}
+
+function restoreEndingBubble() {
+  if (state !== 'waiting'
+      && !askActive && !sessListOpen && !todoPopOpen && !radialOpen
+      && endingMessages.size) {
+    renderEndingBubble();
+    return true;
+  }
+  return false;
+}
+
+function showBubble(text, holdMs = 3200, force = false) {
+  if (!force && (muted || radialOpen || askActive)) return false; // 选项面板开着时不弹气泡盖住它(force=重要提示强制显示)
+  bubbleMode = 'transient';
+  clearEndingPresentation();
+  setBubbleText(text);
   bubble.classList.remove('hidden');
   bubble.scrollTop = 0; // 重置滚动到顶（上次长气泡可能滚到了下边）
   // 大段文字：把窗口按实际高度撑开（fitPopup 已按屏幕封顶，永远不顶出屏幕；
@@ -3135,11 +3275,29 @@ function showBubble(text, holdMs = 3200, force = false) {
   bubbleTimer = setTimeout(hideBubble, holdMs);
   return true;
 }
-function hideBubble() {
+function hideBubble(force = false, preserveSize = false) {
+  if (!force && bubbleMode === 'ending' && endingMessages.size) return false;
   bubble.classList.add('hidden');
+  if (bubbleMode === 'ending') clearEndingPresentation();
+  bubbleMode = 'transient';
+  if (!force && restoreEndingBubble()) return false;
   // 若没有其它弹层占用大窗口尺寸，恢复原始尺寸（避免 pet 一直停在加大窗口里）
-  if (!askActive && !sessListOpen && !todoPopOpen) resetPetSize();
+  if (!preserveSize && !askActive && !sessListOpen && !todoPopOpen) resetPetSize();
+  return true;
 }
+
+bubbleToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (endingMessages.size < 2) return;
+  endingExpanded = !endingExpanded;
+  renderEndingBubble();
+});
+bubbleDismiss.addEventListener('click', (e) => {
+  e.stopPropagation();
+  endingMessages.clear();
+  endingExpanded = false;
+  hideBubble(true);
+});
 
 function scheduleBlink() {
   blinkTimer = setTimeout(() => {
@@ -3214,6 +3372,7 @@ window.pet.onEvent((ev) => {
   // 你正在答面板/打字时：新的待答任务只悄悄进队列(不抢面板)，其余动画/彩带/气泡/状态变化一律不打断
   if (isInteracting()) {
     if ((ev.kind === 'waiting' || ev.kind === 'needsinput') && ev.choice) enqueueChoice(ev.choice);
+    if (ev.kind === 'say') rememberEnding(ev, true);
     return;
   }
   // 旅行中的宠物不被其它普通 session 的动画瞬间拉回工位；真正需要用户
@@ -3221,17 +3380,22 @@ window.pet.onEvent((ev) => {
   if (
     travelBelongsToThisPet(travelData && travelData.active) &&
     ['operation', 'say', 'user-turn', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)
-  ) return;
+  ) {
+    if (ev.kind === 'say') rememberEnding(ev, true);
+    return;
+  }
   // 表情包刚下发时，紧随其后的 user-turn / operation 正是这条 Prompt 自己
   // 产生的。不能让它们在几十毫秒内把配置好的「汗流浃背」应对盖成 thinking /
   // working；错误、授权和需回复等高优先级事件仍继续穿透并接管。
   if (memeLayoutActive && ['user-turn', 'operation', 'say', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)) {
+    if (ev.kind === 'say') rememberEnding(ev, true);
     return;
   }
   // 掠夺是一段不可被普通会话事件插播的完整演出；否则正在运行的 Codex
   // operation 会把“拿来吧你”和掠夺进度气泡瞬间盖掉。
   if (lootPerformanceActive
       && ['user-turn', 'operation', 'say', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)) {
+    if (ev.kind === 'say') rememberEnding(ev, true);
     return;
   }
   switch (ev.kind) {
@@ -3254,25 +3418,32 @@ window.pet.onEvent((ev) => {
       break;
     }
     case 'say':
-      if (ev.text && ev.text.length > 2 && state !== 'waiting') {
+      if (ev.text && ev.text.length > 2) {
         const dur = Math.min(6000, Math.max(2200, ev.text.length * 80));
+        const waitingForUser = state === 'waiting';
+        rememberEnding(ev, waitingForUser);
+        // A different conversation may finish while the global pet is waiting
+        // for permission. Retain that ending, but do not cover the user action.
+        if (waitingForUser) break;
         // Stop 会同批派生 turn-done(happy) + say(talking)：让庆祝先演完，
-        // talking 排在 happy 结束后接棒，气泡文本立刻显示不用等。
+        // talking 排在 happy 结束后接棒；ending 气泡则独立常驻。
         if (transientState === 'happy' && perfNow() < transientUntil) {
-          showBubble(`💬 ${ev.text}`, Math.min(4200, dur));
           const token = ++sayToken;
           setTimeout(() => {
             if (token === sayToken && state !== 'waiting') transient(ev.emotion || 'talking', dur);
           }, Math.max(0, transientUntil - perfNow()));
         } else if (ev.emotion) {
           // Claude 的话里带情绪（sorry/puzzled/excited）→ 短暂表情替代 talking
-          transient(ev.emotion, 2800, `💬 ${ev.text}`, Math.min(4200, ev.text.length * 80));
+          transient(ev.emotion, 2800);
         } else {
-          transient('talking', dur, `💬 ${ev.text}`, Math.min(4200, dur));
+          transient('talking', dur);
         }
       }
       break;
     case 'user-turn':
+      // Starting the next turn acknowledges only this conversation's previous
+      // ending. Other completed conversations remain grouped in the inbox.
+      forgetEnding(ev);
       // A live SessionStart greet must get its short entrance before the task's
       // immediately-following TaskStarted/UserMessage rows take over.
       if (transientState === 'greet' && perfNow() < transientUntil) break;
@@ -3579,6 +3750,7 @@ function applyStats(s) {
   } else {
     setState('idle');
   }
+  if (state !== 'waiting' && bubble.classList.contains('hidden')) restoreEndingBubble();
 }
 window.pet.onStats(applyStats);
 
@@ -4174,6 +4346,9 @@ function closeRadial() {
   radial.classList.add('hidden');
   radialOpen = false;
   try { window.pet.uiBusy(!!(todoPopOpen || sessListOpen || askActive || isInteracting())); } catch {}
+  // closeRadial is also used while synchronously switching to another popup.
+  // Defer restoration one frame so the next surface can claim the window first.
+  requestAnimationFrame(restoreEndingBubble);
 }
 function toggleRadial() {
   if (radialOpen) closeRadial();
@@ -4231,7 +4406,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
 // 桌宠窗口是透明矩形，空白处不该拦住后面的应用。光标在内容(小章鱼/卡片/菜单/记事本)
 // 上 → 接收点击；在透明区 → 让窗口穿透。forward:true 使穿透时 mousemove 仍回传，
 // 因此一旦光标回到内容上即可恢复可点。拖动中(g)始终保持可点。
-const HIT_SEL = '#pixel,#mascot,#cat,#radial,#notepad,#todopop,#ask,#sesslist';
+const HIT_SEL = '#pixel,#mascot,#cat,#bubble.ending,#radial,#notepad,#todopop,#ask,#sesslist';
 let mouseIgnoring = false;
 function setMouseIgnore(on, reason = 'unknown', details = {}) {
   if (on === mouseIgnoring) return;
