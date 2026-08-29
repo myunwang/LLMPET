@@ -407,35 +407,46 @@ function tagModels(byModel, agent) {
   return out;
 }
 
-function combineUsage(claudeStats, codexStats, provider) {
-  // Only the two providers with a local, attributable price ledger may select
-  // one. `all` is the shared machine view. dsh can front arbitrary model
-  // providers, and an unknown future agent has no trusted pricing contract, so
-  // both must remain explicitly unavailable instead of inheriting both ledgers.
+function combineUsage(claudeStats, codexStats, provider, codewhaleStats) {
+  // Only providers with a local, attributable price ledger may select one.
+  // `all` is the shared machine view. dsh can front arbitrary model providers,
+  // and an unknown future agent has no trusted pricing contract, so both must
+  // remain explicitly unavailable instead of inheriting both ledgers.
+  // CodeWhale has a verified per-turn usage contract + models.dev pricing, so
+  // it joins the machine total and the main pet's lane (no dedicated pet).
   const scope = provider || 'all';
   const useClaude = scope === 'all' || scope === 'claude';
   const useCodex = scope === 'all' || scope === 'codex';
+  const useCodewhale = scope === 'all' || scope === 'claude';
   const claude = useClaude && claudeStats ? claudeStats : null;
   const codex = useCodex && codexStats ? codexStats : null;
+  const codewhale = useCodewhale && codewhaleStats ? codewhaleStats : null;
 
   const claudeToday = providerDay(claude && claude.today);
   const codexToday = providerDay(codex && codex.today);
+  const codewhaleToday = providerDay(codewhale && codewhale.today);
   const claudeLifetime = providerDay(claude && claude.lifetime);
   const codexLifetime = providerDay(codex && codex.lifetime);
+  const codewhaleLifetime = providerDay(codewhale && codewhale.lifetime);
   const claudeWindow = (claude && claude.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   const codexWindow = (codex && codex.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
+  const codewhaleWindow = (codewhale && codewhale.window5h) || { cost: 0, tokens: 0, startsAt: null };
   return {
-    billingAvailable: useClaude || useCodex,
-    today: addDay(claudeToday, codexToday),
-    todayByProvider: { claude: claudeToday, codex: codexToday },
-    window5h: addWindows(claudeWindow, codexWindow),
-    window5hByProvider: { claude: claudeWindow, codex: codexWindow },
-    byModel: { ...tagModels(claude && claude.byModel, 'claude'), ...tagModels(codex && codex.byModel, 'codex') },
-    hourly: addHours(claude && claude.hourly, codex && codex.hourly),
-    hourlyTok: addHours(claude && claude.hourlyTok, codex && codex.hourlyTok),
-    daily: addCalendars(claude && claude.daily, codex && codex.daily),
-    lifetime: addDay(claudeLifetime, codexLifetime),
-    lifetimeByProvider: { claude: claudeLifetime, codex: codexLifetime },
+    billingAvailable: useClaude || useCodex || useCodewhale,
+    today: addDay(addDay(claudeToday, codexToday), codewhaleToday),
+    todayByProvider: { claude: claudeToday, codex: codexToday, ...(codewhale ? { codewhale: codewhaleToday } : {}) },
+    window5h: addWindows(addWindows(claudeWindow, codexWindow), codewhaleWindow),
+    window5hByProvider: { claude: claudeWindow, codex: codexWindow, ...(codewhale ? { codewhale: codewhaleWindow } : {}) },
+    byModel: {
+      ...tagModels(claude && claude.byModel, 'claude'),
+      ...tagModels(codex && codex.byModel, 'codex'),
+      ...(codewhale ? tagModels(codewhale.byModel, 'codewhale') : {}),
+    },
+    hourly: addHours(addHours(claude && claude.hourly, codex && codex.hourly), codewhale && codewhale.hourly),
+    hourlyTok: addHours(addHours(claude && claude.hourlyTok, codex && codex.hourlyTok), codewhale && codewhale.hourlyTok),
+    daily: addCalendars(addCalendars(claude && claude.daily, codex && codex.daily), codewhale && codewhale.daily),
+    lifetime: addDay(addDay(claudeLifetime, codexLifetime), codewhaleLifetime),
+    lifetimeByProvider: { claude: claudeLifetime, codex: codexLifetime, ...(codewhale ? { codewhale: codewhaleLifetime } : {}) },
   };
 }
 
@@ -556,7 +567,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
   }
 
   const provider = (opts && opts.usageProvider) || 'claude';
-  const usage = combineUsage(metering, opts && opts.codexUsage, provider);
+  const usage = combineUsage(metering, opts && opts.codexUsage, provider, opts && opts.codewhaleUsage);
   const todayOut = usage.today;
 
   // Header wants a short project label, not the full cwd path.
@@ -597,6 +608,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     bg: (opts && opts.runtime) || { running: 0, zombie: 0, total: 0, scripts: 0, agents: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
     codexUsage: (opts && opts.codexUsage) || null,
+    codewhaleUsage: (opts && opts.codewhaleUsage) || null,
     billingAvailable: usage.billingAvailable,
     usageProvider: (opts && opts.usageProvider) || 'claude',
     ts: snapshot.ts,

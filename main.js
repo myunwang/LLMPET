@@ -57,6 +57,7 @@ const { createProgramRegistry } = require('./backend/program-registry');
 const { createProgramSkillManager } = require('./backend/program-skill');
 const { createRuntimeMonitor } = require('./backend/runtime-monitor');
 const codewhaleProvider = require('./backend/codewhale-provider');
+const { createCodeWhaleMetering } = require('./backend/codewhale-metering');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 const petGeometry = require('./shared/pet-geometry');
@@ -90,6 +91,7 @@ let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
+let codewhaleMetering = null; // CodeWhale turn_end usage 台账（models.dev 计价）
 let dshWatch = null;    // DeepSeek Harness 会话日志只读监听器
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
@@ -947,6 +949,7 @@ function buildStats(agent = 'all', snapshot = null, excludes = []) {
   const snap = filterSnapshot(rawSnapshot, agent, excludes);
   const meter = metering ? metering.getStats() : null;
   const codexUsage = codexMetering ? codexMetering.getStats() : null;
+  const codewhaleUsage = codewhaleMetering ? codewhaleMetering.getStats() : null;
   // 授权（HTTP 阻塞钩子）只存在于 Claude/CodeWhale 路径；Codex / dsh 宠不认领。
   // CodeWhale 的待决策请求没有专属宠，与 Claude 的请求一起在主宠上冒泡。
   const pending = agent === 'codex' || agent === 'dsh'
@@ -961,6 +964,7 @@ function buildStats(agent = 'all', snapshot = null, excludes = []) {
   const stats = adapter.buildPetStats(snap, pending, meter, {
     lastOps: ops,
     codexUsage,
+    codewhaleUsage,
     // Shared pet/panel/archive must combine both ledgers. Mapping `all` to
     // `claude` made the headline omit Codex while the Codex detail card still
     // showed its own cost, producing contradictory totals in the real UI.
@@ -969,7 +973,7 @@ function buildStats(agent = 'all', snapshot = null, excludes = []) {
   });
   // Travel sessions are already present in the Claude/Codex ledgers, so the
   // machine total is the two provider lifetimes only—never travel + providers.
-  stats.machineGrowth = machineGrowth(meter, codexUsage);
+  stats.machineGrowth = machineGrowth(meter, codexUsage, codewhaleUsage);
   stats.travel = travelManager ? travelManager.publicState(i18n.getLang()) : null;
   return stats;
 }
@@ -1126,6 +1130,18 @@ function bootBackend() {
   metering = createMetering();
   metering.start(30000);
 
+  // CodeWhale metering: consumes the turn_end usage the hook forwards through
+  // /state and prices it from the models.dev cache. Enabled whenever the
+  // CodeWhale provider is (config present or forced); harmless otherwise.
+  {
+    let codewhaleConfigExists = false;
+    try { fs.accessSync(codewhaleProvider.CONFIG); codewhaleConfigExists = true; } catch {}
+    if (process.env.LLMPET_ENABLE_CODEWHALE === '1' || codewhaleConfigExists) {
+      codewhaleMetering = createCodeWhaleMetering({ onChange: scheduleEmit });
+      codewhaleMetering.start(30000);
+    }
+  }
+
   // Pricing sync: fetches LiteLLM's open pricing JSON once on boot + every 24h.
   // metering.loadPricing() now reads ~/.octopus/pricing-cache.json beneath the
   // user override. Public-data only — no credentials, no API calls.
@@ -1207,6 +1223,9 @@ function bootBackend() {
     core,
     permissions,
     shouldDropForDnd: () => false,
+    onCodeWhaleUsage: (turn) => {
+      if (codewhaleMetering) codewhaleMetering.record(turn);
+    },
     onPermissionChange: scheduleEmit,
     // CodeWhale bridge: surface the parked request as a pet card the same way
     // the Claude PermissionRequest flow does (state bubble + allow/deny).
