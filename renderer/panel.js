@@ -20,7 +20,9 @@ function fmt(n) {
 }
 function timeStr(ts) {
   const d = new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  // Follow the UI language like the other date formatters below; a hardcoded
+  // zh-CN made the ops column render Chinese-formatted times in en/ja UIs.
+  return d.toLocaleTimeString(LOCALE_TAG[window.OctoI18n.getLang()] || 'zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 function shortModel(m) {
   if (!m) return '?';

@@ -924,13 +924,17 @@ function clearAskBody() {
   askPage.textContent = '';
   askInputRow.classList.add('hidden');
   askText.value = '';
+  // 一张卡的专属 placeholder（如方案打回意见）不得泄漏到下一张卡的
+  // 自定义输入框；这里连同 warnEmptyInput 的缓存一起复位。
+  askText.placeholder = t('ask.placeholder');
+  delete askText.dataset.ph;
   askTerm.textContent = t('ask.goTerminal');
 }
 
 // ① elicitation（AskUserQuestion）：多选项卡 + Other + 分页 + Submit/Back
 function renderElicitation(c) {
   clearAskBody();
-  askLabel.textContent = 'Needs Input';
+  askLabel.textContent = t('ask.needsInput');
   const qs = elic.questions;
   const q = qs[elic.qIdx] ||
     { question: c.question || t('ask.needAnswer'), options: (c.options || []).map((o) => ({ label: o.label, description: o.desc })) };
@@ -957,7 +961,8 @@ function renderElicitation(c) {
   }
 
   for (const o of opts) askOpts.appendChild(buildRadioCard(o.label, o.description, o.label, q));
-  askOpts.appendChild(buildRadioCard('Other', '', '__other__', q));
+  // “Other”是本应用自加的自由输入项（CC 原生 CLI 同款入口），label 走 i18n。
+  askOpts.appendChild(buildRadioCard(t('ask.other'), '', '__other__', q));
   if (elic.selected === '__other__' || (multi && elic.otherOn)) {
     askInputRow.classList.remove('hidden');
     if (!multi && prior && !known(prior)) askText.value = prior;
@@ -966,7 +971,7 @@ function renderElicitation(c) {
   askPage.textContent = `${elic.qIdx + 1} / ${qs.length || 1}`;
   askFoot.classList.remove('hidden');
   const last = elic.qIdx >= (qs.length || 1) - 1;
-  askSubmit.textContent = last ? 'Submit Answer' : 'Next ›';
+  askSubmit.textContent = t(last ? 'ask.submit' : 'ask.next');
   askBack.classList.toggle('hidden', elic.qIdx === 0);
   askTerm.classList.remove('hidden');
   updateSubmitEnabled(q);
@@ -1114,7 +1119,7 @@ function renderPerm(c) {
 // ③ 纯回复（无选项）：只读问题 + Go to Terminal
 function renderContinue(c) {
   clearAskBody();
-  askLabel.textContent = 'Needs Input';
+  askLabel.textContent = t('ask.needsInput');
   askQ.textContent = c.question || t('ask.waitingReply');
   askFoot.classList.add('hidden');
   askTerm.classList.remove('hidden');
@@ -1829,7 +1834,11 @@ function renderSessList() {
     slRows.innerHTML = '';
     const e = document.createElement('div');
     e.className = 'sl-empty';
-    e.textContent = lootCapture ? t('loot.waiting') : t('sess.empty');
+    // 搜索/筛选生效时，“暂无会话”会误导用户以为要新开；给出针对性的提示。
+    const filtered = !!(sessionSearch.trim() || sessionFilter !== 'all' || showArchived);
+    e.textContent = lootCapture
+      ? t('loot.waiting')
+      : t(filtered ? 'sess.noMatch' : 'sess.empty');
     slRows.appendChild(e);
     return true;
   }
@@ -3847,6 +3856,13 @@ function applyLang(next) {
 
 function applySkin(s) {
   skin = ['pixel', 'mascot', ...Object.keys(MEME_PACKS)].includes(s) ? s : 'mascot';
+  // 离开 meme 皮肤时停掉姿态轮换定时器：它只对 cat/whale 有意义，留着会以
+  // 60s 周期空转到应用退出（每次都提前 return，但定时器本身不消失）。
+  if (!isMeme() && poolRot) {
+    clearInterval(poolRot);
+    poolRot = null;
+    poolIdx++; // 与 updateCat 的清理路径同语义：下次进入轮换态直接是下一张
+  }
   document.body.classList.toggle('skin-pixel', skin === 'pixel');
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
   document.body.classList.toggle('skin-cat', isMeme());
@@ -4286,6 +4302,10 @@ function buildRadial(metrics = lastRadialMetrics) {
     const y = point.y;
     const b = document.createElement('div');
     b.className = 'radial-item';
+    // 徽标种别记在节点上：updateRadialBadge 不能用 MENU 下标去对齐过滤后的
+    // DOM 子节点（条件项被滤掉后下标错位，徽标会挂到别人的按钮上）。
+    if (it.badge) b._badgeKind = 'pending';
+    else if (it.badgeBg) b._badgeKind = 'bg';
     b.style.left = x + 'px';
     b.style.top = y + 'px';
     b.style.transitionDelay = i * 0.03 + 's';
@@ -4300,6 +4320,7 @@ function buildRadial(metrics = lastRadialMetrics) {
       bd.className = 'ri-badge';
       bd.textContent = cnt;
       b.appendChild(bd);
+      b._badgeEl = bd;
     }
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4311,18 +4332,25 @@ function buildRadial(metrics = lastRadialMetrics) {
 }
 
 function updateRadialBadge() {
-  const items = radial.querySelectorAll('.radial-item');
-  MENU.forEach((m, idx) => {
-    if (!m.badge && !m.badgeBg) return;
-    const node = items[idx];
-    if (!node) return;
-    const cnt = m.badge ? lastWaiting : lastBgZombie;
-    let bd = node.querySelector('.ri-badge');
+  for (const node of [...radial.children]) {
+    if (!node._badgeKind) continue;
+    const cnt = node._badgeKind === 'pending' ? lastWaiting : lastBgZombie;
     if (cnt > 0) {
-      if (!bd) { bd = document.createElement('span'); bd.className = 'ri-badge'; node.appendChild(bd); }
+      // 复用节点上记的徽标引用：querySelector 在重建/过滤后的子节点集合里
+      // 定位不可靠，直接持有引用最稳（也方便无头测试断言）。
+      let bd = node._badgeEl;
+      if (!bd) {
+        bd = document.createElement('span');
+        bd.className = 'ri-badge';
+        node.appendChild(bd);
+        node._badgeEl = bd;
+      }
       bd.textContent = cnt;
-    } else if (bd) bd.remove();
-  });
+    } else if (node._badgeEl) {
+      node._badgeEl.remove();
+      node._badgeEl = null;
+    }
+  }
 }
 
 async function openRadial() {
