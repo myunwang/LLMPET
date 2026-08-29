@@ -56,6 +56,7 @@ const { createSessionArchive } = require('./backend/session-archive');
 const { createProgramRegistry } = require('./backend/program-registry');
 const { createProgramSkillManager } = require('./backend/program-skill');
 const { createRuntimeMonitor } = require('./backend/runtime-monitor');
+const codewhaleProvider = require('./backend/codewhale-provider');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
 const petGeometry = require('./shared/pet-geometry');
@@ -83,6 +84,7 @@ let core = null;
 let metering = null;
 let pricingSync = null;
 let permissions = null;
+let codewhalePermissions = null; // CodeWhale tool_call_before 桥的待决策池
 let server = null;
 let stopWatcher = null;
 let territory = null;
@@ -945,8 +947,14 @@ function buildStats(agent = 'all', snapshot = null, excludes = []) {
   const snap = filterSnapshot(rawSnapshot, agent, excludes);
   const meter = metering ? metering.getStats() : null;
   const codexUsage = codexMetering ? codexMetering.getStats() : null;
-  // 授权（HTTP 阻塞钩子）只存在于 Claude 路径；Codex / dsh 宠不认领
-  const pending = agent === 'codex' || agent === 'dsh' ? [] : permissions.getPending();
+  // 授权（HTTP 阻塞钩子）只存在于 Claude/CodeWhale 路径；Codex / dsh 宠不认领。
+  // CodeWhale 的待决策请求没有专属宠，与 Claude 的请求一起在主宠上冒泡。
+  const pending = agent === 'codex' || agent === 'dsh'
+    ? []
+    : [
+      ...permissions.getPending(),
+      ...(codewhalePermissions ? codewhalePermissions.getPending() : []),
+    ];
   const ops = (agent === 'all'
     ? recentOps.filter((o) => !excludes.includes(o.agent || 'claude'))
     : recentOps.filter((o) => (o.agent || 'claude') === agent)).slice(0, 30);
@@ -1199,22 +1207,70 @@ function bootBackend() {
     core,
     permissions,
     shouldDropForDnd: () => false,
+    onPermissionChange: scheduleEmit,
+    // CodeWhale bridge: surface the parked request as a pet card the same way
+    // the Claude PermissionRequest flow does (state bubble + allow/deny).
+    onPermissionAdded: (entry) => {
+      // The session may not be in the store yet (a tool_call_before can beat
+      // session_start). Fall back to the entry's own agent identity so the
+      // card still says who is asking instead of degrading to 'Claude'.
+      let lite = { id: entry.sessionId, agentId: entry.agentId || 'codewhale', cwd: '' };
+      try { const s = core.getSession(entry.sessionId); if (s) lite = toEntryLite(s); } catch {}
+      const choice = adapter.buildPermChoice({
+        id: entry.id,
+        sessionId: entry.sessionId,
+        toolName: entry.toolName,
+        toolInput: entry.toolInput,
+        suggestions: [],
+        // The card's auto-deny hint derives from these (same derivation the
+        // stats-snapshot path uses), so both renders of this card agree.
+        createdAt: entry.createdAt,
+        expiresAt: entry.expiresAt,
+      }, lite);
+      try { const w = firstAlivePetWin(); if (w && !w.isVisible()) w.show(); } catch {}
+      sendPetEvent({
+        kind: 'waiting',
+        project: choice.project,
+        reason: 'perm',
+        sessionId: entry.sessionId,
+        choice,
+        agent: 'claude', // no dedicated CodeWhale pet: the main pet answers
+        ts: Date.now(),
+      });
+      scheduleEmit();
+    },
   });
   server.start();
+  codewhalePermissions = server.getCodeWhalePermissions();
 
   // Install hooks once the server has a port (defer so listen wins the race).
   // OCTOPUS_NO_HOOKS=1 skips touching ~/.claude/settings.json (dev/verify mode).
   setTimeout(() => {
     if (process.env.OCTOPUS_NO_HOOKS === '1') {
       log('main', 'OCTOPUS_NO_HOOKS=1 — skipping Claude Code hook install');
-      return;
-    }
-    const port = server.getPort();
-    if (port) {
-      hooks.install(port, server.getToken());
-      stopWatcher = hooks.startWatcher(() => ({ port: server.getPort(), token: server.getToken() }));
     } else {
-      log('main', 'server has no port — hooks not installed (ports busy?)');
+      const port = server.getPort();
+      if (port) {
+        hooks.install(port, server.getToken());
+        stopWatcher = hooks.startWatcher(() => ({ port: server.getPort(), token: server.getToken() }));
+      } else {
+        log('main', 'server has no port — hooks not installed (ports busy?)');
+      }
+    }
+    // CodeWhale hooks: installed when the user runs CodeWhale (LLMPET installs
+    // its managed TOML block) or opted in explicitly via LLMPET_ENABLE_CODEWHALE=1.
+    // Failure is isolated — the rest of LLMPET never depends on it.
+    try {
+      const codewhaleConfigExists = (() => {
+        try { fs.accessSync(codewhaleProvider.CONFIG); return true; } catch { return false; }
+      })();
+      if (process.env.LLMPET_ENABLE_CODEWHALE === '1' || codewhaleConfigExists) {
+        log('main', 'CodeWhale hooks:', JSON.stringify(codewhaleProvider.install()));
+      } else {
+        log('main', 'CodeWhale not detected (~/.codewhale/config.toml absent) — provider idle');
+      }
+    } catch (e) {
+      log('main', 'CodeWhale hook install skipped:', e.message);
     }
   }, 400);
 
@@ -1436,6 +1492,12 @@ function registerIpc() {
   });
 
   ipcMain.on('permission-decide', (_e, permId, behavior) => {
+    // CodeWhale bridge requests carry the cw- id prefix and live in their own
+    // holder; everything else is the Claude PermissionRequest flow.
+    if (typeof permId === 'string' && permId.startsWith('cw-')) {
+      if (codewhalePermissions) codewhalePermissions.decide(permId, behavior);
+      return;
+    }
     if (behavior === 'travel:always-web') {
       const pending = permissions.getPending().find((entry) => entry.id === permId);
       if (pending && travelManager) travelManager.trustWebForSession(pending.sessionId);

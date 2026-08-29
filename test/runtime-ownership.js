@@ -12,8 +12,11 @@ const path = require('path');
 
 // ⚠️ HOME 覆盖必须在 transport require 之前（transport 在模块加载时固化
 // RUNTIME_PATH —— e2e 测试开发时踩过的真实坑）
+// ⚠️ Windows 上 os.homedir() 读 USERPROFILE 而非 HOME，必须两个都覆盖
+// （上游 CI windows-latest 全红的真实事故链，详见 e2e-codewhale.js 头注释）
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-home-'));
 process.env.HOME = fakeHome;
+process.env.USERPROFILE = fakeHome;
 process.env.OCTOPUS_ALLOW_MULTI = '1';
 
 const { createServer } = require('../backend/server');
@@ -104,7 +107,10 @@ async function main() {
   } finally {
     clearInterval(keepAlive);
     for (const s of servers) { try { s.stop(); } catch {} }
-    try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
+    // 先关 logger 常开流再删沙箱（Windows delete-pending 会永阻 rmSync，
+    // 详见 backend/log.js 的 shutdown 注释）
+    await require('../backend/log').shutdown();
+    try { fs.rmSync(fakeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {}
     // 不用 process.exit()：管道 stdout 是异步的，立即退出会截断未刷盘的
     // 输出（开发本测试时真实踩到的坑）。exitCode + 自然退出让缓冲刷完。
     process.exitCode = 0;
@@ -114,6 +120,7 @@ async function main() {
 main().catch((e) => {
   console.error('runtime ownership FAILED:', e.message);
   for (const s of servers) { try { s.stop(); } catch {} }
-  try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
+  require('../backend/log').shutdown(); // 尽力而为（无 await：失败路径同步退出）
+  try { fs.rmSync(fakeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {}
   process.exitCode = 1;
 });

@@ -1094,6 +1094,8 @@ function renderPerm(c) {
   askLabel.textContent = c.travel ? t('travel.letterLabel') : t('ask.needPerm');
   askQhead.textContent = c.header || '';
   askQ.textContent = c.question || t('ask.needPermQ');
+  // Bridges with a fail-closed window (CodeWhale auto-deny) tell the user here.
+  if (c.hint) askHint.textContent = c.hint;
   const opts = c.options || [];
   if (opts.length === 2) askOpts.classList.add('perm-row'); // 仅允许/拒绝时并排
   opts.forEach((opt) => {
