@@ -16,6 +16,7 @@ const {
   TOKEN_HEADER,
   BASE_PORT,
   getPortCandidates,
+  probe,
   readRuntimeConfig,
   writeRuntimeConfig,
   clearRuntimeConfig,
@@ -324,7 +325,10 @@ function createServer(deps) {
 
     server.on('listening', () => {
       activePort = ports[idx];
-      writeRuntimeConfig(activePort, activeToken);
+      // First-live-wins: if the runtime record already points to a live
+      // LLMPET server (explicit multi-instance mode), defer to it instead of
+      // stealing the hook traffic. A missing/stale record is claimed.
+      claimRuntimeOwnership();
       log('server', `listening on 127.0.0.1:${activePort}`);
       startRuntimeGuard();
     });
@@ -332,20 +336,49 @@ function createServer(deps) {
     server.listen(ports[idx], '127.0.0.1');
   }
 
-  // 守护 runtime.json：别的代码副本（同一套 transport 的旧版/分叉）启动时会把
-  // runtime 覆盖成自己的端口，hook 流量随之被劫走。存活期间发现记录不是自己
-  // 就抢回来 —— 先到者赢。
+  // ── runtime.json ownership ─────────────────────────────────────────────────
+  // The record routes hook traffic to one server. Two kinds of disputes exist:
+  //   1) a STALE record (the recorded server crashed / a leftover file) —
+  //      claimed/healed immediately;
+  //   2) a LIVE rival on another port — respected, never fought over.
+  // The previous guard re-asserted unconditionally every 15s, so two live
+  // instances (OCTOPUS_ALLOW_MULTI=1, or an older fork without defer logic)
+  // flip-flopped the file forever — each overwrite invalidates the other's
+  // token mid-flight. Liveness is proven by probing the recorded port and
+  // checking our identity header, so an unrelated process squatting on the
+  // port does NOT count as a live rival.
+  function claimRuntimeOwnership() {
+    if (!activePort) return;
+    const runtime = readRuntimeConfig();
+    if (runtime && runtime.port === activePort) {
+      // Record points at us. A token mismatch is a stale token from a previous
+      // boot of ours (or a same-port crash-restart): rewrite immediately.
+      if (runtime.token !== activeToken) writeRuntimeConfig(activePort, activeToken);
+      return;
+    }
+    if (!runtime) {
+      writeRuntimeConfig(activePort, activeToken);
+      return;
+    }
+    // Record points elsewhere: defer to it only if that server is alive.
+    probe(runtime.port, 600, (alive) => {
+      if (!alive) {
+        // Re-check before writing: the record may have changed during the probe.
+        const now = readRuntimeConfig();
+        if (!now || now.port === activePort) writeRuntimeConfig(activePort, activeToken);
+        else if (now.port === runtime.port) {
+          // Still the rival we probed and it answered nobody — claim it.
+          writeRuntimeConfig(activePort, activeToken);
+        }
+      }
+    });
+  }
+
   let runtimeGuard = null;
   function startRuntimeGuard() {
     stopRuntimeGuard();
-    runtimeGuard = setInterval(() => {
-      if (!activePort) return;
-      const runtime = readRuntimeConfig();
-      if (!runtime || runtime.port !== activePort || runtime.token !== activeToken) {
-        log('server', `runtime.json changed (another instance?) — reasserting ${activePort}`);
-        writeRuntimeConfig(activePort, activeToken);
-      }
-    }, 15000);
+    const intervalMs = Number.isFinite(deps.runtimeGuardMs) && deps.runtimeGuardMs > 0 ? deps.runtimeGuardMs : 15000;
+    runtimeGuard = setInterval(claimRuntimeOwnership, intervalMs);
     if (runtimeGuard.unref) runtimeGuard.unref();
   }
   function stopRuntimeGuard() {
