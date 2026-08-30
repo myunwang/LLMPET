@@ -223,7 +223,7 @@ function powershellInvocation(cli, cliArgs, promptFile) {
 function trySpawn(bin, args, opts) {
   return new Promise((resolve) => {
     try {
-      const child = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: false, ...opts });
+      const child = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: false, ...opts, shell: false });
       child.on('error', () => resolve(false));
       child.on('spawn', () => { child.unref(); resolve(true); });
     } catch {
