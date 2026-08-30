@@ -326,6 +326,9 @@ const bubbleStack = document.getElementById('bubble-stack');
 const bubbleToggle = document.getElementById('bubble-toggle');
 const bubbleCount = document.getElementById('bubble-count');
 const bubbleChevron = document.getElementById('bubble-chevron');
+const bubbleActivity = document.getElementById('bubble-activity');
+const bubbleActivityIcon = document.getElementById('bubble-activity-icon');
+const bubbleActivityText = document.getElementById('bubble-activity-text');
 const chipCost = document.getElementById('chip-cost');
 const chipWindow = document.getElementById('chip-window');
 const chipSep = document.getElementById('chip-sep');
@@ -2861,19 +2864,21 @@ const TOOL_ACT = {
   Edit: 'type', MultiEdit: 'type', Write: 'type', NotebookEdit: 'type',
   Read: 'read',
   Bash: 'crank',
+  Js: 'code',
   Grep: 'search', Glob: 'search',
   WebSearch: 'web', WebFetch: 'web',
   Task: 'summon', Agent: 'summon',
   TodoWrite: 'check',
 };
-const ACT_CLASSES = ['act-type', 'act-read', 'act-search', 'act-crank', 'act-web', 'act-summon', 'act-check', 'act-work'];
-const PROP_MOTION = { crank: 'spin', web: 'spin', search: 'hunt', type: 'jit' };
+const ACT_CLASSES = ['act-type', 'act-read', 'act-search', 'act-crank', 'act-code', 'act-web', 'act-summon', 'act-check', 'act-work'];
+const PROP_MOTION = { crank: 'spin', code: 'jit', web: 'spin', search: 'hunt', type: 'jit' };
 let actTimer = null;
 
 let state = 'idle';
 let bubbleTimer = null;
 let bubbleMode = 'transient';
 let endingExpanded = false;
+let endingScrollSeq = 0;
 const endingMessages = new Map();
 let blinkTimer = null;
 let transientUntil = 0;   // 短暂状态（happy/error）持续到的时间
@@ -3142,12 +3147,33 @@ function setBubbleText(text) {
 }
 
 function clearEndingPresentation() {
-  bubble.classList.remove('ending', 'collapsed', 'expanded');
+  bubble.classList.remove('ending', 'collapsed', 'expanded', 'activity');
   bubbleHead.classList.add('hidden');
   bubbleStack.classList.add('hidden');
   bubbleStack.innerHTML = '';
   bubbleToggle.classList.add('hidden');
   bubbleToggle.setAttribute('aria-expanded', 'false');
+  bubbleActivity.classList.add('hidden');
+  bubbleActivityIcon.textContent = '';
+  bubbleActivityText.textContent = '';
+}
+
+function showEndingActivity(text, icon = '') {
+  if (bubbleMode !== 'ending' || !endingMessages.size) return false;
+  bubbleActivityIcon.textContent = icon || '⚙️';
+  bubbleActivityText.textContent = String(text || '').trim() || t('tool.default');
+  bubbleActivity.classList.remove('hidden');
+  // This row is deliberately persistent until the next final answer replaces
+  // it. Repeated operation events therefore update one fixed-height slot instead
+  // of shrinking the BrowserWindow to 340px and clipping the ending card.
+  if (!askActive && !sessListOpen && !todoPopOpen && !radialOpen) fitPopup(bubble);
+  return true;
+}
+
+function clearEndingActivity() {
+  bubbleActivity.classList.add('hidden');
+  bubbleActivityIcon.textContent = '';
+  bubbleActivityText.textContent = '';
 }
 
 function endingKey(ev) {
@@ -3157,6 +3183,24 @@ function endingKey(ev) {
 
 function endingEntries() {
   return [...endingMessages.values()].reverse();
+}
+
+function resetEndingBubbleScroll() {
+  const seq = ++endingScrollSeq;
+  const reset = () => {
+    if (seq !== endingScrollSeq || bubbleMode !== 'ending') return;
+    bubble.scrollTop = 0;
+    bubbleStack.scrollTop = 0;
+  };
+  // Reset before and after Chromium/Electron lays out the resized transparent
+  // window. A focused expand/collapse button otherwise asks the browser to
+  // scroll it back into view and hides the header/newest answer again.
+  reset();
+  requestAnimationFrame(() => {
+    reset();
+    requestAnimationFrame(reset);
+  });
+  setTimeout(reset, 120);
 }
 
 function renderEndingBubble() {
@@ -3210,7 +3254,7 @@ function renderEndingBubble() {
   // and restore it as soon as that surface closes.
   if (askActive || sessListOpen || todoPopOpen || radialOpen) return true;
   bubble.classList.remove('hidden');
-  bubble.scrollTop = 0;
+  resetEndingBubbleScroll();
   fitPopup(bubble);
   return true;
 }
@@ -3227,6 +3271,7 @@ function rememberEnding(ev, deferDisplay = false) {
     agent: ev.agent || AGENT,
     text,
   });
+  clearEndingActivity();
   // A newly arriving ending follows Codex's compact notification behaviour:
   // show the newest excerpt and the conversation count, not an ever-growing wall.
   endingExpanded = false;
@@ -3257,11 +3302,18 @@ function restoreEndingBubble() {
   return false;
 }
 
-function showBubble(text, holdMs = 3200, force = false) {
+function showBubble(text, holdMs = 3200, force = false, presentation = 'transient', activityIcon = '') {
   if (!force && (muted || radialOpen || askActive)) return false; // 选项面板开着时不弹气泡盖住它(force=重要提示强制显示)
-  bubbleMode = 'transient';
+  // A completed-conversation card owns the visual surface. New status text is
+  // rendered in its dedicated action row, never by dismantling the ending DOM.
+  if (!askActive && !sessListOpen && !todoPopOpen && !radialOpen
+      && bubbleMode === 'ending' && endingMessages.size) {
+    return showEndingActivity(text, activityIcon);
+  }
+  bubbleMode = presentation === 'activity' ? 'activity' : 'transient';
   clearEndingPresentation();
-  setBubbleText(text);
+  bubble.classList.toggle('activity', bubbleMode === 'activity');
+  setBubbleText(bubbleMode === 'activity' && activityIcon ? `${activityIcon} ${text}` : text);
   bubble.classList.remove('hidden');
   bubble.scrollTop = 0; // 重置滚动到顶（上次长气泡可能滚到了下边）
   // 大段文字：把窗口按实际高度撑开（fitPopup 已按屏幕封顶，永远不顶出屏幕；
@@ -3279,6 +3331,7 @@ function hideBubble(force = false, preserveSize = false) {
   if (!force && bubbleMode === 'ending' && endingMessages.size) return false;
   bubble.classList.add('hidden');
   if (bubbleMode === 'ending') clearEndingPresentation();
+  else bubble.classList.remove('activity');
   bubbleMode = 'transient';
   if (!force && restoreEndingBubble()) return false;
   // 若没有其它弹层占用大窗口尺寸，恢复原始尺寸（避免 pet 一直停在加大窗口里）
@@ -3289,6 +3342,9 @@ function hideBubble(force = false, preserveSize = false) {
 bubbleToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   if (endingMessages.size < 2) return;
+  // Do not let focus preservation scroll the bounded ending card back down to
+  // the toggle after expansion. The newest answer must always start at line 1.
+  if (typeof bubbleToggle.blur === 'function') bubbleToggle.blur();
   endingExpanded = !endingExpanded;
   renderEndingBubble();
 });
@@ -3414,7 +3470,7 @@ window.pet.onEvent((ev) => {
         setState(ev.visualState === 'juggling' ? 'juggling' : 'working');
         playAction(ev.tool, ev.icon);
       }
-      showBubble(`${ev.icon || '🔧'} ${ev.detail}`);
+      showBubble(ev.detail, 3200, false, 'activity', ev.icon || '🔧');
       break;
     }
     case 'say':

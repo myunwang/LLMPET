@@ -288,6 +288,16 @@ assert(/function renderEndingBubble[\s\S]*endingMessages\.size[\s\S]*bubble\.cla
   && /function hideBubble[\s\S]*restoreEndingBubble\(\)/.test(js)
   && /#bubble:not\(\.ending\)/.test(css),
   'completed-conversation bubbles must persist, restore after transient status, and remain clickable');
+assert(/\.bubble\.ending\s*\{[^}]*max-height\s*:\s*calc\(100vh - 210px\)[^}]*overflow-y\s*:\s*auto\s*;/s.test(css)
+  && /\.bubble\.ending \.bubble-stack\s*\{[^}]*max-height\s*:\s*none\s*;[^}]*overflow\s*:\s*visible\s*;/s.test(css)
+  && /function resetEndingBubbleScroll[\s\S]*bubble\.scrollTop\s*=\s*0[\s\S]*requestAnimationFrame/s.test(js)
+  && /bubbleToggle\.addEventListener[\s\S]*bubbleToggle\.blur\(\)[\s\S]*renderEndingBubble\(\)/s.test(js),
+  'oversized ending cards must scroll as one bounded surface and reopen at the newest first line');
+assert(/id="bubble-activity"/.test(html)
+  && /function showEndingActivity[\s\S]*bubbleMode !== 'ending'[\s\S]*fitPopup\(bubble\)/.test(js)
+  && /function showBubble[\s\S]*bubbleMode === 'ending' && endingMessages\.size[\s\S]*showEndingActivity/.test(js)
+  && /\.bubble-activity\s*\{[^}]*background\s*:\s*rgba\(31, 29, 38, 0\.94\)/s.test(css),
+  'running actions must use a dedicated dark row without dismantling or shrinking the ending card');
 assert(/function resetPetSize\(\)\s*\{[\s\S]{0,500}if \(sessListOpen \|\| askActive \|\| todoPopOpen\) return false;/.test(js),
   'stale delayed callbacks must not collapse a popup that still owns the BrowserWindow');
 assert(/lastSessListRenderSig/.test(js)

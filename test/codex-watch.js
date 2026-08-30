@@ -73,9 +73,34 @@ check('mapTool：codex 工具名 → 既有词汇', () => {
   assert.strictEqual(mapTool('exec'), 'Bash');
   assert.strictEqual(mapTool('apply_patch'), 'Edit');
   assert.strictEqual(mapTool('js'), 'Js');
+  assert.strictEqual(mapTool('exec', {
+    input: 'const r = await tools.mcp__node_repl__js({ code: "1 + 1" });',
+  }), 'Js');
+  assert.strictEqual(mapTool('exec', {
+    input: 'await tools.update_plan({}); await tools.exec_command({ cmd: "npm test" });',
+  }), 'Bash');
   assert.strictEqual(mapTool('spawn_agent'), 'Task');
   assert.strictEqual(mapTool('wait_agent'), 'Wait');
   assert.strictEqual(mapTool('unknown_tool'), 'unknown_tool');
+});
+check('外层 exec 能从真实 JS 输入识别 Calling JS 动作', () => {
+  const { root, dir } = mkSessions();
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  const fp = path.join(dir, `rollout-wrapped-js-${UUID_B}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_B));
+  w.tick();
+  fs.appendFileSync(fp,
+    line({ type: 'event_msg', payload: { type: 'task_started' } }) +
+    line({ type: 'response_item', payload: {
+      type: 'custom_tool_call', name: 'exec', call_id: 'call-js-1',
+      input: 'const r = await tools.mcp__node_repl__js({ code: "2 + 2" });',
+    } }));
+  w.tick();
+  const op = core.updates.find((u) => u.event === 'PreToolUse');
+  assert(op);
+  assert.strictEqual(op.fields.toolName, 'Js');
 });
 check('parseRequestUserInput：Codex function_call arguments 保留问题/选项', () => {
   const qs = parseRequestUserInput(JSON.stringify({ questions: [{

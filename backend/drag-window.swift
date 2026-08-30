@@ -202,8 +202,14 @@ func matchingAXPetElement(pid: Int32, expected: CGRect) -> (AXUIElement, CGRect,
           let size = axSize(window, kAXSizeAttribute as CFString) else { return nil }
     let bounds = CGRect(origin: position, size: size)
     let shapeError = abs(size.width - expected.width) + abs(size.height - expected.height)
-    // Never substitute the host application's large chat window for its pet.
-    guard shapeError <= 16, size.width <= 650, size.height <= 650 else { return nil }
+    // Native-draw Codex uses a display-height AXDialog composition surface
+    // around the small persisted mascot anchor. Accept that exact large
+    // dialog, but never substitute the host application's AXStandardWindow.
+    let subrole = axString(window, kAXSubroleAttribute as CFString) ?? ""
+    let nativeOverlay = subrole == (kAXDialogSubrole as String)
+      && (expected.width > 650 || expected.height > 650)
+    guard shapeError <= 16,
+          nativeOverlay || (size.width <= 650 && size.height <= 650) else { return nil }
     var windowID = CGWindowID(0)
     guard AXUIElementGetWindow(window, &windowID) == .success, windowID != 0 else { return nil }
     let positionError = abs(position.x - expected.origin.x) + abs(position.y - expected.origin.y)
@@ -317,6 +323,31 @@ func axActionNames(_ element: AXUIElement) -> [String] {
   return values
 }
 
+@discardableResult
+func enableWebAccessibility(pid: Int32) -> [AXError] {
+  // Chromium keeps its renderer subtree lazy until an assistive client asks
+  // for it. Direct AX requests are more reliable here than System Events,
+  // which reports the app window but returns an empty `entire contents` list.
+  let app = AXUIElementCreateApplication(pid_t(pid))
+  return ["AXEnhancedUserInterface", "AXManualAccessibility"].map { name in
+    AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanTrue)
+  }
+}
+
+func axDescendants(_ root: AXUIElement, limit: Int = 30_000) -> [AXUIElement] {
+  var pending = [root]
+  var result: [AXUIElement] = []
+  while let element = pending.popLast(), result.count < limit {
+    result.append(element)
+    pending.append(contentsOf: axChildren(element))
+  }
+  return result
+}
+
+func axText(_ element: AXUIElement, _ attribute: String) -> String {
+  axString(element, attribute as CFString) ?? ""
+}
+
 func findClosePetMenuItem(pid: Int32) -> AXUIElement? {
   // Codex 自己的右键菜单是它公开的关闭入口；只接受这三个产品已支持语言的
   // 精确文案，不能误按 ChatGPT 主窗口里的普通菜单项。
@@ -371,6 +402,133 @@ func openContextMenuWithRestoredCursor(at point: CGPoint) -> Bool {
   let show = CGDisplayShowCursor(display)
   restored = warp == .success && associate == .success && show == .success
   return restored
+}
+
+func postKey(pid: Int32, virtualKey: CGKeyCode, flags: CGEventFlags = []) -> Bool {
+  let source = CGEventSource(stateID: .privateState)
+  guard let down = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
+        let up = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false) else {
+    return false
+  }
+  down.flags = flags
+  up.flags = flags
+  // Codex 26.825 can receive the targeted key even when this private API
+  // reports a non-zero status. Always release the key, then let the caller
+  // verify the exact AX outcome (Command menu / accepted action) instead of
+  // treating an unreliable transport status as the UI result.
+  _ = SLEventPostToPid(pid, down)
+  usleep(25_000)
+  _ = SLEventPostToPid(pid, up)
+  return true
+}
+
+func mainCodexWindow(pid: Int32) -> AXUIElement? {
+  axWindows(pid: pid).first { window in
+    guard axText(window, kAXSubroleAttribute as String) == (kAXStandardWindowSubrole as String),
+          let size = axSize(window, kAXSizeAttribute as CFString) else { return false }
+    return size.width >= 500 && size.height >= 400
+  }
+}
+
+func commandMenuSearchField(pid: Int32) -> AXUIElement? {
+  let app = AXUIElementCreateApplication(pid_t(pid))
+  return axDescendants(app).first { element in
+    let role = axText(element, kAXRoleAttribute as String)
+    let title = axText(element, kAXTitleAttribute as String)
+    return role == (kAXComboBoxRole as String) && title == "Command menu"
+  }
+}
+
+func exactPressableAXElement(pid: Int32, accepted: Set<String>) -> AXUIElement? {
+  let app = AXUIElementCreateApplication(pid_t(pid))
+  return axDescendants(app).first { element in
+    guard axActionNames(element).contains(kAXPressAction as String) else { return false }
+    let texts = [
+      axText(element, kAXTitleAttribute as String),
+      axText(element, kAXDescriptionAttribute as String),
+      axText(element, kAXValueAttribute as String),
+    ]
+    return texts.contains(where: accepted.contains)
+  }
+}
+
+func closeCodexNativePetViaCommandMenu(pid: Int32, expected: CGRect) -> (Bool, String) {
+  guard let codex = NSRunningApplication(processIdentifier: pid_t(pid)),
+        codex.bundleIdentifier == "com.openai.codex",
+        let mainWindow = mainCodexWindow(pid: pid) else {
+    return (false, "verified Codex main window not found")
+  }
+  let previousApp = NSWorkspace.shared.frontmostApplication
+  defer {
+    if let previousApp, !previousApp.isTerminated, previousApp.processIdentifier != pid_t(pid) {
+      previousApp.activate(options: [])
+    }
+  }
+
+  _ = enableWebAccessibility(pid: pid)
+  _ = AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
+  let appElement = AXUIElementCreateApplication(pid_t(pid))
+  _ = AXUIElementSetAttributeValue(
+    appElement, kAXFocusedWindowAttribute as CFString, mainWindow)
+  codex.activate(options: [.activateAllWindows])
+  usleep(180_000)
+
+  // Cmd-Shift-P is Codex's own `openCommandMenu` shortcut. We do not type
+  // anything until the exact AXComboBox named "Command menu" exists, so a
+  // remapped/blocked shortcut cannot leak text into the chat composer.
+  var search = commandMenuSearchField(pid: pid)
+  if search == nil {
+    guard postKey(pid: pid, virtualKey: 35, flags: [.maskCommand, .maskShift]) else {
+      return (false, "Codex command-menu shortcut failed")
+    }
+    for _ in 0..<16 where search == nil {
+      usleep(50_000)
+      search = commandMenuSearchField(pid: pid)
+    }
+  }
+  guard let search else {
+    return (false, "Codex command menu did not open")
+  }
+
+  _ = AXUIElementSetAttributeValue(search, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+  guard AXUIElementSetAttributeValue(
+    search, kAXValueAttribute as CFString, "tuck away the pet" as CFString) == .success else {
+    _ = postKey(pid: pid, virtualKey: 53)
+    return (false, "Codex command-menu search could not be set")
+  }
+
+  let accepted = Set(["Hide pet", "Tuck away the pet"])
+  var hideAction: AXUIElement?
+  for _ in 0..<24 where hideAction == nil {
+    usleep(50_000)
+    hideAction = exactPressableAXElement(pid: pid, accepted: accepted)
+  }
+  guard let hideAction else {
+    _ = postKey(pid: pid, virtualKey: 53)
+    return (false, "verified Hide pet command not found")
+  }
+  guard AXUIElementPerformAction(hideAction, kAXPressAction as CFString) == .success else {
+    _ = postKey(pid: pid, virtualKey: 53)
+    return (false, "verified Hide pet command failed")
+  }
+
+  // The host client must survive with its standard window, while the exact
+  // previously matched overlay must disappear twice before success is claimed.
+  var misses = 0
+  for _ in 0..<16 {
+    usleep(100_000)
+    guard NSRunningApplication(processIdentifier: pid_t(pid)) != nil,
+          mainCodexWindow(pid: pid) != nil else {
+      return (false, "Codex host window disappeared")
+    }
+    if matchingAXPetElement(pid: pid, expected: expected) == nil {
+      misses += 1
+      if misses >= 2 { return (true, "command-menu") }
+    } else {
+      misses = 0
+    }
+  }
+  return (false, "Hide pet ran but the verified overlay remained")
 }
 
 func findPromptTextArea(_ root: AXUIElement) -> AXUIElement? {
@@ -554,6 +712,7 @@ if windowCommand == "--close-window" && CommandLine.arguments.count >= 7 {
     fputs("matching pet window not found\n", stderr)
     exit(4)
   }
+  _ = enableWebAccessibility(pid: pid)
   if let closeButton = axElement(window, kAXCloseButtonAttribute as CFString) {
     let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
     guard result == .success else {
@@ -577,14 +736,29 @@ if windowCommand == "--close-window" && CommandLine.arguments.count >= 7 {
   let transport = TargetedMouseTransport(
     targetPid: pid, targetWindowID: windowID, logicalBounds: serverBounds)
   var menuItem: AXUIElement?
+  let nativeMascot: CGRect? = {
+    guard CommandLine.arguments.count >= 11,
+          let x = Double(CommandLine.arguments[7]),
+          let y = Double(CommandLine.arguments[8]),
+          let width = Double(CommandLine.arguments[9]),
+          let height = Double(CommandLine.arguments[10]),
+          width > 0, height > 0 else { return nil }
+    return CGRect(x: x, y: y, width: width, height: height)
+  }()
   // 中央可能被 Codex 自己的 Computer Use controls 覆盖。新版 243×253
   // viewport 的可见 mascot 从 x≈81 开始，所以先试左侧仍属于本体的窄带，
-  // 再试中心和右侧；普通状态下三者都命中同一个桌宠 renderer。
-  let points = [
-    CGPoint(x: serverBounds.minX + serverBounds.width * 0.345, y: serverBounds.midY),
-    CGPoint(x: serverBounds.midX, y: serverBounds.midY),
-    CGPoint(x: serverBounds.minX + serverBounds.width * 0.655, y: serverBounds.midY),
-  ]
+  // 再试中心和右侧。native-draw 的 serverBounds 可高达整屏两倍，必须用
+  // JS 从官方持久化状态传来的真实 mascot rect，不能点大窗中心。
+  let hitBounds = nativeMascot ?? serverBounds
+  let points = nativeMascot == nil ? [
+      CGPoint(x: hitBounds.minX + hitBounds.width * 0.345, y: hitBounds.midY),
+      CGPoint(x: hitBounds.midX, y: hitBounds.midY),
+      CGPoint(x: hitBounds.minX + hitBounds.width * 0.655, y: hitBounds.midY),
+    ] : [
+      CGPoint(x: hitBounds.midX, y: hitBounds.minY + hitBounds.height * 0.52),
+      CGPoint(x: hitBounds.minX + hitBounds.width * 0.42, y: hitBounds.minY + hitBounds.height * 0.52),
+      CGPoint(x: hitBounds.minX + hitBounds.width * 0.58, y: hitBounds.minY + hitBounds.height * 0.52),
+    ]
   for point in points where menuItem == nil {
     let targetedDown = transport.post(.rightMouseDown, at: point)
     let targetedUp = transport.post(.rightMouseUp, at: point)
@@ -601,17 +775,27 @@ if windowCommand == "--close-window" && CommandLine.arguments.count >= 7 {
       }
     }
   }
-  guard let menuItem else {
-    fputs("Codex pet close menu item not found\n", stderr)
-    exit(5)
+  if let menuItem {
+    let menuResult = AXUIElementPerformAction(menuItem, kAXPressAction as CFString)
+    guard menuResult == .success else {
+      fputs("Codex pet close menu action failed: \(menuResult.rawValue)\n", stderr)
+      exit(6)
+    }
+    print("closed|context-menu|\(pid)|\(bounds.origin.x)|\(bounds.origin.y)|\(bounds.width)|\(bounds.height)")
+    exit(0)
   }
-  let menuResult = AXUIElementPerformAction(menuItem, kAXPressAction as CFString)
-  guard menuResult == .success else {
-    fputs("Codex pet close menu action failed: \(menuResult.rawValue)\n", stderr)
-    exit(6)
+  if nativeMascot != nil {
+    _ = postKey(pid: pid, virtualKey: 53)
+    let result = closeCodexNativePetViaCommandMenu(pid: pid, expected: bounds)
+    guard result.0 else {
+      fputs("Codex native pet close failed: \(result.1)\n", stderr)
+      exit(5)
+    }
+    print("closed|\(result.1)|\(pid)|\(bounds.origin.x)|\(bounds.origin.y)|\(bounds.width)|\(bounds.height)")
+    exit(0)
   }
-  print("closed|context-menu|\(pid)|\(bounds.origin.x)|\(bounds.origin.y)|\(bounds.width)|\(bounds.height)")
-  exit(0)
+  fputs("Codex pet close menu item not found\n", stderr)
+  exit(5)
 }
 
 if windowCommand == "--set-claude-prompt" && CommandLine.arguments.count >= 3 {
@@ -699,6 +883,77 @@ if windowCommand == "--inspect-pid" && CommandLine.arguments.count >= 3 {
     let name = (info[kCGWindowName as String] as? String) ?? ""
     print("cg|\(number.uint32Value)|\(bounds.origin.x)|\(bounds.origin.y)|\(bounds.width)|\(bounds.height)|\(layer)|\(alpha)|\(onscreen)|\(sharing)|\(store)|\(memory)|\(name)")
   }
+  exit(0)
+}
+
+if windowCommand == "--inspect-ax-tree" && CommandLine.arguments.count >= 3 {
+  guard AXIsProcessTrusted(), let pid = Int32(CommandLine.arguments[2]) else {
+    fputs("bad --inspect-ax-tree argument or accessibility permission missing\n", stderr)
+    exit(2)
+  }
+  let results = enableWebAccessibility(pid: pid)
+  print("enable|\(results.map { String($0.rawValue) }.joined(separator: ","))")
+  usleep(250_000)
+  let app = AXUIElementCreateApplication(pid_t(pid))
+  for element in axDescendants(app) {
+    let role = axText(element, kAXRoleAttribute as String)
+    let subrole = axText(element, kAXSubroleAttribute as String)
+    let title = axText(element, kAXTitleAttribute as String)
+    let description = axText(element, kAXDescriptionAttribute as String)
+    let value = axText(element, kAXValueAttribute as String)
+    let placeholder = axText(element, kAXPlaceholderValueAttribute as String)
+    guard !role.isEmpty || !title.isEmpty || !description.isEmpty || !value.isEmpty || !placeholder.isEmpty else {
+      continue
+    }
+    let clean = [role, subrole, title, description, value, placeholder]
+      .map { $0.replacingOccurrences(of: "|", with: "/").replacingOccurrences(of: "\n", with: " ") }
+    print("node|\(clean.joined(separator: "|"))|\(axActionNames(element).joined(separator: ","))")
+  }
+  exit(0)
+}
+
+if windowCommand == "--wake-codex-pet" && CommandLine.arguments.count >= 3 {
+  guard AXIsProcessTrusted(), let pid = Int32(CommandLine.arguments[2]),
+        let codex = NSRunningApplication(processIdentifier: pid_t(pid)),
+        codex.bundleIdentifier == "com.openai.codex",
+        let mainWindow = mainCodexWindow(pid: pid) else {
+    fputs("verified Codex main window not found\n", stderr)
+    exit(4)
+  }
+  _ = enableWebAccessibility(pid: pid)
+  _ = AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
+  codex.activate(options: [.activateAllWindows])
+  usleep(180_000)
+  var search = commandMenuSearchField(pid: pid)
+  if search == nil {
+    guard postKey(pid: pid, virtualKey: 35, flags: [.maskCommand, .maskShift]) else {
+      fputs("Codex command-menu shortcut failed\n", stderr)
+      exit(5)
+    }
+    for _ in 0..<16 where search == nil {
+      usleep(50_000)
+      search = commandMenuSearchField(pid: pid)
+    }
+  }
+  guard let search,
+        AXUIElementSetAttributeValue(
+          search, kAXValueAttribute as CFString, "pet" as CFString) == .success else {
+    fputs("Codex command menu did not open\n", stderr)
+    exit(5)
+  }
+  var wakeAction: AXUIElement?
+  let accepted = Set(["Wake pet", "Show pet"])
+  for _ in 0..<24 where wakeAction == nil {
+    usleep(50_000)
+    wakeAction = exactPressableAXElement(pid: pid, accepted: accepted)
+  }
+  guard let wakeAction,
+        AXUIElementPerformAction(wakeAction, kAXPressAction as CFString) == .success else {
+    _ = postKey(pid: pid, virtualKey: 53)
+    fputs("verified Wake pet command not found\n", stderr)
+    exit(5)
+  }
+  print("opened|command-menu|\(pid)")
   exit(0)
 }
 

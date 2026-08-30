@@ -549,6 +549,16 @@ async function main() {
     check('子 agent operation 显示 juggling 类', () => assert(cat4.classList.contains('juggling')));
     check('子 agent operation 真实选中 cat-juggling.gif', () =>
       assert(catSrc(w4).endsWith('cat-juggling.gif')));
+    const w5 = world();
+    w5.handlers.config({ skin: 'cat', muted: false });
+    w5.handlers.event({
+      kind: 'operation', tool: 'Js', icon: '⌨️', detail: '调用 JS', visualState: 'working',
+    });
+    check('Calling JS 使用独立代码动作与深色动作气泡', () => {
+      assert(w5.elements('cat').classList.contains('act-code'));
+      assert(w5.elements('bubble').classList.contains('activity'));
+      assert(w5.elements('bubble-text').textContent.includes('调用 JS'));
+    });
   }
 
   console.log('[R4] happy 庆祝不被同批 say 秒盖，say 接棒');
@@ -594,19 +604,30 @@ async function main() {
     });
 
     w.handlers.event({ kind: 'operation', sessionId: 'work-c', tool: 'Read', icon: '📖', detail: '读取文件' });
-    check('普通状态可临时覆盖 ending', () => assert(!bubble.classList.contains('ending')));
+    check('普通状态进入 ending 内独立动作条，不再覆盖完成信息', () => {
+      assert(bubble.classList.contains('ending'));
+      assert(!w.elements('bubble-activity').classList.contains('hidden'));
+      assert.strictEqual(w.elements('bubble-activity-icon').textContent, '📖');
+      assert(w.elements('bubble-activity-text').textContent.includes('读取文件'));
+      assert.strictEqual(vm.runInContext('endingMessages.size', w.sandbox), 2);
+    });
     vm.runInContext('hideBubble()', w.sandbox);
-    check('普通状态结束后恢复常驻 ending', () => {
+    check('旧隐藏定时器也无法收掉常驻 ending', () => {
       assert(bubble.classList.contains('ending'));
       assert.strictEqual(w.elements('bubble-count').textContent, '2 个对话');
     });
 
+    bubble.scrollTop = 240;
+    w.elements('bubble-stack').scrollTop = 80;
     w.elements('bubble-toggle').dispatch('click');
     check('点击计数可展开其余完成信息', () => {
       assert(bubble.classList.contains('expanded'));
       assert.strictEqual(w.elements('bubble-toggle').getAttribute('aria-expanded'), 'true');
       assert.strictEqual(w.elements('bubble-stack').children.length, 1);
       assert(w.elements('bubble-stack').children[0].children[1].textContent.includes('第一段完成信息'));
+      assert.strictEqual(bubble.scrollTop, 0, '展开后必须从最新消息第一行开始');
+      assert.strictEqual(w.elements('bubble-stack').scrollTop, 0,
+        '旧的内层滚动位置不能让较早消息缺头');
     });
 
     w.handlers.event({ kind: 'user-turn', sessionId: second.sessionId, project: second.project, agent: 'codex' });

@@ -49,6 +49,7 @@ const HOST_RIVALS = ['ChatGPT'];
 // 也保证 MOVE 时永远只推同进程里最小的那扇宠物窗)。
 const MAX_RIVAL_SIZE = 650;
 const DRAG_HELPER = path.join(__dirname, 'drag-window.swift');
+const CODEX_GLOBAL_STATE = path.join(os.homedir(), '.codex', '.codex-global-state.json');
 // 112px ChatGPT mascot 的可见中心距边约 42px；重叠也设 42 会让章鱼
 // 120px 透明窗的边缘正好盖住拖拽热点。保留 30px 贴身重叠，同时给热点
 // 留出 12px 命中安全缝，避免 click-through 切换竞争导致第一次长拖失效。
@@ -76,6 +77,49 @@ const CHATGPT_MASCOT = {
 // 必须是 x=-81，而不是 x=0。两套轮廓并存:老版本仍是 356x320 狗桌宠。
 const CODEX_VIEWPORT = { w: 243, h: 253 };
 const CODEX_MASCOT = { left: 81, top: 80, width: 80, height: 100 };
+const CODEX_NATIVE_MASCOT = { width: 112, height: 121 };
+
+// Codex 26.825 switched the pet to a native-draw overlay. Its AX/WindowServer
+// frame can be taller than the display (754x1831 in the first observed build),
+// while the visible mascot remains a small 112x121 anchor recorded in Codex's
+// own global state. The state is only a geometry hint: a matching ChatGPT
+// AXDialog still has to exist before we accept it as a pet.
+function parseCodexNativePetState(state) {
+  if (!state || state['electron-avatar-overlay-open'] !== true) return null;
+  const bounds = state['electron-avatar-overlay-bounds'];
+  if (!bounds || typeof bounds !== 'object') return null;
+  const x = Number(bounds.x);
+  const y = Number(bounds.y);
+  const width = Number(bounds.width) || CODEX_NATIVE_MASCOT.width;
+  const height = Number(bounds.height)
+    || Math.round(width * CODEX_NATIVE_MASCOT.height / CODEX_NATIVE_MASCOT.width);
+  if (![x, y, width, height].every(Number.isFinite)
+      || width < 80 || width > 224 || height < 80 || height > 260) return null;
+  const display = bounds.displayBounds;
+  if (display && [display.x, display.y, display.width, display.height].every(Number.isFinite)) {
+    const slack = Math.max(width, height);
+    if (x + width < display.x - slack || x > display.x + display.width + slack
+        || y + height < display.y - slack || y > display.y + display.height + slack) return null;
+  }
+  return { x, y, w: width, h: height, displayBounds: display || null };
+}
+
+function readCodexNativePetState(filePath = CODEX_GLOBAL_STATE) {
+  try {
+    return parseCodexNativePetState(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+function nativeOverlayMatches(rival, nativePet) {
+  if (!nativePet || rival.subrole !== 'AXDialog') return false;
+  if (!(rival.w > MAX_RIVAL_SIZE || rival.h > MAX_RIVAL_SIZE)) return false;
+  const cx = nativePet.x + nativePet.w / 2;
+  const cy = nativePet.y + nativePet.h / 2;
+  return cx >= rival.x - 2 && cx <= rival.x + rival.w + 2
+    && cy >= rival.y - 2 && cy <= rival.y + rival.h + 2;
+}
 
 // ChatGPT 名下窗口的桌宠轮廓判定:'dog'(老 356x320) | 'codex'(新 243x253)
 // | null(通知/设置等杂窗)。同进程还有 345x54 的 Activity Stack 条,两套轮廓
@@ -95,6 +139,7 @@ function chatGPTPlacement(rival, wa, dir = 0) {
 }
 
 function chatGPTVisualBounds(rival, wa, dir = 0, learned = null) {
+  if (rival && rival.nativeMascot) return { ...rival, ...rival.nativeMascot };
   if (chatGPTShape(rival.w, rival.h) === 'codex') {
     // Codex 的拖拽锚点和可见机器人都在固定的中央区域；learned anchor、
     // 屏幕半区和本轮推送方向都不能改变视觉几何。
@@ -133,6 +178,22 @@ function chatGPTVisualBounds(rival, wa, dir = 0, learned = null) {
 }
 
 function chatGPTDragCandidates(rival, _wa, learned = null) {
+  if (rival && rival.nativeMascot) {
+    const mascot = rival.nativeMascot;
+    const points = [
+      [(mascot.x + mascot.w * 0.5 - rival.x) / rival.w,
+        (mascot.y + mascot.h * 0.52 - rival.y) / rival.h],
+      [(mascot.x + mascot.w * 0.42 - rival.x) / rival.w,
+        (mascot.y + mascot.h * 0.52 - rival.y) / rival.h],
+      [(mascot.x + mascot.w * 0.58 - rival.x) / rival.w,
+        (mascot.y + mascot.h * 0.52 - rival.y) / rival.h],
+      [(mascot.x + mascot.w * 0.5 - rival.x) / rival.w,
+        (mascot.y + mascot.h * 0.64 - rival.y) / rival.h],
+    ].map(([x, y]) => [Math.min(0.99, Math.max(0.01, x)), Math.min(0.99, Math.max(0.01, y))]);
+    return learned
+      ? [learned, ...points.filter(([x, y]) => x !== learned[0] || y !== learned[1])]
+      : points;
+  }
   if (rival && chatGPTShape(rival.w, rival.h) === 'codex') {
     // 机器人居中:窗口中心即躯干。已校准锚点优先,再沿中轴补几个候选。
     const defaults = [[0.5, 0.51], [0.5, 0.62], [0.5, 0.4], [0.42, 0.51], [0.58, 0.51]];
@@ -187,7 +248,11 @@ const SCAN_SCRIPT = [
   '          repeat with w in (every window of p)',
   '            set {px, py} to position of w',
   '            set {pw, ph} to size of w',
-  '            set out to out & (name of p) & "|" & (unix id of p) & "|" & px & "|" & py & "|" & pw & "|" & ph & linefeed',
+  '            set windowSubrole to ""',
+  '            try',
+  '              set windowSubrole to subrole of w as text',
+  '            end try',
+  '            set out to out & (name of p) & "|" & (unix id of p) & "|" & px & "|" & py & "|" & pw & "|" & ph & "|" & windowSubrole & linefeed',
   '          end repeat',
   '        end try',
   '      end repeat',
@@ -337,23 +402,32 @@ function parsePresence(out, excludePids) {
   return res;
 }
 
-// "name|pid|x|y|w|h" 行(一行一扇窗)→ rival 列表。只认「宠物体型」(≤ maxSize)
+// "name|pid|x|y|w|h|subrole" 行(一行一扇窗)→ rival 列表。旧的 6 字段
+// 输出仍兼容。普通对手只认「宠物体型」(≤ maxSize)；Codex native-draw
+// overlay 由 AXDialog + 官方持久化 mascot 锚点双重确认。
 // 的窗口,同 pid 取面积最小的一扇 —— 一个进程可能既有大主窗(ChatGPT 聊天窗)
 // 又有宠物窗(Codex 桌宠),永远只盯后者。排除自己的 pid。
-function parseScan(out, excludePids, maxSize) {
+function parseScan(out, excludePids, maxSize, nativePet = null) {
   const cap = maxSize == null ? MAX_RIVAL_SIZE : maxSize;
   const best = new Map(); // pid → 最小的宠物体型窗口
   for (const line of String(out || '').split('\n')) {
     const parts = line.split('|');
-    if (parts.length !== 6) continue;
-    const [name, pid, x, y, w, h] = parts;
+    if (parts.length !== 6 && parts.length !== 7) continue;
+    const [name, pid, x, y, w, h, subrole = ''] = parts;
     const r = { name: name.trim(), pid: +pid, x: +x, y: +y, w: +w, h: +h };
+    if (subrole) r.subrole = subrole.trim();
     if (!r.name || !Number.isFinite(r.pid) || !Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
-    if (!(r.w > 0) || !(r.h > 0) || r.w > cap || r.h > cap) continue;
+    if (!(r.w > 0) || !(r.h > 0)) continue;
+    const nativeMatch = /chatgpt/i.test(r.name) && nativeOverlayMatches(r, nativePet);
+    if (!nativeMatch && (r.w > cap || r.h > cap)) continue;
     // ChatGPT 同进程还有通知、设置、快捷面板等小窗。桌宠外框只有两种:
-    // 老狗 356x320 / 新 Codex 机器人 243x253;硬过滤轮廓,不能只给 popup
-    // 一个较差分数后仍把它当宠物。
-    if (/chatgpt/i.test(r.name) && !chatGPTShape(r.w, r.h)) continue;
+    // 老狗 356x320 / Codex 243x253 / native AXDialog;硬过滤轮廓,不能只给
+    // popup 一个较差分数后仍把它当宠物。
+    if (/chatgpt/i.test(r.name) && !chatGPTShape(r.w, r.h) && !nativeMatch) continue;
+    if (nativeMatch) {
+      r.codexMode = 'native';
+      r.nativeMascot = { x: nativePet.x, y: nativePet.y, w: nativePet.w, h: nativePet.h };
+    }
     if ((excludePids || []).includes(r.pid)) continue;
     const prev = best.get(r.pid);
     if (!prev || scanCandidateScore(r) < scanCandidateScore(prev)) best.set(r.pid, r);
@@ -363,6 +437,7 @@ function parseScan(out, excludePids, maxSize) {
 
 function scanCandidateScore(r) {
   if (/chatgpt/i.test(r.name)) {
+    if (r.codexMode === 'native') return -1000;
     // 优先轮廓匹配(离两种已知桌宠外框哪个都行,取更近的),而非同进程
     // 面积更小的通知、设置面板或瞬时 popup。
     return Math.min(
@@ -802,6 +877,10 @@ function createTerritory(hooks) {
   }
 
   async function clearRivalVisual(rival) {
+    // Native-draw owns a display-height composition surface. It has no legacy
+    // transform to clear; warping that large AXDialog would move unrelated
+    // activity/tray pixels instead of the mascot.
+    if (rival && rival.codexMode === 'native') return { ok: true, native: true };
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
     const previous = activeWarps.get(rival.pid);
@@ -1020,7 +1099,10 @@ function createTerritory(hooks) {
       }
       return { ok: false, rivals: [], error: String(res.err || 'window scan failed') };
     }
-    return { ok: true, rivals: parseScan(res.out, hooks.excludePids()), error: '' };
+    const nativePet = hooks.codexNativePetState
+      ? hooks.codexNativePetState()
+      : readCodexNativePetState();
+    return { ok: true, rivals: parseScan(res.out, hooks.excludePids(), undefined, nativePet), error: '' };
   }
 
   async function scan() {
@@ -1122,9 +1204,15 @@ function createTerritory(hooks) {
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
     return new Promise((resolve) => {
-      execFile(helper.bin, [
+      const args = [
         '--close-window', rival.pid, rival.x, rival.y, rival.w, rival.h,
-      ].map(String), { timeout: 3000 }, (err, stdout, stderr) => {
+      ];
+      if (rival.nativeMascot) {
+        args.push(rival.nativeMascot.x, rival.nativeMascot.y,
+          rival.nativeMascot.w, rival.nativeMascot.h);
+      }
+      const timeout = rival.nativeMascot ? 8000 : 3000;
+      execFile(helper.bin, args.map(String), { timeout }, (err, stdout, stderr) => {
         const out = String(stdout || '').trim();
         resolve(!err && /^closed\|/.test(out)
           ? { ok: true, out }
@@ -1245,7 +1333,8 @@ function createTerritory(hooks) {
     const ex = sx + (targetX - rival.x);
     // Codex 机器人窗口对 AX hit-test 隐身(冷查/hover 后都命不中),但真实
     // HID 拖拽有效——跳过 helper 的命中门,由调用方的 AX frame 位移复核兜底。
-    const gateArgs = chatGPTShape(rival.w, rival.h) === 'codex' ? ['nogate'] : [];
+    const gateArgs = chatGPTShape(rival.w, rival.h) === 'codex' || rival.codexMode === 'native'
+      ? ['nogate'] : [];
     return new Promise((resolve) => {
       const child = spawn(helper.bin, [
         '--isolated-drag-pid', rival.pid, rival.x, rival.y, rival.w, rival.h,
@@ -1358,7 +1447,7 @@ function createTerritory(hooks) {
   async function finishClampedVisualEdge(current, dir, maxTravel = 0) {
     // Codex 机器人:窗口只是特效/追踪层,compositor warp 只会把"雾"挪到边上,
     // 机器人本体纹丝不动。它的本体可以被真实拖拽到贴边,不适用视觉补偿。
-    if (chatGPTShape(current.w, current.h) === 'codex') return null;
+    if (chatGPTShape(current.w, current.h) === 'codex' || current.codexMode === 'native') return null;
     const currentWa = hooks.getWorkArea(current);
     if (!atEdgeInDirection(current, currentWa, dir, 3)) return null;
     // 必须忽略已有内存偏移，计算透明外框相对于可见本体的绝对补偿。
@@ -1920,7 +2009,8 @@ function createTerritory(hooks) {
         await wait(140);
         const confirmed = (await scan()).find((candidate) => candidate.pid === target.pid
           && /chatgpt/i.test(candidate.name)
-          && Math.abs(candidate.w - target.w) <= 2 && Math.abs(candidate.h - target.h) <= 2);
+          && (candidate.codexMode === 'native' && target.codexMode === 'native'
+            || Math.abs(candidate.w - target.w) <= 2 && Math.abs(candidate.h - target.h) <= 2));
         if (!confirmed) {
           hooks.emit({ kind: 'loot', phase: 'notFound', ts: Date.now() });
           return 'not-found';
@@ -2131,6 +2221,9 @@ module.exports = {
   parsePresence,
   parseScan,
   scanCandidateScore,
+  parseCodexNativePetState,
+  readCodexNativePetState,
+  nativeOverlayMatches,
   nearestEdgeTarget,
   edgeAwayFromPet,
   atEdge,
