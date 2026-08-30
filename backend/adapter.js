@@ -21,7 +21,7 @@ const TOOL_ICON = {
   WebSearch: '🌐', WebFetch: '🌐', Task: '🤖', Agent: '🤖',
   TodoWrite: '✅',
   // Codex 专属工具（codex-watch 归一化后的词）；exec/apply_patch 等已映射到上面的既有词
-  Js: '🧮', Wait: '⏳',
+  Js: '⌨️', Wait: '⏳',
 };
 // Tool → i18n key. The label itself is resolved per call so a language switch
 // takes effect on the next stats push without reloading the module.

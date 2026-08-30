@@ -7,6 +7,7 @@
 const assert = require('assert');
 const {
   createTerritory, parsePresence, parseScan, scanCandidateScore,
+  parseCodexNativePetState, nativeOverlayMatches,
   nearestEdgeTarget, edgeAwayFromPet, atEdge, atEdgeInDirection,
   windowTargetForVisual, visualAtEdge, visualAtEdgeInDirection,
   visualShiftMatches, visualShiftOffset, interpolateFrame, chatGPTShape, chatGPTVisualBounds,
@@ -86,6 +87,62 @@ check('chatGPTShape:两种桌宠轮廓都认,Activity 条和主窗都拒', () =>
   assert.strictEqual(chatGPTShape(243, 253), 'codex');
   assert.strictEqual(chatGPTShape(345, 54), null);
   assert.strictEqual(chatGPTShape(768, 912), null);
+});
+check('Codex native-draw:官方锚点 + AXDialog 才识别，大主窗绝不替代', () => {
+  const nativePet = parseCodexNativePetState({
+    'electron-avatar-overlay-open': true,
+    'electron-avatar-overlay-bounds': {
+      x: 1118, y: 226,
+      displayBounds: { x: 0, y: 0, width: 1512, height: 982 },
+    },
+  });
+  assert.deepStrictEqual(
+    { x: nativePet.x, y: nativePet.y, w: nativePet.w, h: nativePet.h },
+    { x: 1118, y: 226, w: 112, h: 121 });
+  const out = [
+    'ChatGPT|29125|820|-628|754|1831|AXDialog',
+    'ChatGPT|29125|0|33|1512|865|AXStandardWindow',
+  ].join('\n');
+  const result = parseScan(out, [], undefined, nativePet);
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].codexMode, 'native');
+  assert.deepStrictEqual(result[0].nativeMascot, { x: 1118, y: 226, w: 112, h: 121 });
+  assert.deepStrictEqual(
+    { x: result[0].x, y: result[0].y, w: result[0].w, h: result[0].h },
+    { x: 820, y: -628, w: 754, h: 1831 },
+    '拖拽 helper 仍应拿精确 AXDialog 外框，不得拿 mascot rect 冒充窗口');
+  assert(nativeOverlayMatches(result[0], nativePet));
+  assert.deepStrictEqual(
+    parseScan('ChatGPT|29125|0|33|1512|865|AXStandardWindow\n', [], undefined, nativePet),
+    [], '只有主窗口时不能误锁');
+});
+check('Codex native-draw:关闭状态、坏锚点、普通 AXDialog 都不伪造桌宠', () => {
+  assert.strictEqual(parseCodexNativePetState({
+    'electron-avatar-overlay-open': false,
+    'electron-avatar-overlay-bounds': { x: 100, y: 100 },
+  }), null);
+  assert.strictEqual(parseCodexNativePetState({
+    'electron-avatar-overlay-open': true,
+    'electron-avatar-overlay-bounds': { x: Number.NaN, y: 100 },
+  }), null);
+  const pet = { x: 1118, y: 226, w: 112, h: 121 };
+  assert.deepStrictEqual(
+    parseScan('ChatGPT|29125|20|20|420|360|AXDialog\n', [], undefined, pet),
+    [], '普通设置对话框不能借 mascot 锚点混入');
+});
+check('Codex native-draw:视觉位置和拖点都来自 mascot 锚点', () => {
+  const rival = {
+    name: 'ChatGPT', pid: 29125, x: 820, y: -628, w: 754, h: 1831,
+    codexMode: 'native', nativeMascot: { x: 1118, y: 226, w: 112, h: 121 },
+  };
+  const visual = chatGPTVisualBounds(rival, { x: 0, y: 0, width: 1512, height: 982 });
+  assert.deepStrictEqual(
+    { x: visual.x, y: visual.y, w: visual.w, h: visual.h },
+    rival.nativeMascot);
+  const points = chatGPTDragCandidates(rival, { x: 0, y: 0, width: 1512, height: 982 });
+  const [rx, ry] = points[0];
+  assert(Math.abs((rival.x + rival.w * rx) - 1174) < 0.01);
+  assert(Math.abs((rival.y + rival.h * ry) - (226 + 121 * 0.52)) < 0.01);
 });
 check('Codex 机器人视觉本体:固定居中，左右推送方向不能改写 81px 透明边距', () => {
   const wa = { x: 0, y: 25, width: 1512, height: 920 };
@@ -257,6 +314,7 @@ check('Electron 指针窗口已移除，原生覆盖层保持全透明且鼠标�
   const root = path.join(__dirname, '..');
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
   const swift = fs.readFileSync(path.join(root, 'backend', 'drag-window.swift'), 'utf8');
+  const territory = fs.readFileSync(path.join(root, 'backend', 'territory.js'), 'utf8');
   assert(!main.includes('patrolPointerWin'));
   assert(!main.includes('patrol-pointer.html'));
   assert(swift.includes('panel.isOpaque = false'));
@@ -266,6 +324,11 @@ check('Electron 指针窗口已移除，原生覆盖层保持全透明且鼠标�
   assert(swift.includes('panel.sharingType = .readOnly'));
   assert(swift.includes('CGEventSetWindowLocation(event, local)'));
   assert(swift.includes('SLEventPostToPid(targetPid, event)'));
+  assert(swift.includes('_ = SLEventPostToPid(pid, down)'));
+  assert(swift.includes('_ = SLEventPostToPid(pid, up)'));
+  const postKeySource = swift.slice(swift.indexOf('func postKey('), swift.indexOf('\nfunc mainCodexWindow('));
+  assert(!postKeySource.includes('guard SLEventPostToPid'));
+  assert(!swift.includes('Codex could not be activated safely'));
   assert(swift.includes('AXUIElementGetWindow(window, &windowID)'));
   assert(swift.includes('.mouseEventWindowUnderMousePointer'));
   assert(swift.includes('if windowCommand == "--isolated-drag-pid"'));
@@ -279,8 +342,15 @@ check('Electron 指针窗口已移除，原生覆盖层保持全透明且鼠标�
   assert(swift.includes('AXUIElementPerformAction(closeButton, kAXPressAction'));
   assert(swift.includes('findClosePetMenuItem(pid: pid)'));
   assert(swift.includes('["Close pet", "关闭宠物", "關閉寵物", "ペットを閉じる"]'));
+  assert(swift.includes('_ = enableWebAccessibility(pid: pid)'));
   assert(swift.includes('openContextMenuWithRestoredCursor(at: point)'));
   assert(swift.includes('closed|context-menu'));
+  assert(swift.includes('closeCodexNativePetViaCommandMenu(pid: pid, expected: bounds)'));
+  assert(swift.includes('role == (kAXComboBoxRole as String) && title == "Command menu"'));
+  assert(swift.includes('"tuck away the pet" as CFString'));
+  assert(swift.includes('Set(["Hide pet", "Tuck away the pet"])'));
+  assert(swift.includes('Codex host window disappeared'));
+  assert(territory.includes('rival.nativeMascot ? 8000 : 3000'));
   assert(!swift.includes('NSRunningApplication(processIdentifier: pid_t(pid))?.terminate'));
 });
 check('ChatGPT 独占 HID 租约只有完整还原鼠标后才接受成功', () => {
@@ -905,6 +975,57 @@ check('会话由后端逐条演出，ready 后只关闭匹配桌宠窗', async (
   assert.strictEqual(tweenCalls.length, 1,
     '真正出脚后只能保留接近站位，不得在 finally 又移动回掠夺前位置');
   assert.strictEqual(t.busy, false);
+});
+
+check('新版 native-draw Codex：掠夺整条链路锁定 AXDialog，尺寸变化也不丢目标', async () => {
+  const phases = [];
+  let visible = true;
+  let windowScans = 0;
+  let pushed = null;
+  let closed = null;
+  const nativePet = { x: 1047, y: 673, w: 112, h: 121 };
+  const { hooks } = mockHooks({
+    hostRivalNames: () => ['ChatGPT'],
+    codexNativePetState: () => nativePet,
+    emit: (event) => phases.push(event.phase),
+    sleep: async () => {},
+    physicalPush: async (rival, _dir, _pet, _abort, options) => {
+      pushed = rival;
+      await options.beforeDrag();
+      options.onMoveStart();
+      await options.onLanded(rival);
+      return 'victory';
+    },
+    closeRival: async (rival) => {
+      closed = rival;
+      visible = false;
+      return { ok: true };
+    },
+    runOsa: fakeOsa({
+      presence: () => '',
+      windows: () => {
+        windowScans++;
+        const main = 'ChatGPT|29125|0|33|1512|865|AXStandardWindow';
+        if (!visible) return `${main}\n`;
+        // Action tray can resize the native surface between discovery and the
+        // confirmation frame. Identity is PID + native mode, not old fixed size.
+        const width = windowScans === 1 ? 754 : 800;
+        const overlay = `ChatGPT|29125|749|-181|${width}|1831|AXDialog`;
+        return `${overlay}\n${main}\n`;
+      },
+      move: () => { throw new Error('native-draw Codex 不应走 AXPosition'); },
+    }),
+  });
+  const t = createTerritory(hooks);
+  assert.strictEqual(await t.runLoot([]), 'closed');
+  assert.strictEqual(pushed.codexMode, 'native');
+  assert.deepStrictEqual(pushed.nativeMascot, nativePet);
+  assert.strictEqual(pushed.w, 800, '确认帧尺寸变化后应继续使用最新 AXDialog frame');
+  assert.strictEqual(closed.pid, 29125);
+  assert.deepStrictEqual(closed.nativeMascot, nativePet,
+    '精确关闭必须继续携带 mascot 命中区域，不能点击超高窗口中心');
+  assert(phases.includes('push'));
+  assert(phases.includes('closed'));
 });
 
 check('踢击真实拖动期间 LLMPET 保持原位，不消费巡视的逐帧跟随回调', async () => {

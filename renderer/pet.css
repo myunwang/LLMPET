@@ -230,8 +230,38 @@ html, body {
 .bubble.hidden { opacity: 0; transform: translateY(8px) scale(0.96); pointer-events: none; }
 .bubble.ending {
   width: min(340px, calc(100vw - 16px));
+  /* A completed answer can be taller than the work area once several
+     conversations are expanded. Keep the card itself inside the space left
+     by the pet stack and make that card the single scroll owner. Otherwise
+     flex shrinking keeps the rounded shell visible while silently clipping
+     the header and the beginning of the newest answer. */
+  min-height: 0;
+  max-height: calc(100vh - 210px);
+  flex: 0 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   cursor: default;
   pointer-events: auto;
+}
+.bubble.ending::-webkit-scrollbar { width: 6px; height: 0; }
+.bubble.ending::-webkit-scrollbar-track { background: transparent; }
+.bubble.ending::-webkit-scrollbar-thumb {
+  border-radius: 6px;
+  background: rgba(164, 94, 66, 0.38);
+}
+.bubble.activity {
+  border-color: rgba(128, 146, 255, 0.38);
+  background: rgba(31, 29, 38, 0.94);
+  color: #f4f1fb;
+  box-shadow: 0 7px 20px rgba(36, 30, 54, 0.3);
+}
+.bubble.activity::after {
+  border-color: rgba(31, 29, 38, 0.94) transparent transparent transparent;
+}
+#stage.edge-below .bubble.activity::after {
+  border-color: transparent transparent rgba(31, 29, 38, 0.94) transparent;
 }
 .bubble-head {
   display: flex;
@@ -239,7 +269,7 @@ html, body {
   gap: 8px;
   margin-bottom: 5px;
 }
-.bubble-head.hidden, .bubble-stack.hidden, .bubble-toggle.hidden { display: none; }
+.bubble-head.hidden, .bubble-stack.hidden, .bubble-toggle.hidden, .bubble-activity.hidden { display: none; }
 .bubble-project {
   min-width: 0;
   flex: 1;
@@ -263,6 +293,33 @@ html, body {
   -webkit-app-region: no-drag;
 }
 .bubble-dismiss:hover { background: rgba(217, 119, 87, 0.18); color: #8e412d; }
+.bubble-activity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(128, 146, 255, 0.32);
+  border-radius: 10px;
+  background: rgba(31, 29, 38, 0.94);
+  color: #f4f1fb;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+}
+.bubble-activity-icon {
+  width: 18px;
+  flex: 0 0 18px;
+  text-align: center;
+}
+.bubble-activity-text {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .bubble.ending.collapsed #bubble-text {
   display: -webkit-box;
   overflow: hidden;
@@ -277,6 +334,12 @@ html, body {
   margin-top: 8px;
   overflow-y: auto;
   padding-right: 2px;
+}
+/* Expanded endings use the outer card's bounded scroller. Nested scrolling
+   made the latest message and earlier-message stack fight over focus. */
+.bubble.ending .bubble-stack {
+  max-height: none;
+  overflow: visible;
 }
 .bubble-ending-item {
   padding-top: 7px;
@@ -662,6 +725,13 @@ body.skin-whale .sessions { width: 180px; }
 #pixel.act-check .pixel-sprite { animation: actNod 0.4s ease-in-out 2; }
 @keyframes actNod { 0%,100% { transform: rotate(0) translateY(0); } 50% { transform: rotate(6deg) translateY(2px); } }
 
+/* 调用 JS：像终端光标一样短促左右点动，和普通 Bash 摇杆明确区分。 */
+#pixel.act-code .pixel-sprite { animation: actCode 0.34s steps(2, end) infinite; }
+@keyframes actCode {
+  0%,100% { transform: translateX(-3px) scale(0.98, 1.02); }
+  50% { transform: translateX(3px) scale(1.02, 0.98); }
+}
+
 /* ---- 头顶道具 emoji ---- */
 .prop {
   position: absolute;
@@ -760,6 +830,8 @@ body.skin-whale .sessions { width: 180px; }
 #mascot.act-web #mascot-img { animation: actWeb 1s ease-in-out infinite; }
 #mascot.act-summon #mascot-img { animation: actSummon 0.5s ease-in-out; }
 #mascot.act-check #mascot-img { animation: actNod 0.4s ease-in-out 2; }
+#mascot.act-code #mascot-img { animation: actCode 0.34s steps(2, end) infinite; }
+#cat.act-code #cat-img { animation: actCode 0.34s steps(2, end) infinite; }
 
 /* ====================================================================
    月薪喵（cat）—— 猫 meme 表情包皮肤

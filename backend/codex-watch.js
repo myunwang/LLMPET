@@ -61,7 +61,55 @@ const TOOL_MAP = {
   view_image: 'Read',
   web_search: 'WebSearch',
 };
-const mapTool = (name) => TOOL_MAP[name] || String(name || 'Tool');
+const WRAPPED_TOOL_PRIORITY = new Map([
+  ['Js', 100], ['Edit', 90], ['Bash', 80], ['WebSearch', 70],
+  ['Read', 60], ['Task', 50], ['TodoWrite', 40], ['Wait', 30],
+]);
+
+function mapDirectTool(name) {
+  const raw = String(name || '').trim();
+  if (TOOL_MAP[raw]) return TOOL_MAP[raw];
+  if (/node_repl.*(?:__|\b)js$/i.test(raw)) return 'Js';
+  if (/imagegen|image_gen/i.test(raw)) return 'Write';
+  if (/web__run|browser|chrome/i.test(raw)) return 'WebSearch';
+  if (/computer[-_]?use/i.test(raw)) return 'Task';
+  return raw || 'Tool';
+}
+
+function wrappedToolNames(payload) {
+  const source = typeof payload === 'string'
+    ? payload
+    : payload && typeof payload === 'object'
+      ? (payload.input || payload.arguments || '')
+      : '';
+  const names = [];
+  const seen = new Set();
+  const re = /\btools\.([A-Za-z0-9_$]+)\s*\(/g;
+  let match;
+  while ((match = re.exec(String(source)))) {
+    if (!seen.has(match[1])) {
+      seen.add(match[1]);
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+function mapTool(name, payload) {
+  const raw = String(name || '').trim();
+  // Current Codex Desktop records orchestration as custom_tool_call(name=exec)
+  // and puts the real nested tool in its JS input. Inspect that authoritative
+  // input so `tools.mcp__node_repl__js(...)` becomes Calling JS instead of the
+  // misleading generic Running command.
+  if (raw === 'exec' || raw === 'functions.exec') {
+    const nested = wrappedToolNames(payload)
+      .map(mapDirectTool)
+      .filter((tool) => tool && tool !== 'Tool')
+      .sort((a, b) => (WRAPPED_TOOL_PRIORITY.get(b) || 0) - (WRAPPED_TOOL_PRIORITY.get(a) || 0));
+    if (nested.length) return nested[0];
+  }
+  return mapDirectTool(raw);
+}
 const SUBAGENT_START_TOOLS = new Set(['spawn_agent']);
 function isSubagentStartTool(name) {
   const raw = String(name || '').trim();
@@ -428,7 +476,7 @@ function createCodexWatch(deps) {
           return;
         }
         markWork(t);
-        t.lastTool = mapTool(p.name);
+        t.lastTool = mapTool(p.name, p);
         if (isSubagentStartTool(p.name)) {
           t.subagentActive = true;
           const callId = String(p.call_id || p.id || '');

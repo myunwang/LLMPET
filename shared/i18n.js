@@ -115,7 +115,7 @@
     'tool.WebFetch': '抓取网页',
     'tool.Task': '派出子 agent',
     'tool.TodoWrite': '更新待办',
-    'tool.Js': '跑 JS 代码',
+    'tool.Js': '调用 JS',
     'tool.Wait': '等命令输出',
     'tool.default': '处理中',
 
@@ -558,7 +558,7 @@
     'tool.WebFetch': 'Fetching page',
     'tool.Task': 'Spawning subagent',
     'tool.TodoWrite': 'Updating todos',
-    'tool.Js': 'Running JS',
+    'tool.Js': 'Calling JS',
     'tool.Wait': 'Awaiting output',
     'tool.default': 'Working',
 
@@ -988,7 +988,7 @@
     'tool.WebFetch': 'ページ取得',
     'tool.Task': 'サブエージェント起動',
     'tool.TodoWrite': 'ToDo 更新',
-    'tool.Js': 'JS 実行',
+    'tool.Js': 'JS を呼び出し',
     'tool.Wait': '出力待ち',
     'tool.default': '処理中',
 
