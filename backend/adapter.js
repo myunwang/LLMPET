@@ -38,6 +38,7 @@ function agentOf(entry) {
   const id = entry && entry.agentId;
   if (id === 'codex') return 'codex';
   if (id === 'dsh') return 'dsh';
+  if (id === 'codewhale') return 'codewhale';
   // Claude hooks historically omitted agentId, so preserve that compatible
   // default. A non-empty unknown id must remain unknown instead of being
   // painted as Claude throughout the UI.
@@ -46,7 +47,7 @@ function agentOf(entry) {
 }
 
 // 气泡/授权卡里的「谁在说话」。
-const AGENT_NAME = { codex: 'Codex', dsh: 'DeepSeek Harness', claude: 'Claude', unknown: 'Agent' };
+const AGENT_NAME = { codex: 'Codex', dsh: 'DeepSeek Harness', claude: 'Claude', codewhale: 'CodeWhale', unknown: 'Agent' };
 function agentLabel(entry) {
   return AGENT_NAME[agentOf(entry)] || 'Agent';
 }
@@ -144,17 +145,26 @@ function mapState(state) {
 }
 
 // Human-readable permission question from the (full) tool_input CC sent us.
+// CodeWhale tool names (exec_shell / write_file / edit_file / apply_patch /
+// fim_edit / read_file) join the Claude spellings — field names verified
+// against CodeWhale's permission-rule docs (exec_shell→command, file tools→path).
 function humanizeTool(toolName, input) {
   const i = input && typeof input === 'object' ? input : {};
   switch (toolName) {
     case 'Bash':
+    case 'exec_shell':
       return t('perm.runCommand') + clip(i.command || i.cmd || '', 80);
     case 'Edit':
     case 'MultiEdit':
     case 'Write':
     case 'NotebookEdit':
+    case 'edit_file':
+    case 'write_file':
+    case 'apply_patch':
+    case 'fim_edit':
       return t('perm.editFile') + clip(i.file_path || i.path || i.notebook_path || '', 60);
     case 'Read':
+    case 'read_file':
       return t('perm.readFile') + clip(i.file_path || i.path || '', 60);
     case 'WebFetch':
       return t('perm.fetchUrl') + clip(i.url || '', 60);
@@ -203,13 +213,29 @@ function buildPermChoice(perm, entry) {
   });
   const who = entry ? agentLabel(entry) : 'Claude';
   const action = humanizeTool(perm.toolName, perm.toolInput);
+  // Auto-deny hint window: explicit minutes win; otherwise derive it from the
+  // pending entry's own timestamps. The derivation matters because the same
+  // card is rebuilt on two paths — the first push (main.js onPermissionAdded)
+  // and every stats snapshot (getPending() → buildPermChoice) — and only the
+  // entry itself is guaranteed to flow through both.
+  const denyWindowMs = Number.isFinite(perm.autoDenyMins) && perm.autoDenyMins > 0
+    ? perm.autoDenyMins * 60000
+    : (Number.isFinite(perm.expiresAt) && Number.isFinite(perm.createdAt) && perm.expiresAt > perm.createdAt
+      ? perm.expiresAt - perm.createdAt
+      : 0);
   return {
     kind: 'perm',
     sessionId: perm.sessionId,
     permId: perm.id,
     project: entry ? projectName(entry) : (perm.sessionId || '?'),
-    header: travel ? t('travel.letterFrom', { who }) : perm.toolName,
+    // Non-Claude agents must be identifiable on the card: a user running
+    // Claude Code and CodeWhale side by side otherwise cannot tell who is
+    // asking. Claude sessions keep the bare tool name (byte-identical cards).
+    header: travel ? t('travel.letterFrom', { who }) : (who === 'Claude' ? perm.toolName : `${who} · ${perm.toolName}`),
     question: travel ? t('travel.letterQuestion', { action }) : action,
+    // Optional honesty line for bridges that auto-deny after a fixed window
+    // (CodeWhale: unanswered requests deny at 8 min, under the TOML timeout).
+    hint: denyWindowMs > 0 ? t('perm.autoDenyHint', { mins: Math.max(1, Math.round(denyWindowMs / 60000)) }) : '',
     options,
     multi: false,
     allowInput: false,
@@ -381,35 +407,46 @@ function tagModels(byModel, agent) {
   return out;
 }
 
-function combineUsage(claudeStats, codexStats, provider) {
-  // Only the two providers with a local, attributable price ledger may select
-  // one. `all` is the shared machine view. dsh can front arbitrary model
-  // providers, and an unknown future agent has no trusted pricing contract, so
-  // both must remain explicitly unavailable instead of inheriting both ledgers.
+function combineUsage(claudeStats, codexStats, provider, codewhaleStats) {
+  // Only providers with a local, attributable price ledger may select one.
+  // `all` is the shared machine view. dsh can front arbitrary model providers,
+  // and an unknown future agent has no trusted pricing contract, so both must
+  // remain explicitly unavailable instead of inheriting both ledgers.
+  // CodeWhale has a verified per-turn usage contract + models.dev pricing, so
+  // it joins the machine total and the main pet's lane (no dedicated pet).
   const scope = provider || 'all';
   const useClaude = scope === 'all' || scope === 'claude';
   const useCodex = scope === 'all' || scope === 'codex';
+  const useCodewhale = scope === 'all' || scope === 'claude';
   const claude = useClaude && claudeStats ? claudeStats : null;
   const codex = useCodex && codexStats ? codexStats : null;
+  const codewhale = useCodewhale && codewhaleStats ? codewhaleStats : null;
 
   const claudeToday = providerDay(claude && claude.today);
   const codexToday = providerDay(codex && codex.today);
+  const codewhaleToday = providerDay(codewhale && codewhale.today);
   const claudeLifetime = providerDay(claude && claude.lifetime);
   const codexLifetime = providerDay(codex && codex.lifetime);
+  const codewhaleLifetime = providerDay(codewhale && codewhale.lifetime);
   const claudeWindow = (claude && claude.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
   const codexWindow = (codex && codex.window5h) || { cost: 0, tokens: 0, startTs: 0, resetTs: 0 };
+  const codewhaleWindow = (codewhale && codewhale.window5h) || { cost: 0, tokens: 0, startsAt: null };
   return {
-    billingAvailable: useClaude || useCodex,
-    today: addDay(claudeToday, codexToday),
-    todayByProvider: { claude: claudeToday, codex: codexToday },
-    window5h: addWindows(claudeWindow, codexWindow),
-    window5hByProvider: { claude: claudeWindow, codex: codexWindow },
-    byModel: { ...tagModels(claude && claude.byModel, 'claude'), ...tagModels(codex && codex.byModel, 'codex') },
-    hourly: addHours(claude && claude.hourly, codex && codex.hourly),
-    hourlyTok: addHours(claude && claude.hourlyTok, codex && codex.hourlyTok),
-    daily: addCalendars(claude && claude.daily, codex && codex.daily),
-    lifetime: addDay(claudeLifetime, codexLifetime),
-    lifetimeByProvider: { claude: claudeLifetime, codex: codexLifetime },
+    billingAvailable: useClaude || useCodex || useCodewhale,
+    today: addDay(addDay(claudeToday, codexToday), codewhaleToday),
+    todayByProvider: { claude: claudeToday, codex: codexToday, ...(codewhale ? { codewhale: codewhaleToday } : {}) },
+    window5h: addWindows(addWindows(claudeWindow, codexWindow), codewhaleWindow),
+    window5hByProvider: { claude: claudeWindow, codex: codexWindow, ...(codewhale ? { codewhale: codewhaleWindow } : {}) },
+    byModel: {
+      ...tagModels(claude && claude.byModel, 'claude'),
+      ...tagModels(codex && codex.byModel, 'codex'),
+      ...(codewhale ? tagModels(codewhale.byModel, 'codewhale') : {}),
+    },
+    hourly: addHours(addHours(claude && claude.hourly, codex && codex.hourly), codewhale && codewhale.hourly),
+    hourlyTok: addHours(addHours(claude && claude.hourlyTok, codex && codex.hourlyTok), codewhale && codewhale.hourlyTok),
+    daily: addCalendars(addCalendars(claude && claude.daily, codex && codex.daily), codewhale && codewhale.daily),
+    lifetime: addDay(addDay(claudeLifetime, codexLifetime), codewhaleLifetime),
+    lifetimeByProvider: { claude: claudeLifetime, codex: codexLifetime, ...(codewhale ? { codewhale: codewhaleLifetime } : {}) },
   };
 }
 
@@ -530,7 +567,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
   }
 
   const provider = (opts && opts.usageProvider) || 'claude';
-  const usage = combineUsage(metering, opts && opts.codexUsage, provider);
+  const usage = combineUsage(metering, opts && opts.codexUsage, provider, opts && opts.codewhaleUsage);
   const todayOut = usage.today;
 
   // Header wants a short project label, not the full cwd path.
@@ -571,6 +608,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     bg: (opts && opts.runtime) || { running: 0, zombie: 0, total: 0, scripts: 0, agents: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
     codexUsage: (opts && opts.codexUsage) || null,
+    codewhaleUsage: (opts && opts.codewhaleUsage) || null,
     billingAvailable: usage.billingAvailable,
     usageProvider: (opts && opts.usageProvider) || 'claude',
     ts: snapshot.ts,

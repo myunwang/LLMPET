@@ -124,15 +124,25 @@ function render(s) {
   fitPanelHeight();
 }
 
-// 合计大数下方的两家拆分。只有一家有量时留空——单 agent 的机器不该看到
-// 「Codex $0.000」这种噪音。
+// 合计大数下方的按家拆分。只有一家有量时留空——单 agent 的机器不该看到
+// 「Codex $0.000」这种噪音。没有 CodeWhale 花费的机器保持上游两方文案不变；
+// CodeWhale 也有量时动态拼接（Claude/Codex/CodeWhale 是专有名词，三语言一致），
+// 否则「合计 > 拆分之和」的矛盾数字会出现在面板上。
 function renderSplit(id, byProvider) {
   const el = $(id);
   if (!el) return;
-  const claude = (byProvider && byProvider.claude && byProvider.claude.cost) || 0;
-  const codex = (byProvider && byProvider.codex && byProvider.codex.cost) || 0;
-  if (claude <= 0 || codex <= 0) { el.textContent = ''; return; }
-  el.textContent = t('panel.providerSplit', { claude: claude.toFixed(2), codex: codex.toFixed(2) });
+  const cost = (k) => (byProvider && byProvider[k] && byProvider[k].cost) || 0;
+  const claude = cost('claude');
+  const codex = cost('codex');
+  const codewhale = cost('codewhale');
+  if (codewhale <= 0) {
+    if (claude <= 0 || codex <= 0) { el.textContent = ''; return; }
+    el.textContent = t('panel.providerSplit', { claude: claude.toFixed(2), codex: codex.toFixed(2) });
+    return;
+  }
+  const rows = [['Claude', claude], ['Codex', codex], ['CodeWhale', codewhale]].filter(([, c]) => c > 0);
+  if (rows.length < 2) { el.textContent = ''; return; }
+  el.textContent = rows.map(([name, c]) => `${name} $${c.toFixed(2)}`).join(' · ');
 }
 
 // 面板按内容高度自适应：量出内容底边（footer 底）到卡片顶的距离，通知主进程调窗口高，
