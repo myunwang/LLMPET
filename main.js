@@ -403,7 +403,7 @@ function makePetWindow(agent) {
       preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       autoplayPolicy: 'no-user-gesture-required',
     },
   });
@@ -483,7 +483,7 @@ function openPanel() {
       preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
   hardenWindow(panelWin);
@@ -533,7 +533,7 @@ function openArchive() {
       preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
   hardenWindow(archiveWin);
