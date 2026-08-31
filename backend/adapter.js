@@ -38,6 +38,7 @@ function agentOf(entry) {
   const id = entry && entry.agentId;
   if (id === 'codex') return 'codex';
   if (id === 'dsh') return 'dsh';
+  if (id === 'codewhale') return 'codewhale';
   // Claude hooks historically omitted agentId, so preserve that compatible
   // default. A non-empty unknown id must remain unknown instead of being
   // painted as Claude throughout the UI.
@@ -46,7 +47,7 @@ function agentOf(entry) {
 }
 
 // 气泡/授权卡里的「谁在说话」。
-const AGENT_NAME = { codex: 'Codex', dsh: 'DeepSeek Harness', claude: 'Claude', unknown: 'Agent' };
+const AGENT_NAME = { codex: 'Codex', dsh: 'DeepSeek Harness', claude: 'Claude', codewhale: 'CodeWhale', unknown: 'Agent' };
 function agentLabel(entry) {
   return AGENT_NAME[agentOf(entry)] || 'Agent';
 }
@@ -144,17 +145,26 @@ function mapState(state) {
 }
 
 // Human-readable permission question from the (full) tool_input CC sent us.
+// CodeWhale tool names (exec_shell / write_file / edit_file / apply_patch /
+// fim_edit / read_file) join the Claude spellings — field names verified
+// against CodeWhale's permission-rule docs (exec_shell→command, file tools→path).
 function humanizeTool(toolName, input) {
   const i = input && typeof input === 'object' ? input : {};
   switch (toolName) {
     case 'Bash':
+    case 'exec_shell':
       return t('perm.runCommand') + clip(i.command || i.cmd || '', 80);
     case 'Edit':
     case 'MultiEdit':
     case 'Write':
     case 'NotebookEdit':
+    case 'edit_file':
+    case 'write_file':
+    case 'apply_patch':
+    case 'fim_edit':
       return t('perm.editFile') + clip(i.file_path || i.path || i.notebook_path || '', 60);
     case 'Read':
+    case 'read_file':
       return t('perm.readFile') + clip(i.file_path || i.path || '', 60);
     case 'WebFetch':
       return t('perm.fetchUrl') + clip(i.url || '', 60);
@@ -203,13 +213,29 @@ function buildPermChoice(perm, entry) {
   });
   const who = entry ? agentLabel(entry) : 'Claude';
   const action = humanizeTool(perm.toolName, perm.toolInput);
+  // Auto-deny hint window: explicit minutes win; otherwise derive it from the
+  // pending entry's own timestamps. The derivation matters because the same
+  // card is rebuilt on two paths — the first push (main.js onPermissionAdded)
+  // and every stats snapshot (getPending() → buildPermChoice) — and only the
+  // entry itself is guaranteed to flow through both.
+  const denyWindowMs = Number.isFinite(perm.autoDenyMins) && perm.autoDenyMins > 0
+    ? perm.autoDenyMins * 60000
+    : (Number.isFinite(perm.expiresAt) && Number.isFinite(perm.createdAt) && perm.expiresAt > perm.createdAt
+      ? perm.expiresAt - perm.createdAt
+      : 0);
   return {
     kind: 'perm',
     sessionId: perm.sessionId,
     permId: perm.id,
     project: entry ? projectName(entry) : (perm.sessionId || '?'),
-    header: travel ? t('travel.letterFrom', { who }) : perm.toolName,
+    // Non-Claude agents must be identifiable on the card: a user running
+    // Claude Code and CodeWhale side by side otherwise cannot tell who is
+    // asking. Claude sessions keep the bare tool name (byte-identical cards).
+    header: travel ? t('travel.letterFrom', { who }) : (who === 'Claude' ? perm.toolName : `${who} · ${perm.toolName}`),
     question: travel ? t('travel.letterQuestion', { action }) : action,
+    // Optional honesty line for bridges that auto-deny after a fixed window
+    // (CodeWhale: unanswered requests deny at 8 min, under the TOML timeout).
+    hint: denyWindowMs > 0 ? t('perm.autoDenyHint', { mins: Math.max(1, Math.round(denyWindowMs / 60000)) }) : '',
     options,
     multi: false,
     allowInput: false,

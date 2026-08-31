@@ -15,6 +15,12 @@ const { createPermissions } = require('../backend/permission');
 const { createServer } = require('../backend/server');
 const adapter = require('../backend/adapter');
 
+// Node 19+ 的 globalAgent 默认 keepAlive：空闲 socket 会被 server 的
+// keepAliveTimeout（5s）关掉，慢 CI 机器上请求间隔一旦超过 5s，复用死
+// socket → ECONNRESET（windows-latest 真实撞过：纯函数 check 之间停顿 4s+，
+// 累计空闲 6.4s）。每请求一条新连接，彻底免疫该竞态。
+const NO_KEEPALIVE = new http.Agent({ keepAlive: false });
+
 const events = [];
 let dirtyCount = 0;
 
@@ -40,7 +46,7 @@ function postAbortable(pathName, body, options = {}) {
     const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) };
     if (authenticated && pathName === '/state') headers['x-octopus-token'] = server.getToken();
     req = http.request(
-      { hostname: '127.0.0.1', port: server.getPort(), path: requestPath, method: 'POST', headers },
+      { hostname: '127.0.0.1', port: server.getPort(), path: requestPath, method: 'POST', headers, agent: NO_KEEPALIVE },
       (res) => {
         let data = '';
         res.on('data', (c) => (data += c));
@@ -59,7 +65,7 @@ function post(pathName, body, options) {
 
 function get(pathName) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: '127.0.0.1', port: server.getPort(), path: pathName }, (res) => {
+    const req = http.get({ hostname: '127.0.0.1', port: server.getPort(), path: pathName, agent: NO_KEEPALIVE }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
