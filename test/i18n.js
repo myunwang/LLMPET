@@ -42,13 +42,13 @@ for (const key of zhKeys) {
 // ── 3. EN/JA are actually translated, not zh copies ──────────────────────────
 // Legitimately identical across locales:
 //   lang.*        — the switcher lists each language in its own script
-//   ask.back/submit/needsInput — already English in the original zh UI
+//   ask.back/submit/next/needsInput/other — already English in the original zh UI
 //   bub.waitYou   — pure template, both slots are filled from other keys
 //   panel.less/more, *.interrupted — the same kanji is correct in ja and zh
 //   panel.providerSplit — two product names and two numbers, nothing to translate
 const SHARED_VERBATIM = new Set([
   'lang.zh', 'lang.en', 'lang.ja',
-  'ask.back', 'ask.submit', 'ask.needsInput',
+  'ask.back', 'ask.submit', 'ask.next', 'ask.needsInput', 'ask.other',
   'bub.waitYou',
   'panel.less', 'panel.more', 'sess.interrupted', 'state.interrupted',
   'panel.providerSplit',
@@ -59,6 +59,12 @@ for (const lang of ['en', 'ja']) {
 }
 
 // ── 4. every t() key used in source exists ───────────────────────────────────
+// Blind spot worth knowing: call sites like `t(last ? 'ask.submit' : 'ask.next')`
+// are invisible to the literal scan below (the regex requires t( directly
+// followed by a quote). Their keys are still guarded — by the locale-parity
+// checks above and by the behavioral suite test/gui-defects.js — but a key
+// reachable ONLY through a ternary would not be caught here if it were dropped
+// from every dictionary. Prefer plain t('literal') at call sites when you can.
 const SOURCES = [
   'main.js', 'backend/adapter.js', 'renderer/pet.js', 'renderer/panel.js',
 ];

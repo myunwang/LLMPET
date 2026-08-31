@@ -152,4 +152,52 @@ assert.strictEqual((byModel.match(/fill="#3b82f6"/g) || []).length, 2, 'both Cod
   assert.strictEqual(text('cal-readout'), '—');
 }
 
+// ── CodeWhale joins the machine total and the split line ─────────────────────
+{
+  const codewhale = {
+    today: { cost: 3.5, tokens: 4_000_000, msgs: 12, input: 3_000_000, output: 1_000_000, cacheRead: 500_000, cacheWrite: 0 },
+    window5h: { cost: 3.5, tokens: 4_000_000, startsAt: Date.now() - 1e6 },
+    byModel: { 'deepseek-chat': { cost: 3.5, tokens: 4_000_000, msgs: 12, input: 3_000_000, output: 1_000_000, cacheRead: 500_000, cacheWrite: 0 } },
+    hourly: new Array(24).fill(0),
+    hourlyTok: new Array(24).fill(0),
+    daily: {},
+    lifetime: { cost: 9.5, tokens: 11_000_000, msgs: 40 },
+    diagnostics: { unknownModelCount: 0 },
+  };
+  const combined = combineUsage(claude, codex, 'all', codewhale);
+  vm.runInContext('render(__cw)', Object.assign(world.sandbox, {
+    __cw: { ...stats, ...combined, codewhaleUsage: codewhale },
+  }), { filename: 'drive-cw' });
+  // 总额 = 三家之和（不再出现「合计 > 拆分之和」的矛盾）
+  assert.strictEqual(text('today-cost'), '$64.824', 'today must be Claude + Codex + CodeWhale');
+  assert.strictEqual(
+    text('today-split'),
+    'Claude $41.26 · Codex $20.07 · CodeWhale $3.50',
+    `three-way split expected, got "${text('today-split')}"`,
+  );
+  assert.strictEqual(text('win-split'), 'Claude $8392.98 · Codex $1390.25 · CodeWhale $9.50');
+
+  // claude + codewhale（无 Codex 花费）：以前完全隐藏，现在正确显示两方拆分
+  const noCodex = combineUsage({ ...claude, today: { ...claude.today, cost: 5 }, lifetime: { ...claude.lifetime, cost: 5 } }, { ...codex, today: { ...codex.today, cost: 0 }, lifetime: { ...codex.lifetime, cost: 0 } }, 'all', codewhale);
+  vm.runInContext('render(__cw2)', Object.assign(world.sandbox, {
+    __cw2: { ...stats, ...noCodex, codewhaleUsage: codewhale },
+  }), { filename: 'drive-cw2' });
+  assert.strictEqual(text('today-cost'), '$8.500');
+  assert.strictEqual(text('today-split'), 'Claude $5.00 · CodeWhale $3.50', 'claude+codewhale pair must show a split');
+
+  // Codex + CodeWhale（无 Claude 花费）：两方拆分同样成立
+  const noClaude = combineUsage({ ...claude, today: { ...claude.today, cost: 0 }, lifetime: { ...claude.lifetime, cost: 0 } }, { ...codex, today: { ...codex.today, cost: 2 }, lifetime: { ...codex.lifetime, cost: 2 } }, 'all', codewhale);
+  vm.runInContext('render(__cw4)', Object.assign(world.sandbox, {
+    __cw4: { ...stats, ...noClaude, codewhaleUsage: codewhale },
+  }), { filename: 'drive-cw4' });
+  assert.strictEqual(text('today-split'), 'Codex $2.00 · CodeWhale $3.50', 'codex+codewhale pair must show a split');
+
+  // 只有 CodeWhale 一家：不显示拆分（单 agent 噪音规则）
+  const cwOnly = combineUsage({ ...claude, today: { ...claude.today, cost: 0, tokens: 0, msgs: 0 }, lifetime: { ...claude.lifetime, cost: 0 } }, { ...codex, today: { ...codex.today, cost: 0 }, lifetime: { ...codex.lifetime, cost: 0 } }, 'all', codewhale);
+  vm.runInContext('render(__cw3)', Object.assign(world.sandbox, {
+    __cw3: { ...stats, ...cwOnly, codewhaleUsage: codewhale },
+  }), { filename: 'drive-cw3' });
+  assert.strictEqual(text('today-split'), '', 'single-agent machine shows no split');
+}
+
 console.log('panel render (combined Claude + Codex) checks passed');

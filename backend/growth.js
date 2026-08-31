@@ -32,14 +32,16 @@ function rankFor(totalTokens, unitTokens = TRAVEL_RANK_UNIT_TOKENS) {
   };
 }
 
-function machineGrowth(claudeStats, codexStats) {
+function machineGrowth(claudeStats, codexStats, codewhaleStats) {
   const claudeTokens = number(claudeStats && claudeStats.lifetime && claudeStats.lifetime.tokens);
   const codexTokens = number(codexStats && codexStats.lifetime && codexStats.lifetime.tokens);
-  const totalTokens = claudeTokens + codexTokens;
+  const codewhaleTokens = number(codewhaleStats && codewhaleStats.lifetime && codewhaleStats.lifetime.tokens);
+  const totalTokens = claudeTokens + codexTokens + codewhaleTokens;
   return {
     totalTokens,
     claudeTokens,
     codexTokens,
+    codewhaleTokens,
     rank: rankFor(totalTokens, MACHINE_RANK_UNIT_TOKENS),
   };
 }

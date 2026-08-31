@@ -1,4 +1,4 @@
-# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness 桌宠工作台
+# 🐙 LLMPET — Claude Code / Codex / DeepSeek Harness / CodeWhale 桌宠工作台
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -7,7 +7,7 @@
   <a href="https://github.com/myunwang/LLMPET/forks"><img src="https://img.shields.io/github/forks/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Forks&amp;labelColor=2d2735&amp;color=8a5b88" alt="GitHub Forks"></a>
 </p>
 
-LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**。它把 **Claude Code、OpenAI Codex 和 DeepSeek Harness** 的会话放到同一个桌面层：看状态、找会话、回到原窗口、管理历史，也能把一项工作从一个 Agent 安全地交给另一个 Agent 继续。
+LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**。它把 **Claude Code、OpenAI Codex、DeepSeek Harness 和 CodeWhale** 的会话放到同一个桌面层：看状态、找会话、回到原窗口、管理历史，也能把一项工作从一个 Agent 安全地交给另一个 Agent 继续。
 
 桌宠仍然是 LLMPET 最直观的交互方式：它会随 Agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把回复弹成气泡；但产品能力已经从“看 Agent 在做什么”，扩展到**统一会话管理、跨 Agent 接管、本机归档与备份、用量诊断和可控的 Agent 行动**。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
@@ -49,6 +49,17 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | <img src="assets/whale/whale-sleeping.gif" width="72" alt="被窝睡觉"> <img src="assets/whale/whale-sleeping-2.gif" width="72" alt="椅子上睡觉"> | 😴 **sleeping 睡觉** | 会话结束或长时间没有活动 |
 
 鲸鱼女仆是本项目的原创角色，与 DeepSeek 官方无隶属或代言关系。素材来源、制作流程与规格见 [`assets/whale/CREDITS.md`](assets/whale/CREDITS.md)。
+
+## CodeWhale 已接入：状态、授权与花费
+
+LLMPET 支持 [CodeWhale](https://github.com/Hmbown/CodeWhale)（Rust TUI 编码代理，前身是 `deepseek-tui`）：
+
+- **自动接入**：LLMPET 启动时检测 `~/.codewhale/config.toml`，存在即合并写入带 BEGIN/END 标记的 managed hook 区块；用户原有 TOML 内容字节级保留，卸载只删自己的区块。
+- **状态**：10 个生命周期事件（`session_start`/`message_submit`/`tool_call_before`/`turn_end`/`on_error`/`mode_change` 等）映射为桌宠表情——与 Claude 同一套状态词汇。
+- **授权**：CodeWhale 的 `tool_call_before` 权限门桥接到桌宠气泡；单一只读命令（经 fail-closed 识别器验证）免打扰放行，其余一键允许/拒绝。LLMPET 不可达时回落 CodeWhale 原生提示，8 分钟无人决策主动拒绝——上游对无响应 hook 的默认行为是放行，这里刻意 fail-closed。
+- **花费**：`turn_end` 事件自带 usage，按 models.dev 公开价格（24h 缓存、特殊 key 安全边界）计入与 Claude/Codex 并列的账单。
+
+完整协议差异、安全边界与已知限制见 [docs/CODEWHALE.md](docs/CODEWHALE.md)。
 
 ## 不只是桌宠
 
@@ -284,6 +295,7 @@ shared/
   i18n.js               全部界面文案的单一来源（zh / en / ja，主进程与渲染端共用）
 test/smoke.js           端到端冒烟测试
 test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗真的本地化了）
+test/gui-defects.js     渲染端 GUI 缺陷回归（卡片 i18n / placeholder / 徽标 / 定时器泄漏）
 test/dsh-watch.js       dsh 会话日志监听（事件映射 / 子 agent 过滤 / zstd 增量）
 test/zstd.js            zstd 分帧读取（完整帧 / 半帧 / 坏数据）
 ```

@@ -71,4 +71,25 @@ function safeJson(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-module.exports = { log, LOG_PATH, LOG_DIR };
+// Close the append stream and release the file handle. On Windows an open
+// write handle keeps the file's directory entry in a delete-pending state,
+// so rmSync of the log directory fails with ENOTEMPTY no matter how many
+// retries it is given — the e2e sandbox cleanup hit exactly that on
+// windows-latest (Linux/macOS unlink by inode refcount and never see it).
+// Tests call this before deleting their fake HOME; an app quitting may call
+// it to flush. Resolves on stream close; never rejects, never hangs >500ms.
+function shutdown() {
+  return new Promise((resolve) => {
+    const s = stream;
+    stream = null;
+    if (!s || s.destroyed || s.closed) return resolve();
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    s.once('close', done);
+    try { s.end(); } catch { done(); }
+    // end() flushes asynchronously; if the stream is wedged, don't hang the caller.
+    setTimeout(done, 500).unref?.();
+  });
+}
+
+module.exports = { log, shutdown, LOG_PATH, LOG_DIR };

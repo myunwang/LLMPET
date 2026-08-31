@@ -16,10 +16,12 @@ const {
   TOKEN_HEADER,
   BASE_PORT,
   getPortCandidates,
+  probe,
   readRuntimeConfig,
   writeRuntimeConfig,
   clearRuntimeConfig,
 } = require('./transport');
+const { createCodeWhalePermissions } = require('./codewhale-permission');
 const { log } = require('./log');
 
 // A Stop event carries the assistant's last reply (up to ~2200 chars). In CJK
@@ -153,6 +155,10 @@ function createServer(deps) {
   const core = deps.core;
   const permissions = deps.permissions;
   const shouldDropForDnd = typeof deps.shouldDropForDnd === 'function' ? deps.shouldDropForDnd : () => false;
+  const codewhalePermissions = createCodeWhalePermissions({
+    onChange: deps.onPermissionChange,
+    onAdded: deps.onPermissionAdded,
+  });
 
   let server = null;
   let activePort = null;
@@ -208,7 +214,7 @@ function createServer(deps) {
         terminalApp: normTerminalApp(data.terminal_app),
         terminalTty: normTerminalTty(data.terminal_tty),
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
-        agentId: 'claude-code',
+        agentId: data.agent_id === 'codewhale' ? 'codewhale' : 'claude-code',
         headless: data.headless === true,
         externalResume: data.external_resume === true,
         transcriptPath: normTranscriptPath(data.transcript_path),
@@ -231,8 +237,27 @@ function createServer(deps) {
       // SessionEnd) may clear permission cards. Parallel tool events share a
       // session_id and must not sweep another agent's live request.
       permissions.sweepForSessionEvent(sid, event);
+      if (data.agent_id === 'codewhale' && event === 'SessionEnd') {
+        codewhalePermissions.sweepForSession(sid, 'ask');
+      }
 
       core.updateSession(sid, state, event, fields);
+      // turn_end carries the authoritative per-turn usage (verified CodeWhale
+      // contract); the metering ledger consumes it without touching session
+      // files. Delivery is best-effort — pricing gaps never block state flow.
+      if (data.agent_id === 'codewhale' && data.usage && typeof data.usage === 'object' && typeof deps.onCodeWhaleUsage === 'function') {
+        try {
+          deps.onCodeWhaleUsage({
+            sessionId: sid,
+            model: fields.model,
+            provider: typeof data.provider === 'string' && data.provider ? data.provider : null,
+            usage: data.usage,
+            totals: data.usage_totals && typeof data.usage_totals === 'object' ? data.usage_totals : null,
+            turnId: typeof data.turn_id === 'string' ? data.turn_id : null,
+            status: typeof data.turn_status === 'string' ? data.turn_status : null,
+          });
+        } catch (e) { log('server', 'codewhale usage rejected:', e.message); }
+      }
       res.writeHead(200, { [SERVER_HEADER]: SERVER_ID });
       res.end('ok');
     });
@@ -269,6 +294,20 @@ function createServer(deps) {
     });
   }
 
+  function handleCodeWhalePermissionPost(req, res) {
+    readBody(req, MAX_PERMISSION_BODY_BYTES, (body) => {
+      if (body === null) { res.writeHead(413); res.end('payload too large'); return; }
+      let data;
+      try { data = JSON.parse(body); } catch { res.writeHead(400); res.end('bad json'); return; }
+      if (typeof data.session_id !== 'string' || !data.session_id) { res.writeHead(400); res.end('missing session_id'); return; }
+      codewhalePermissions.addPermission(res, {
+        sessionId: data.session_id,
+        toolName: typeof data.tool_name === 'string' && data.tool_name ? data.tool_name : 'Unknown',
+        toolInput: truncateInput(data.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {}),
+      });
+    });
+  }
+
   function onRequest(req, res) {
     if (!isLoopback(req)) { res.writeHead(403); res.end(); return; }
     if (!hostAllowed(req) || fromBrowser(req)) { res.writeHead(403); res.end('forbidden'); return; }
@@ -295,6 +334,12 @@ function createServer(deps) {
     if (req.method === 'POST' && req.url === '/state') {
       if (!stateAuthorized(req)) { res.writeHead(403, { [SERVER_HEADER]: SERVER_ID }); res.end('forbidden'); return; }
       return handleStatePost(req, res);
+    }
+    // CodeWhale tool_call_before bridge: same loopback/Host/Origin/token trust
+    // boundary as /state (the hook reads the per-boot token from runtime.json).
+    if (req.method === 'POST' && req.url === '/codewhale-permission') {
+      if (!stateAuthorized(req)) { res.writeHead(403, { [SERVER_HEADER]: SERVER_ID }); res.end('forbidden'); return; }
+      return handleCodeWhalePermissionPost(req, res);
     }
     if (req.method === 'POST' && permissionAuthorized(req)) return handlePermissionPost(req, res);
     if (req.method === 'POST' && String(req.url || '').startsWith('/permission')) {
@@ -324,7 +369,10 @@ function createServer(deps) {
 
     server.on('listening', () => {
       activePort = ports[idx];
-      writeRuntimeConfig(activePort, activeToken);
+      // First-live-wins: if the runtime record already points to a live
+      // LLMPET server (explicit multi-instance mode), defer to it instead of
+      // stealing the hook traffic. A missing/stale record is claimed.
+      claimRuntimeOwnership();
       log('server', `listening on 127.0.0.1:${activePort}`);
       startRuntimeGuard();
     });
@@ -332,20 +380,49 @@ function createServer(deps) {
     server.listen(ports[idx], '127.0.0.1');
   }
 
-  // 守护 runtime.json：别的代码副本（同一套 transport 的旧版/分叉）启动时会把
-  // runtime 覆盖成自己的端口，hook 流量随之被劫走。存活期间发现记录不是自己
-  // 就抢回来 —— 先到者赢。
+  // ── runtime.json ownership ─────────────────────────────────────────────────
+  // The record routes hook traffic to one server. Two kinds of disputes exist:
+  //   1) a STALE record (the recorded server crashed / a leftover file) —
+  //      claimed/healed immediately;
+  //   2) a LIVE rival on another port — respected, never fought over.
+  // The previous guard re-asserted unconditionally every 15s, so two live
+  // instances (OCTOPUS_ALLOW_MULTI=1, or an older fork without defer logic)
+  // flip-flopped the file forever — each overwrite invalidates the other's
+  // token mid-flight. Liveness is proven by probing the recorded port and
+  // checking our identity header, so an unrelated process squatting on the
+  // port does NOT count as a live rival.
+  function claimRuntimeOwnership() {
+    if (!activePort) return;
+    const runtime = readRuntimeConfig();
+    if (runtime && runtime.port === activePort) {
+      // Record points at us. A token mismatch is a stale token from a previous
+      // boot of ours (or a same-port crash-restart): rewrite immediately.
+      if (runtime.token !== activeToken) writeRuntimeConfig(activePort, activeToken);
+      return;
+    }
+    if (!runtime) {
+      writeRuntimeConfig(activePort, activeToken);
+      return;
+    }
+    // Record points elsewhere: defer to it only if that server is alive.
+    probe(runtime.port, 600, (alive) => {
+      if (!alive) {
+        // Re-check before writing: the record may have changed during the probe.
+        const now = readRuntimeConfig();
+        if (!now || now.port === activePort) writeRuntimeConfig(activePort, activeToken);
+        else if (now.port === runtime.port) {
+          // Still the rival we probed and it answered nobody — claim it.
+          writeRuntimeConfig(activePort, activeToken);
+        }
+      }
+    });
+  }
+
   let runtimeGuard = null;
   function startRuntimeGuard() {
     stopRuntimeGuard();
-    runtimeGuard = setInterval(() => {
-      if (!activePort) return;
-      const runtime = readRuntimeConfig();
-      if (!runtime || runtime.port !== activePort || runtime.token !== activeToken) {
-        log('server', `runtime.json changed (another instance?) — reasserting ${activePort}`);
-        writeRuntimeConfig(activePort, activeToken);
-      }
-    }, 15000);
+    const intervalMs = Number.isFinite(deps.runtimeGuardMs) && deps.runtimeGuardMs > 0 ? deps.runtimeGuardMs : 15000;
+    runtimeGuard = setInterval(claimRuntimeOwnership, intervalMs);
     if (runtimeGuard.unref) runtimeGuard.unref();
   }
   function stopRuntimeGuard() {
@@ -360,11 +437,12 @@ function createServer(deps) {
     // 只清掉指向自己的记录，避免误删另一个存活实例刚写的端口
     const runtime = readRuntimeConfig();
     if (runtime && runtime.port === activePort && runtime.token === activeToken) clearRuntimeConfig();
+    codewhalePermissions.cleanup();
     if (server) { try { server.close(); } catch {} server = null; }
     activeToken = null;
   }
 
-  return { start, stop, getPort, getToken };
+  return { start, stop, getPort, getToken, getCodeWhalePermissions: () => codewhalePermissions };
 }
 
 module.exports = { createServer, MAX_STATE_BODY_BYTES };

@@ -78,11 +78,13 @@ function clearRuntimeConfig() {
   try { fs.unlinkSync(RUNTIME_PATH); return true; } catch { return false; }
 }
 
-// Candidate ports to try, runtime-recorded port first.
-function getPortCandidates() {
+// Candidate ports to try, runtime-recorded port first. Accepts an optional
+// already-read runtime port so callers that just parsed runtime.json don't
+// pay a second synchronous read of the same file.
+function getPortCandidates(knownPort) {
   const out = [];
   const add = (p) => { const v = inRange(p); if (v && !out.includes(v)) out.push(v); };
-  add(readRuntimePort());
+  add(knownPort != null ? knownPort : readRuntimePort());
   PORTS.forEach(add);
   return out;
 }
@@ -114,7 +116,7 @@ function postState(body, cb) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
   const runtime = readRuntimeConfig();
   if (!runtime) { cb && cb(false); return; }
-  const ports = getPortCandidates();
+  const ports = getPortCandidates(runtime.port);
   let i = 0;
   const tryNext = () => {
     if (i >= ports.length) { cb && cb(false); return; }

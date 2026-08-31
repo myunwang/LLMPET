@@ -96,9 +96,36 @@ jobs:
             dist/LLMPET-*-Windows-x64.zip
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify tag matches package version
+        run: node -e "const v=require('./package.json').version;if('v'+v!==process.env.GITHUB_REF_NAME)throw new Error('tag/package version mismatch')"
+      # The lockfile itself must only reference public npmjs tarball URLs —
+      # internal mirrors are unreachable from public runners (regression guard
+      # is also enforced by npm test via test/lockfile-hygiene.js).
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:linux
+      - name: List Linux packages
+        run: ls -la dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llmpet-linux-x64
+          path: |
+            dist/LLMPET-*-Linux-x64.AppImage
+            dist/LLMPET-*-Linux-x64.deb
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
