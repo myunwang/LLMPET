@@ -45,6 +45,10 @@ const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex, launchDsh, ensureDshWeb, launchExecutable, findCli } = require('./backend/launch');
 const { createAgentStartup } = require('./backend/agent-startup');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { createAgentAutomation } = require('./backend/codex-automation');
+const { readAccountQuotas } = require('./backend/codex-control');
+const { createAgentExecutor } = require('./backend/agent-control');
+const { createClaudeActivityAdapter } = require('./backend/agent-events');
 const { createDshWatch } = require('./backend/dsh-watch');
 const { createCodexMetering } = require('./backend/codex-metering');
 const { createTravelManager } = require('./backend/travel');
@@ -62,6 +66,8 @@ const petGeometry = require('./shared/pet-geometry');
 const { dragTrace, PET_DRAG_TRACE_PATH } = require('./backend/pet-drag-trace');
 
 const t = i18n.t;
+const backendLoadedAt = Date.now();
+let observeClaude = null;
 // Main-process strings (tray, dialogs, adapter-built labels) are localized at
 // build time, so the language must be live before the first menu or event.
 i18n.setLang(config.get().lang);
@@ -87,6 +93,8 @@ let server = null;
 let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
+let codexAutomation = null;
+let codexExecutor = null;
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
 let dshWatch = null;    // DeepSeek Harness 会话日志只读监听器
 let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
@@ -1020,9 +1028,29 @@ function startMemeWatcher() {
 }
 
 // ── backend wiring ────────────────────────────────────────────────────────────
+function automationSnapshot() {
+  if (!codexAutomation) return null;
+  const value = codexAutomation.snapshot();
+  const choices = new Map(value.sessions.map(s => [`${s.agent}:${s.sessionId}`, s]));
+  for (const s of sessionArchive ? sessionArchive.list({ pageSize: 100 }).sessions : []) {
+    const key = `${s.provider}:${s.id}`;
+    if (!choices.has(key)) choices.set(key, { agent: s.provider, sessionId: s.id, title: s.title, cwd: s.cwd, kind: 'history', at: s.updatedAt });
+  }
+  value.choices = [...choices.values()];
+  value.diagnostics = {
+    sourceRoot: __dirname, executable: process.execPath, loadedAt: backendLoadedAt, configPath: config.CONFIG_PATH,
+    watchers: [codexWatch ? codexWatch.diagnostics() : { agent: 'codex', disabled: true },
+      { agent: 'claude', path: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects'),
+        tracked: core ? [...core.sessions.values()].filter(s => adapter.agentOf(s) === 'claude').length : 0 },
+      dshWatch ? dshWatch.diagnostics() : { agent: 'dsh', disabled: true }],
+  };
+  return value;
+}
+
 function bootBackend() {
   core = createCore({
     onActivity: (act) => {
+      if (observeClaude) observeClaude(act);
       const claimedByTravel = travelManager && travelManager.observeActivity({
         ...act,
         agent: adapter.agentOf(act.session),
@@ -1055,6 +1083,9 @@ function bootBackend() {
   });
   sessionTakeover = createSessionTakeover();
   sessionArchive = createSessionArchive({
+    codexRoot: process.env.LLMPET_CODEX_DIR || path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions'),
+    codexSessionIndexPath: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'session_index.jsonl'),
+    claudeRoot: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects'),
     getSettings: () => config.get().sessionArchive,
     onChange: (event) => sendArchive('archive:changed', event),
     // Keep archive discovery on the same injected root as the live watcher in
@@ -1085,6 +1116,23 @@ function bootBackend() {
   runtimeMonitor.start();
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
+  codexExecutor = createAgentExecutor();
+  codexAutomation = createAgentAutomation({
+    statePath: process.env.LLMPET_AUTOMATION_STATE || undefined,
+    isAgentEnabled: agent => agent === 'codex' ? process.env.LLMPET_NO_CODEX !== '1' : agent === 'dsh' ? process.env.LLMPET_NO_DSH !== '1' : true,
+    onChange: () => { if (archiveWin && !archiveWin.isDestroyed()) sendArchive('automation:changed', automationSnapshot()); },
+    run: (job, onThread) => process.env.OCTOPUS_NO_NET === '1'
+      ? Promise.resolve({ ok: false, kind: 'failed', message: '离线模式禁止自动任务联网 / Offline mode blocks automated inference' })
+      : codexExecutor.run(job, onThread),
+    readQuotas: () => process.env.OCTOPUS_NO_NET === '1'
+      ? Promise.resolve({ ok: false, message: '离线模式不查询账号额度 / Offline mode disables account quota checks' })
+      : readAccountQuotas(),
+    flushStatus: () => { if (codexWatch) codexWatch.tick(); if (dshWatch) dshWatch.tick(); },
+    isBusy: () => [...core.sessions.values()].some(s =>
+      ['working', 'thinking', 'juggling', 'sweeping', 'carrying', 'notification'].includes(s.state)),
+  });
+  observeClaude = createClaudeActivityAdapter(event => codexAutomation.observe(event));
+  for (const session of core.sessions.values()) if (adapter.agentOf(session) === 'claude') observeClaude({ session }, true);
   // LLMPET_NO_CODEX=1 关闭（比如只想盯 Claude 的机器）。
   if (process.env.LLMPET_NO_CODEX === '1') {
     log('main', 'LLMPET_NO_CODEX=1 — Codex watcher disabled');
@@ -1096,6 +1144,8 @@ function bootBackend() {
     codexMetering.start(30000);
     codexWatch = createCodexWatch({
       core,
+      onStatus: (event) => codexAutomation.observe(event),
+      onQuota: (quota, options) => codexAutomation.observeQuota(quota, options),
       // 开发/E2E 可用 LLMPET_CODEX_DIR 指到假目录，不碰真实 ~/.codex
       sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
     });
@@ -1110,10 +1160,12 @@ function bootBackend() {
   } else {
     dshWatch = createDshWatch({
       core,
+      onStatus: event => codexAutomation.observe(event),
       sessionsDir: process.env.LLMPET_DSH_DIR || undefined,
     });
     dshWatch.start();
   }
+  codexAutomation.start();
 
   metering = createMetering();
   metering.start(30000);
@@ -1247,6 +1299,27 @@ function registerIpc() {
   };
 
   ipcMain.handle('get-config', (e) => frontendConfig(senderAgent(e)));
+  const automationCall = (event, fn) => {
+    if (!archiveWin || archiveWin.isDestroyed() || event.sender !== archiveWin.webContents) return { ok: false, message: 'Open the workbench to configure automation' };
+    if (!codexAutomation) return { ok: false, message: 'Automation unavailable' };
+    try { const value = fn(); return { ok: true, value }; }
+    catch (err) { return { ok: false, message: String(err.message || err) }; }
+  };
+  ipcMain.handle('automation-get', e => automationCall(e, () => automationSnapshot()));
+  ipcMain.handle('automation-rescan', e => automationCall(e, () => {
+    if (codexWatch) codexWatch.tick();
+    if (dshWatch) dshWatch.tick();
+    core.rescanSessions();
+    const known = new Set(codexAutomation.snapshot().sessions.filter(s => s.agent === 'claude').map(s => s.sessionId));
+    for (const session of core.sessions.values()) if (adapter.agentOf(session) === 'claude' && !known.has(session.id)) observeClaude({ session }, true);
+    if (sessionArchive) sessionArchive.refresh().then(() => sendArchive('automation:changed', automationSnapshot())).catch(() => {});
+    return true;
+  }));
+  ipcMain.handle('automation-save', (e, rule) => automationCall(e, () => codexAutomation.saveRule(rule)));
+  ipcMain.handle('automation-remove', (e, id) => automationCall(e, () => codexAutomation.removeRule(id)));
+  ipcMain.handle('automation-reset', (e, id) => automationCall(e, () => codexAutomation.resetCount(id)));
+  ipcMain.handle('automation-cancel', (e, id) => automationCall(e, () => codexAutomation.cancelJob(id)));
+  ipcMain.handle('automation-refresh-quota', e => automationCall(e, () => { codexAutomation.refreshQuotas(); return true; }));
   ipcMain.handle('get-stats', (e) => {
     // Do not return a stale cached price/token snapshot to a newly opened
     // dashboard. buildStats is read-only and reflects the latest ledger scan.
@@ -2003,6 +2076,8 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
+  try { if (codexAutomation) codexAutomation.stop(); } catch {}
+  try { if (codexExecutor) codexExecutor.stop(); } catch {}
   try { if (territory) territory.stop(); } catch {}
   try { if (travelManager) travelManager.shutdown(); } catch {}
   try { if (sessionArchive) sessionArchive.stop(); } catch {}

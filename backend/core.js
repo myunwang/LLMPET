@@ -16,7 +16,7 @@ const { log } = require('./log');
 const transcript = require('./transcript');
 const States = require('../shared/states');
 
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+const PROJECTS_DIR = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
 
 // Rolling per-session event history → drives the "done/interrupted" badge
 // without bloating the state enum. Capped to keep long sessions bounded.
@@ -246,7 +246,8 @@ function createCore(options = {}) {
     sessions.set(id, s);
 
     try {
-      onActivity({ session: s, event: event || null, prevState, newState: resolvedState, isNew, realCompletion, assistantChanged, cwdActive });
+      onActivity({ session: s, event: event || null, prevState, newState: resolvedState, isNew, realCompletion, assistantChanged, cwdActive,
+        errorType: f.errorType || null, terminalError: f.apiErrorTerminal === true });
     } catch (err) {
       log('core', 'onActivity error:', err.message);
     }
@@ -293,6 +294,9 @@ function createCore(options = {}) {
     if (typeof fields.model === 'string' && fields.model && s.model !== fields.model) {
       s.model = fields.model;
       changed = true;
+    }
+    if (Number.isFinite(fields.transcriptActiveAt) && fields.transcriptActiveAt > (s.transcriptActiveAt || 0)) {
+      s.transcriptActiveAt = fields.transcriptActiveAt; changed = true;
     }
     if (changed) onDirty();
   }
@@ -425,7 +429,7 @@ function createCore(options = {}) {
       try {
         // transcript 的 mtime = 模型最近一次产出时间。事件间隙里文件还在长，
         // 说明模型在干活（重连后继续跑/流式输出），adapter 据此不判摸鱼。
-        try { s.transcriptActiveAt = fs.statSync(p).mtimeMs; } catch {}
+        try { s.transcriptActiveAt = Math.max(s.transcriptActiveAt || 0, fs.statSync(p).mtimeMs); } catch {}
         // 非 Claude 后端的 transcript 不是 Claude 格式（Codex 是 rollout JSONL，
         // dsh 是 zstd 分帧的会话日志）：mtime 活跃度通用，但上下文/中断/API 错误
         // 都由各自的 watcher 事件驱动，别用 Claude 解析器去猜（dsh 那份还是二进制）。
@@ -438,6 +442,7 @@ function createCore(options = {}) {
           s.state = 'idle';
           s.recentEvents = pushRecentEvent(s, 'idle', 'StopFailure', now); // 徽标 → 中断
           s.updatedAt = now;
+          onActivity({ session: s, event: 'StopFailure', interrupted: true, prevState: 'working', newState: 'idle', realCompletion: false });
           changed = true;
         }
         // 网络重试/API 报错同样发生在事件间隙：忙碌态（含 thinking）会话 tail
@@ -450,6 +455,7 @@ function createCore(options = {}) {
             s.sweepError = true; // 巡检发现的错误，恢复也由巡检负责
             s.recentEvents = pushRecentEvent(s, 'error', 'ApiError', now);
             s.updatedAt = now;
+            onActivity({ session: s, event: 'ApiError', prevState: 'working', newState: 'error', realCompletion: false });
             changed = true;
           }
         } else if (s.sweepError && s.state === 'error') {
@@ -458,6 +464,7 @@ function createCore(options = {}) {
           } else {
             s.state = 'working'; // 重试成功、回合继续 → 恢复干活（后续事件会再校正）
             s.sweepError = false;
+            onActivity({ session: s, event: 'Reasoning', prevState: 'error', newState: 'working', realCompletion: false });
             s.updatedAt = now;
             changed = true;
           }
@@ -537,6 +544,7 @@ function createCore(options = {}) {
     cleanStaleSessions,
     startStaleCleanup,
     stopStaleCleanup,
+    rescanSessions: backfillFromTranscripts,
   };
 }
 

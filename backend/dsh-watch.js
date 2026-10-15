@@ -48,6 +48,7 @@ const { log } = require('./log');
 const { detectEmotion } = require('./emotion');
 const { promptTitle } = require('./transcript');
 const { decodeFrames, scanFrames, decodeFrame } = require('./zstd');
+const { classifyError } = require('./codex-status');
 
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const SESSIONS_DIR = path.join(DSH_HOME, 'sessions');
@@ -422,6 +423,7 @@ function isSubagentHeader(header) {
 
 function createDshWatch(deps) {
   const core = deps.core;
+  const onStatus = deps.onStatus || (() => {});
   const sessionsDir = deps.sessionsDir || SESSIONS_DIR; // 测试可注入
   const pollMs = deps.pollMs || POLL_MS;
 
@@ -496,6 +498,13 @@ function createDshWatch(deps) {
   function update(t, state, event, extra) {
     core.updateSession(t.sid, state, event, { ...baseFields(t), ...extra });
   }
+  function report(t, kind, obj = {}, extra = {}) {
+    const data = obj.data || {};
+    if (obj.type === 'turn/start') t.turnId = String(data.turn ?? obj.seq ?? obj.time ?? Date.now());
+    onStatus({ agent: 'dsh', sessionId: t.sid, turnId: t.turnId || '', kind,
+      at: (Number.isFinite(obj.time) ? obj.time : Date.parse(obj.time)) || Date.now(), cwd: t.cwd || '', model: t.model || '',
+      title: t.sessionTitle || '', transcriptPath: t.fp, source: 'dsh-log', ...extra });
+  }
 
   // 会话标题/模型这类纯展示字段不该进状态机（会污染 recentEvents 的徽标判定）。
   function meta(t, fields) {
@@ -533,6 +542,7 @@ function createDshWatch(deps) {
       case 'turn/start':
         beginTurn(t);
         update(t, 'thinking', 'TaskStarted');
+        report(t, 'running', obj);
         break;
 
       case 'user/message': {
@@ -594,12 +604,13 @@ function createDshWatch(deps) {
         t.subagentActive = false;
         if (kind === 'error') {
           update(t, 'error', 'ApiError', { errorType: 'api_error' });
+          report(t, classifyError(data.reason.error || data.reason).kind, obj);
           break;
         }
         // Only an explicit completed outcome may celebrate. Developer-preview
         // Harness has emitted interrupted/max-tokens and may add more reasons;
         // treating an unknown value as success would surface a false completion.
-        if (kind !== 'completed') { update(t, 'idle', 'TurnAborted'); break; }
+        if (kind !== 'completed') { update(t, 'idle', 'TurnAborted'); report(t, ['aborted', 'interrupted', 'cancelled'].includes(kind) ? 'interrupted' : 'failed', obj); break; }
         const text = clipAssistant(t.lastAgentMessage);
         const extra = {};
         if (text) {
@@ -609,6 +620,7 @@ function createDshWatch(deps) {
         }
         t.lastAgentMessage = null;
         update(t, 'attention', 'Stop', extra);
+        report(t, 'completed', obj);
         break;
       }
 
@@ -616,12 +628,14 @@ function createDshWatch(deps) {
       case 'approval/asked':
         t.pendingApprovals = (t.pendingApprovals || 0) + 1;
         update(t, 'notification', 'Notification');
+        report(t, 'waiting_input', obj);
         break;
       case 'approval/decided': {
         t.pendingApprovals = Math.max(0, (t.pendingApprovals || 0) - 1);
         if (t.pendingApprovals > 0) break; // 还有别的问题挂着，继续等
         const allowed = data.outcome === 'allowed-once';
         update(t, allowed ? activeTurnState(t) : 'idle', 'ApprovalDecided');
+        report(t, allowed ? 'running' : 'unknown', obj);
         break;
       }
 
@@ -636,6 +650,7 @@ function createDshWatch(deps) {
         // 一次请求失败后排队重试：和 Claude 路径的 API 错误同义，重试成功后
         // 下一条事件（step/start / assistant/message）会自然把状态带回来。
         update(t, 'error', 'ApiError', { errorType: 'api_error' });
+        report(t, 'error_observed', obj);
         break;
 
       case 'session/title': {
@@ -897,6 +912,9 @@ function createDshWatch(deps) {
       createdAt: mtimeMs,
       updatedAt: mtimeMs,
     });
+    t.model = model || t.model;
+    t.sessionTitle = title || promptFallback || '';
+    report(t, pending > 0 ? 'waiting_input' : turnActive ? 'running' : 'idle', {}, { seed: true, at: mtimeMs });
   }
 
   // 老会话恢复（1h 后又开始写）：只补身份，不派 SessionStart，随后只泵增量。
@@ -1021,7 +1039,7 @@ function createDshWatch(deps) {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  return { start, stop, tick, _trackers: trackers, _cursors: cursors };
+  return { start, stop, tick, diagnostics: () => ({ agent: 'dsh', path: sessionsDir, exists: fs.existsSync(sessionsDir), tracked: [...trackers.values()].filter(t => !t.ignored).length }), _trackers: trackers, _cursors: cursors };
 }
 
 module.exports = {

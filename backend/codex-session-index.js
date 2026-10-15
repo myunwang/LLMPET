@@ -9,7 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const DEFAULT_PATH = path.join(os.homedir(), '.codex', 'session_index.jsonl');
+const DEFAULT_PATH = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'session_index.jsonl');
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 
 function cleanText(value, max) {

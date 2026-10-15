@@ -220,6 +220,7 @@ function createServer(deps) {
         assistantLastOutputTruncated: data.assistant_last_output_truncated === true,
         preserveState: data.preserve_state === true,
         errorType: typeof data.api_error_type === 'string' && data.api_error_type.trim() ? data.api_error_type.trim() : null,
+        apiErrorTerminal: data.api_error_terminal === true,
         userEmotion: typeof data.user_emotion === 'string' && data.user_emotion.trim() ? data.user_emotion.trim() : null,
         assistantEmotion: typeof data.assistant_emotion === 'string' && data.assistant_emotion.trim() ? data.assistant_emotion.trim() : null,
         backgroundTasksCount: Number.isFinite(data.background_tasks_count) ? data.background_tasks_count : 0,

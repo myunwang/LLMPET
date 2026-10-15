@@ -23,7 +23,7 @@ const { log } = require('./log');
 const archiveUtil = require('./usage-archive');
 const { loadCodexPricing, priceForCodex, codexUsageCost } = require('./codex-pricing');
 
-const SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
+const SESSIONS_DIR = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
 const STATE_DIR = path.join(os.homedir(), '.octopus');
 const STATE_PATH = path.join(STATE_DIR, 'codex-usage.json');
 const SCHEMA_VERSION = 4;

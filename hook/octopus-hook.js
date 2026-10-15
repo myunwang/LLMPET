@@ -109,6 +109,7 @@ function buildBody(event, p) {
       if (err) {
         body.state = 'error';
         body.event = 'ApiError';
+        body.api_error_terminal = true;
         body.api_error_type = err.api_error_type;
       } else {
         const text = transcript.lastAssistantText(entries, sid);
