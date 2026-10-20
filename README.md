@@ -187,7 +187,7 @@ dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项
 
 **前置条件**
 - macOS 或 Windows（状态显示、授权气泡、计量计费、「去回复」终端聚焦全都可用；「领地模式」目前仅 macOS）
-- Node.js ≥ 18（含 npm）
+- 推荐 Node.js 22（22.12.0 或更新的 22.x，含 npm；仓库 `.nvmrc` 使用 22）
 - 至少安装并使用过一个受支持的 agent：[Claude Code](https://claude.com/claude-code)、[OpenAI Codex](https://github.com/openai/codex) 或 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 ```bash
@@ -196,6 +196,8 @@ cd LLMPET
 npm ci               # 按 package-lock.json 安装（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci）
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
+
+> **Electron 启动报错：** Windows + Node.js 26 有 `Electron failed to install correctly` 的反馈（[#28](https://github.com/myunwang/LLMPET/issues/28)，报告者切换 Node.js 20 后恢复）。当前锁定的打包依赖要求 Node.js ≥22.12.0，所以源码安装和打包统一推荐 22.x。此报错表示 Electron 二进制安装不完整，不足以单独确认 Node.js 版本是根因。`npm start` 会先检查安装；可用 `npm run check:electron` 单独诊断，恢复步骤见[本地部署文档](docs/LOCAL_DEPLOYMENT.md#electron-安装不完整或无法启动)。
 
 启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切四款皮肤，并分别开关 Codex / dsh 分身。
 

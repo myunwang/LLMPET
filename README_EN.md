@@ -100,7 +100,7 @@ For source deployment, local packaging, permissions, and troubleshooting, see [D
 Requirements:
 
 - macOS or Windows
-- Node.js 18 or newer
+- Recommended: Node.js 22 (22.12.0 or a newer 22.x, including npm; `.nvmrc` selects 22)
 - At least one supported agent installed and used once: Claude Code, OpenAI Codex, or DeepSeek Harness
 
 ```bash
@@ -109,6 +109,8 @@ cd LLMPET
 npm ci
 npm start
 ```
+
+> **Electron startup error:** Windows + Node.js 26 has a report of `Electron failed to install correctly` ([#28](https://github.com/myunwang/LLMPET/issues/28)); the reporter recovered with Node.js 20. The locked packaging dependencies require Node.js ≥22.12.0, so use 22.x for source installation and packaging. This error means the Electron binary installation is incomplete; it does not establish Node.js as the cause. `npm start` now checks the installation first. Run `npm run check:electron` for diagnostics and see the [recovery steps](docs/LOCAL_DEPLOYMENT_EN.md#incomplete-electron-installation-or-startup-failure).
 
 Useful commands:
 

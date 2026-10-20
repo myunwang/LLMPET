@@ -100,7 +100,7 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 必要なもの：
 
 - macOS または Windows
-- Node.js 18 以上
+- 推奨：Node.js 22（22.12.0 以降の 22.x、npm を含む。`.nvmrc` は 22 を指定）
 - 対応 Agent のいずれかをインストールし、一度は利用済み：Claude Code、OpenAI Codex、または DeepSeek Harness
 
 ```bash
@@ -109,6 +109,8 @@ cd LLMPET
 npm ci
 npm start
 ```
+
+> **Electron の起動エラー：** Windows + Node.js 26 で `Electron failed to install correctly` が報告されています（[#28](https://github.com/myunwang/LLMPET/issues/28)。報告者は Node.js 20 に切り替えて復旧）。固定済みのパッケージ作成用依存関係には Node.js ≥22.12.0 が必要なため、ソースからの導入・パッケージ作成には 22.x を推奨します。このエラーは Electron バイナリのインストールが不完全であることを示し、Node.js が原因とは断定できません。`npm start` は起動前に確認を行います。`npm run check:electron` で診断し、[復旧手順](docs/LOCAL_DEPLOYMENT_JA.md#electron-のインストール不備起動失敗)を参照してください。
 
 主なコマンド：
 

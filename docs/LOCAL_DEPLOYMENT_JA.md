@@ -21,7 +21,7 @@ Claude Code または OpenAI Codex をインストールし、少なくとも一
 
 ## ソースから起動
 
-Git、Node.js 18 以上（CI は Node.js 20）、Claude Code または OpenAI Codex を用意します。
+Git、Node.js 22（22.12.0 以降の 22.x を推奨）、Claude Code または OpenAI Codex を用意します。`.nvmrc`、Electron のインストール確認、リリースビルドは Node.js 22 を使用します。
 
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
@@ -59,6 +59,32 @@ PowerShell：
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
 ```
+
+### Electron のインストール不備・起動失敗
+
+Windows + Node.js 26 での起動失敗は [#28](https://github.com/myunwang/LLMPET/issues/28) を参照してください。報告者は Node.js 20 への切り替えで復旧しましたが、固定済みの `@electron/rebuild` には Node.js ≥22.12.0 が必要なため、導入・パッケージ作成には 22.x を推奨します。旧バージョンでのヘッドレステストは、Electron のダウンロード・起動・パッケージ作成まで検証するものではありません。
+
+Electron 33 は、インストール時に生成される `path.txt` がないと `Electron failed to install correctly` を出します。ダウンロード失敗、インストールスクリプトの無効化、`ELECTRON_SKIP_BINARY_DOWNLOAD` の設定でも起きるため、このメッセージだけでは Node.js 26 との非互換とは断定できません。
+
+1. Node.js 22（22.12.0+）に切り替え、新しいターミナルで `node --version` を確認します。macOS/Linux の nvm では、リポジトリ内で `nvm install`、`nvm use` を実行すると `.nvmrc` が使われます。Windows では利用中の Node バージョン管理ツールで切り替えます。
+2. プロジェクトディレクトリで再インストールします（`npm ci` は依存関係を作り直し、ロックファイルを保持します）。
+
+   ```bash
+   npm ci --foreground-scripts
+   npm run check:electron
+   npm start
+   ```
+
+3. まだ失敗する場合は `npm config get ignore-scripts` が `true` か、`ELECTRON_SKIP_BINARY_DOWNLOAD` が設定されているかを確認します。`--foreground-scripts` はログを表示するだけで、これらの設定を上書きしません。ダウンロードする場合はスキップ用環境変数を解除します。パッケージが存在する場合は、固定されたバージョンのインストーラーだけを再実行できます。
+
+   ```bash
+   node node_modules/electron/install.js
+   npm run check:electron
+   ```
+
+4. タイムアウトや接続エラーの場合は、上記のミラー設定後に再試行し、インストールログを保存してください。
+
+`npm start` は同じ確認を先に行い、パッケージ・インストール記録・実行ファイルがない場合に復旧手順を表示します。確認自体はダウンロード、LLMPET の起動、Agent 設定の変更を行いません。
 
 ## ローカルパッケージを作成
 

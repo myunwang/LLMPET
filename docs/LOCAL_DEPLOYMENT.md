@@ -31,7 +31,7 @@ LLMPET 至少需要用户安装并使用过以下一个 agent：
 
 - macOS 或 Windows；
 - [Git](https://git-scm.com/)；
-- Node.js 18 或更高版本（项目 CI 使用 Node.js 20）；
+- 推荐 Node.js 22（22.12.0 或更新的 22.x；`.nvmrc`、Electron 安装验证和发布打包使用 22）；
 - Claude Code 和/或 OpenAI Codex。
 
 检查环境：
@@ -89,6 +89,32 @@ Windows PowerShell：
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
 ```
+
+### Electron 安装不完整或无法启动
+
+Windows + Node.js 26 的启动失败见 [#28](https://github.com/myunwang/LLMPET/issues/28)。报告者切换到 Node.js 20 后恢复，但当前锁定的 `@electron/rebuild` 打包依赖要求 Node.js ≥22.12.0，因此统一推荐 22.x。已有无头测试覆盖旧版本，并不代表 Electron 下载、启动和打包也经过了验证。
+
+`Electron failed to install correctly` 在 Electron 33 找不到安装生成的 `path.txt` 时出现。下载失败、禁用安装脚本或设置了 `ELECTRON_SKIP_BINARY_DOWNLOAD` 都可能留下这种状态，不能仅凭这条消息归因于 Node.js 26。
+
+1. 切换到 Node.js 22（22.12.0+），在新终端运行 `node --version` 确认。使用 nvm（macOS/Linux）时，可在仓库内执行 `nvm install`、`nvm use` 读取 `.nvmrc`；Windows 使用自己的 Node 版本管理器切换。
+2. 在项目目录重新安装并检查（`npm ci` 会重新创建依赖目录，保留锁文件）：
+
+   ```bash
+   npm ci --foreground-scripts
+   npm run check:electron
+   npm start
+   ```
+
+3. 如果仍失败，检查 `npm config get ignore-scripts` 是否为 `true`，以及是否设置了 `ELECTRON_SKIP_BINARY_DOWNLOAD`。`--foreground-scripts` 只显示安装日志，不会覆盖这些跳过设置。需要下载 Electron 时，先取消跳过下载的环境变量；若包已存在，可仅重试当前锁定版本的安装器：
+
+   ```bash
+   node node_modules/electron/install.js
+   npm run check:electron
+   ```
+
+4. 下载超时或连接失败时，按上方“网络较慢时”设置镜像后重试，保留安装日志以便排查。
+
+`npm start` 会先执行同样的检查，缺包、缺少安装记录或二进制丢失时输出恢复步骤。检查本身不会下载文件，也不会启动桌宠或修改 Agent 设置。
 
 ## 制作本地安装包
 

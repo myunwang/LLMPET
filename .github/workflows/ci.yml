@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [18, 20, 22]
+        node: [18, 20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,3 +21,20 @@ jobs:
       # 所以无需 npm install —— 直接跑，快且不受 electron 二进制下载影响。
       - name: Smoke + renderer tests
         run: npm test
+
+  electron-install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Headless tests do not install Electron; verify the real binary separately.
+      - run: npm ci --foreground-scripts
+      - run: npm run check:electron
+      - name: Verify Electron can execute
+        run: npx --no-install electron --version

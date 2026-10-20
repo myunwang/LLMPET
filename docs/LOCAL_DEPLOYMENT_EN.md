@@ -21,7 +21,7 @@ Claude Code and/or OpenAI Codex must already be installed and used at least once
 
 ## Run from source
 
-Requirements: Git, Node.js 18 or newer (CI uses Node.js 20), and Claude Code and/or OpenAI Codex.
+Requirements: Git, preferably Node.js 22 (22.12.0 or a newer 22.x), and Claude Code and/or OpenAI Codex. `.nvmrc`, Electron installation checks, and release builds use Node.js 22.
 
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
@@ -59,6 +59,32 @@ PowerShell:
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
 ```
+
+### Incomplete Electron installation or startup failure
+
+Windows + Node.js 26 has a startup failure report in [#28](https://github.com/myunwang/LLMPET/issues/28); the reporter recovered with Node.js 20. The locked `@electron/rebuild` packaging dependency requires Node.js ≥22.12.0, so prefer 22.x for both installation and packaging. Headless test coverage on older versions does not verify Electron downloads, startup, or packaging.
+
+Electron 33 reports `Electron failed to install correctly` when its generated `path.txt` is missing. Failed downloads, disabled install scripts, or `ELECTRON_SKIP_BINARY_DOWNLOAD` can cause this state; the message alone does not establish a Node.js 26 incompatibility.
+
+1. Switch to Node.js 22 (22.12.0+) and confirm with `node --version` in a new terminal. With nvm on macOS/Linux, run `nvm install` and `nvm use` in the repository to use `.nvmrc`; on Windows, switch with your Node version manager.
+2. Reinstall from the project directory (`npm ci` recreates dependencies and preserves the lockfile):
+
+   ```bash
+   npm ci --foreground-scripts
+   npm run check:electron
+   npm start
+   ```
+
+3. If it still fails, check whether `npm config get ignore-scripts` returns `true` or `ELECTRON_SKIP_BINARY_DOWNLOAD` is set. `--foreground-scripts` shows install logs but does not override those settings. Unset the skip-download variable when you want to download Electron. If the package is already present, retry just its pinned installer:
+
+   ```bash
+   node node_modules/electron/install.js
+   npm run check:electron
+   ```
+
+4. For network timeouts or connection failures, configure the mirror shown above and retry, retaining the installation log.
+
+`npm start` performs the same check first and prints recovery steps if the package, installation record, or executable is missing. The check does not download files, launch LLMPET, or modify agent settings.
 
 ## Create a local package
 
