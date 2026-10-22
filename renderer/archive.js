@@ -63,6 +63,12 @@ Object.assign(COPY.ja, {
   skillGrantConfirm:'{agent} Skill を次のローカルフォルダへ追加します。\n{path}\n\n実際に起動したプログラムだけを登録し、プロジェクトやセッションは送信しません。続けますか？', skillRemoveConfirm:'LLMPET が管理する {agent} Skill を削除しますか？登録済みのショートカットは残ります。', skillActionFailed:'Skill の操作に失敗しました。既存ファイルは上書きされていません。',
 });
 
+for (const [locale, title, subtitle] of [
+  ['zh', '任务自动化', '为 Codex、Claude 和 DSH 配置触发条件、动作和执行限制'],
+  ['en', 'Task automation', 'Configure triggers, actions and limits for Codex, Claude and DSH'],
+  ['ja', 'タスク自動化', 'Codex・Claude・DSH の条件・アクション・実行上限を設定'],
+]) { COPY[locale].pages.automation = [title, subtitle]; COPY[locale].nav.push(title); }
+
 let lang = 'zh'; let config = { sessionArchive: {} }; let page = localStorage.getItem('llmpet-workbench-page') || 'dashboard';
 let stats = null; let programs = []; let programSkills = []; let data = { sessions: [], total: 0, summary: null }; let loadedOnce = false;
 let selectedKey = '', provider = 'all', origin = 'all', backup = 'all', search = '', searchTimer = null;
@@ -109,7 +115,7 @@ function applyCopy() {
   $('skill-consent-title').textContent=c.skillConsentTitle;$('skill-consent-note').textContent=c.skillConsentNote;$('skill-privacy-note').textContent=c.skillPrivacyNote;$('program-list-title').textContent=c.programListTitle;
   $('usage-detail-title').textContent=c.usageDetail;$('usage-detail-note').textContent=c.usageDetailNote;$('usage-trend-title').textContent=c.usageTrend;$('usage-model-title').textContent=c.byModelDetail;$('usage-token-title').textContent=c.tokenCategories;$('usage-diagnostics-title').textContent=c.meteringHealth;
   const metricButtons=$('usage-metric-tabs').querySelectorAll('button');metricButtons[0].textContent=c.metricTokens;metricButtons[1].textContent=c.metricCost;const viewButtons=$('usage-view-tabs').querySelectorAll('button');viewButtons[0].textContent=c.hours24;viewButtons[1].textContent=c.weeks12;
-  $('summary-total-label').textContent=c.total; $('summary-source-label').textContent=c.source; $('summary-backup-label').textContent=c.backup; $('backup-title').textContent=c.backupTitle; $('backup-note').textContent=c.backupNote; $('backup-now').textContent=c.backupNow; $('backup-folder').textContent=c.folder; $('search').placeholder=c.search; $('empty-title').textContent=c.emptyTitle; $('empty-copy').textContent=c.emptyCopy; $('status').textContent=c.indexNote;
+  $('summary-total-label').textContent=c.total; $('summary-source-label').textContent=c.source; $('summary-backup-label').textContent=c.backup; $('backup-title').textContent=c.backupTitle; $('backup-note').textContent=c.backupNote; $('backup-now').textContent=c.backupNow; $('backup-folder').textContent=c.folder; $('search').placeholder=c.search; if($('empty-title'))$('empty-title').textContent=c.emptyTitle; if($('empty-copy'))$('empty-copy').textContent=c.emptyCopy; $('status').textContent=c.indexNote;
   const providerFilters=$('provider-filters'); providerFilters.querySelector('[data-provider="all"]').textContent=c.all; providerFilters.querySelector('[data-provider="dsh"]').textContent=c.dsh;
   const originFilters=$('origin-filters'); originFilters.querySelector('[data-origin="all"]').textContent=c.allSources;originFilters.querySelector('[data-origin="desktop"]').textContent=c.desktop;originFilters.querySelector('[data-origin="cli"]').textContent=c.cli;originFilters.querySelector('[data-origin="harness"]').textContent=c.harness;originFilters.querySelector('[data-origin="backed-up"]').textContent=c.saved;
   const opts=$('backup-interval').options; [c.every6,c.every12,c.every24,c.every72,c.every168].forEach((v,i)=>opts[i].textContent=v); switchPage(page);

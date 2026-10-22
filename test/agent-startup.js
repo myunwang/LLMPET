@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const config = require('../backend/config');
 const { createAgentStartup } = require('../backend/agent-startup');
 const {
@@ -9,9 +12,30 @@ const {
   isDshWebCommand,
   dshWebProcessPids,
   ensureDshWeb,
+  findCli,
 } = require('../backend/launch');
 
 async function main() {
+  console.log('[AS0] Windows GUI launches find installed CLI without a terminal PATH');
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-cli-discovery-'));
+  const local = path.join(fixture, 'Local'), roaming = path.join(fixture, 'Roaming');
+  const oldCli = path.join(local, 'OpenAI', 'Codex', 'bin', 'old-build', 'codex.exe');
+  const currentCli = path.join(local, 'OpenAI', 'Codex', 'bin', 'current-build', 'codex.exe');
+  const touch = file => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture'); };
+  touch(oldCli); touch(currentCli); fs.utimesSync(oldCli, new Date(1000), new Date(1000));
+  const lookup = { platform: 'win32', home: fixture, env: { LOCALAPPDATA: local, APPDATA: roaming, SystemRoot: path.join(fixture, 'Windows') },
+    execFileSync: () => { throw Object.assign(new Error('CLI absent from PATH'), { code: 'ENOENT' }); } };
+  assert.strictEqual(findCli('codex', lookup), currentCli, 'desktop-installed Codex must be found without PATH');
+  fs.unlinkSync(currentCli);
+  assert.strictEqual(findCli('codex', lookup), oldCli, 'a stale build directory must not hide another installed binary');
+  const shim = path.join(roaming, 'npm', 'dsh.cmd'); touch(shim);
+  assert.strictEqual(findCli('dsh', lookup), shim, 'npm command shims work without PATH');
+  const extensionless = path.join(fixture, 'codex'), cmd = `${extensionless}.cmd`; touch(extensionless); touch(cmd);
+  assert.strictEqual(findCli('codex', { ...lookup, execFileSync: () => `${extensionless}\r\n${cmd}\r\n` }), cmd,
+    'skip Unix shell shims in Windows where output');
+  assert.strictEqual(findCli('missing', lookup), 'missing');
+  console.log('  ✓ bundled Codex builds, stale paths and npm shims');
+
   console.log('[AS1] 只把真正交互式 CLI 视为已运行');
   assert.strictEqual(isInteractiveCliCommand('/Users/me/.local/bin/codex --model gpt-5', 'codex'), true);
   assert.strictEqual(isInteractiveCliCommand('/opt/homebrew/bin/claude --resume abc', 'claude'), true);

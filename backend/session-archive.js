@@ -188,6 +188,7 @@ async function scanCodexRoot(root, providerArchived = false, officialTitles = ne
     let title = '';
     let lastTitle = '';
     let cwd = '';
+    let model = '', modelProvider = '';
     let lastTimestamp = 0;
     for (const line of lines) {
       const row = jsonLine(line);
@@ -195,6 +196,7 @@ async function scanCodexRoot(root, providerArchived = false, officialTitles = ne
       const payload = row.payload || {};
       if (!meta && row.type === 'session_meta') meta = payload;
       if (row.type === 'turn_context' && !cwd && typeof payload.cwd === 'string') cwd = payload.cwd;
+      if (row.type === 'turn_context') { model = safeText(payload.model, 100) || model; modelProvider = safeText(payload.model_provider, 100) || modelProvider; }
       if (row.type === 'event_msg' && payload.type === 'user_message') {
         const next = promptTitle(payload.message);
         if (next) { if (!title) title = next; lastTitle = next; }
@@ -212,6 +214,7 @@ async function scanCodexRoot(root, providerArchived = false, officialTitles = ne
       key: archiveKey('codex', id), id, provider: 'codex', origin: codexOrigin(meta),
       title: safeText(officialTitle, 96) || lastTitle || title || path.basename(cwd || id),
       cwd: safeText(cwd, 1024),
+      model, modelProvider: modelProvider || safeText(meta.model_provider, 100),
       project: safeText(path.basename(cwd || path.dirname(file)), 160),
       sourcePath: file, sourceAvailable: true, providerArchived: !!providerArchived,
       createdAt: timestamp(meta.timestamp, stat.birthtimeMs || stat.mtimeMs),
@@ -251,6 +254,7 @@ function cleanPersistedSession(value) {
     key: archiveKey(provider, id), id, provider,
     origin: ['desktop', 'cli', 'harness', 'unknown'].includes(value.origin) ? value.origin : 'unknown',
     title: safeText(value.title, 96), project: safeText(value.project, 160), cwd: safeText(value.cwd, 1024),
+    model: safeText(value.model, 100), modelProvider: safeText(value.modelProvider, 100),
     sourcePath: safeText(value.sourcePath, 4096), sourceAvailable: value.sourceAvailable === true,
     providerArchived: value.providerArchived === true,
     createdAt: Number(value.createdAt) || 0, updatedAt: Number(value.updatedAt) || 0,

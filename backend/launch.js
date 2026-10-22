@@ -36,17 +36,45 @@ const CLI_DIRS = {
   ],
 };
 
-function findCli(name) {
-  const plat = process.platform;
+function findCli(name, deps = {}) {
+  const plat = deps.platform || process.platform;
+  const env = deps.env || process.env;
+  const home = deps.home || os.homedir();
+  const run = deps.execFileSync || execFileSync;
   if (plat === 'win32') {
+    const isLauncher = file => {
+      if (!path.isAbsolute(file) || !/\.(exe|cmd|bat)$/i.test(file)) return false;
+      try { return fs.statSync(file).isFile(); } catch { return false; }
+    };
     try {
-      const out = execFileSync('where', [name], { encoding: 'utf8', timeout: 3000, windowsHide: true });
-      const line = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      const where = path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe');
+      const out = run(where, [name], { encoding: 'utf8', timeout: 3000, windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const line = out.split(/\r?\n/).map(s => s.trim()).find(isLauncher);
       if (line) return line;
     } catch {}
+    const local = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const roaming = env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const candidates = [path.join(home, '.local', 'bin', `${name}.exe`), path.join(roaming, 'npm', `${name}.cmd`)];
+    if (name === 'claude') candidates.push(path.join(home, '.claude', 'local', 'claude.exe'));
+    if (name === 'codex') {
+      // Desktop/Explorer launches often inherit no Codex PATH entry. Store
+      // upgrades can leave several hashed builds; use the newest real binary.
+      const bin = path.join(local, 'OpenAI', 'Codex', 'bin');
+      const builds = [];
+      try {
+        for (const entry of fs.readdirSync(bin, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const file = path.join(bin, entry.name, 'codex.exe');
+          if (isLauncher(file)) builds.push({ file, modified: fs.statSync(file).mtimeMs });
+        }
+      } catch {}
+      candidates.push(...builds.sort((a, b) => b.modified - a.modified || a.file.localeCompare(b.file)).map(b => b.file), path.join(bin, 'codex.exe'));
+    }
+    candidates.push(path.join(local, 'Microsoft', 'WindowsApps', `${name}.exe`));
+    for (const file of candidates) if (isLauncher(file)) return file;
     return name;
   }
-  const dirs = CLI_DIRS[name] ? CLI_DIRS[name](os.homedir()) : [];
+  const dirs = CLI_DIRS[name] ? CLI_DIRS[name](home) : [];
   for (const c of dirs) { try { fs.accessSync(c, fs.constants.X_OK); return c; } catch {} }
   try {
     const shell = process.env.SHELL || '/bin/zsh';

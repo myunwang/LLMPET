@@ -148,6 +148,8 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 - **组合形态**（托盘 → 设置 → 分身）：主宠默认同时盯 Claude、Codex 与已安装的 dsh；Codex 宠和 dsh 宠可分别开启，形象、位置、名牌与事件路由彼此独立。
 - `LLMPET_NO_CODEX=1` 关闭 Codex 监听；`LLMPET_CODEX_DIR=<dir>` 指向假目录做开发验证。
 
+工作台新增 **任务自动化**：为指定 Codex、Claude Code 或 DSH 会话分别选择触发条件和动作，支持额度耗尽后等待恢复再继续、关机、失败重试及完成后启动新任务。规则默认关闭，提供执行上限、事件去重、可取消的关机倒计时和执行记录。额度必须由匹配的新数据确认恢复；现有客户端未写入日志的错误无法保证识别。设置方法、会话显示诊断和各 Agent 的能力边界见 [多 Agent 自动化说明](docs/agent-automation.md)。
+
 ### 🌊 dsh / DeepSeek Harness 后端（零配置、只读）
 
 第三个能盯的后端是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（CLI 名 `dsh`）。它仍处于 **developer preview**，上游明确提示会有破坏兼容的变更；LLMPET 对未知日志版本采取 fail-closed：不解析、不展示为正常会话，等待适配后再支持。
