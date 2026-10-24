@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-let config = { mode: 'pet', skin: 'mascot' };
+let config = { mode: 'pet', skin: 'deepseek-maid' };
 let lastOpKey = null;
 const t = (key, vars) => window.OctoI18n.t(key, vars);
 // Date formatting follows the UI language, not the OS locale.
@@ -433,7 +433,7 @@ function applyConfigUI() {
     b.classList.toggle('active', b.dataset.mode === config.mode)
   );
   document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
-    b.classList.toggle('active', b.dataset.skin === (config.skin || 'mascot'))
+    b.classList.toggle('active', b.dataset.skin === (config.skin || 'deepseek-maid'))
   );
 }
 

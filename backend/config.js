@@ -14,7 +14,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 const DEFAULTS = Object.freeze({
   mode: 'pet',            // 'pet' | 'panel' | 'menubar'
-  skin: 'mascot',         // 见 SKINS
+  skin: 'deepseek-maid',  // 最新透明逐帧版；已有有效选择仍由保存的配置覆盖
   petPosition: null,      // {x,y} | null
   muted: false,
   permHook: true,         // whether the blocking permission HTTP hook is active
@@ -26,7 +26,7 @@ const DEFAULTS = Object.freeze({
   // dsh（DeepSeek Harness）宠是独立开关，不并进 petMode：Codex 宠开不开与
   // dsh 宠开不开互不影响，四种组合都成立（主宠始终兜住没被分出去的后端）。
   dshPet: false,
-  skinDsh: 'pixel',       // dsh 宠默认像素怪兽：和主宠(章鱼)/Codex 宠(月薪喵)三者错开
+  skinDsh: 'pixel',       // dsh 宠默认像素怪兽，与主宠 DeepSeek 娘 / Codex 月薪喵区分
   petPositionDsh: null,   // {x,y} | null — dsh 宠的落脚点
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
   pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）

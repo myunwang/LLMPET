@@ -50,7 +50,9 @@ jobs:
           security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application:'
           echo "MAC_SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
       - run: npm ci
+      - run: npm run install:electron
       - run: npm test
+      - run: npm run test:electron
       - name: Sign, notarize and package macOS app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -83,7 +85,9 @@ jobs:
       - name: Verify tag matches package version
         run: node -e "const v=require('./package.json').version;if('v'+v!==process.env.GITHUB_REF_NAME)throw new Error('tag/package version mismatch')"
       - run: npm ci
+      - run: npm run install:electron
       - run: npm test
+      - run: npm run test:electron
       - run: npm run package:win
       - name: List Windows packages
         shell: pwsh

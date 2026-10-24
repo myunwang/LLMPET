@@ -1819,7 +1819,7 @@ function refreshTrayMenu() {
   if (!tray) return;
   const cfg = config.get();
   const muted = cfg.muted;
-  const skin = cfg.skin || 'mascot';
+  const skin = cfg.skin || config.DEFAULTS.skin;
   const mode = cfg.mode || 'pet';
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
@@ -1964,6 +1964,7 @@ if (!gotTheLock) {
     openArchive();
   });
   app.whenReady().then(async () => {
+    log('runtime', `Electron ${process.versions.electron}; Chromium ${process.versions.chrome}; Node ${process.versions.node}`);
     if (process.platform === 'darwin' && app.dock) {
       const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.icns'));
       if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);

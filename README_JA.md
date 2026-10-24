@@ -15,7 +15,7 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 - **設定不要の dsh 監視** — zstd フレーム形式の `session.jsonl.zstd` とプレーンな `session.jsonl` に対応し、未知のログ version は推測せず fail-closed で扱います。
 - **独立した dsh ペット** — トレイで **🌊 dsh ペット** を有効にすると、専用のペット、スキン、位置、名札を使えます。分身をオフにした場合も本体ペットが dsh を監視できます。
 - **クジラメイド（`whale`）スキン** — 本体、Codex、dsh のどのペットにも選択でき、静止画一枚ではなく 23 個のアニメーションで作業全体を表現します。
-- **DeepSeek メイド（透明フレーム版、`deepseek-maid`）** — 既存のクジラメイドとは別の 23 個の透明 GIF。731 フレームの時間、V6 スプレーループ、V4 尾びれ・目、V10 キーボード・マウス動作を維持し、白い衣装や小道具も保持します。トレイの「見た目」またはペットのメニューから選択でき、現在の設定は変更しません。[プレビューと制作記録](assets/deepseek-maid/CREDITS.md)
+- **DeepSeek メイド（透明フレーム版、`deepseek-maid`）** — 既存のクジラメイドとは別の 23 個の透明 GIF。731 フレームの時間、V6 スプレーループ、V4 尾びれ・目、V10 キーボード・マウス動作を維持し、白い衣装や小道具も保持します。新規導入時の本体ペットの既定スキンで、V8 r3 の睡眠姿勢と V9 r1 の泡の修正版を含みます。保存済みの有効な選択は維持され、トレイまたはペットのメニューで変更できます。[プレビューと制作記録](assets/deepseek-maid/CREDITS.md)
 - **検索・保管・引き継ぎ** — dsh Session は統合ワークスペースとローカル保管庫に表示され、Claude Code または Codex への引き継ぎ元にできます。現在 dsh は接管先としては案内していません。正確な範囲は後述します。
 
 > DeepSeek Harness / dsh を検索して来ましたか？LLMPET の導入後に dsh Session を一度起動すれば、ペットが検出します。進捗を知らせるクジラが役に立ちそうなら、ぜひ **Star** ⭐ をお願いします。
@@ -59,7 +59,7 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 - **ミームアクション** — GIF と音声を再生しながら、対応する構造化 Prompt を選択中のセッションへ送れます。
 - **旅するカエル** — 選択した Claude / Codex を独立した読み取り専用の探索へ送り、帰還後にローカルの旅便りを受け取れます。
 - **利用状況パネル** — 実 token 推移、モデル別内訳、Claude の API 公開価格換算、Codex のローカル token 台帳、レート制限、診断情報、現在の操作を確認できます。
-- **4 種類のスキン** — タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱、クジラメイド 🌊。
+- **5 種類のスキン** — 既定の最新透明 DeepSeek メイド、タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱、クジラメイド 🌊。
 - **macOS のパトロールモード** — 対応する他のデスクトップペットを検出し、最前面を維持しながら相手を画面端へ押し出します。
 
 状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex と DeepSeek Harness は各自のローカル Session ファイルを読み取り専用で監視します。Agent の設定は変更しません。
@@ -107,6 +107,7 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci
+npm run install:electron
 npm start
 ```
 
@@ -149,7 +150,7 @@ DeepSeek Harness はまだ **developer preview** で、破壊的変更の可能�
 $DSH_HOME|~/.dsh/sessions/--<プロジェクト>--/<セッション>/session.jsonl.zstd
 ```
 
-このログは既定で **zstd フレームの連結**です。Electron 33 同梱の Node には zstd API が無いため、LLMPET 自身がフレーム境界を走査し、完全なフレームだけを順に展開します（内蔵の純 JS デコーダ [fzstd](https://github.com/101arrowz/fzstd)、MIT、`backend/vendor/` 参照）。末尾の不完全なフレームは次の巡回まで持ち越します。圧縮フレーム 1 個の展開には 32 MiB の安全上限があり、それを超えたフレームは記録して飛ばし、後続を継続するため監視が永久停止しません。`compression: 'none'` の平文 `session.jsonl` にも対応します。
+このログは既定で **zstd フレームの連結**です。ランタイムによらず同じ挙動を保つため、LLMPET 自身がフレーム境界を走査し、完全なフレームだけを順に展開します（内蔵の純 JS デコーダ [fzstd](https://github.com/101arrowz/fzstd)、MIT、`backend/vendor/` 参照）。末尾の不完全なフレームは次の巡回まで持ち越します。圧縮フレーム 1 個の展開には 32 MiB の安全上限があり、それを超えたフレームは記録して飛ばし、後続を継続するため監視が永久停止しません。`compression: 'none'` の平文 `session.jsonl` にも対応します。
 
 `turn/start` は思考、そのターン最初の `tool/call` 以降は「作業中」を維持し、`turn/end` は理由に応じて完了祝い / 中断バッジ / エラーになります。`approval/asked` は「返事待ち」（承認は dsh 自身の画面で行います）、`session/title` はそのままセッション名に、`assistant/message.usage` と `request/context.contextWindow` からコンテキスト % を出します。subagent のログ（`origin: 'subagent'`、`delegationDepth > 0`）はファイルごと除外します。
 

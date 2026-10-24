@@ -41,7 +41,7 @@ ELECTRON_APP="$ROOT/node_modules/electron/dist/Electron.app"
 RESOURCES="$APP/Contents/Resources"
 
 if [[ ! -d "$ELECTRON_APP" ]]; then
-  echo "Electron runtime not found. Run npm install first." >&2
+  echo "Electron runtime not found. Run npm ci and npm run install:electron first." >&2
   exit 1
 fi
 

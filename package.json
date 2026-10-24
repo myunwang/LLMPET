@@ -5,9 +5,14 @@
   "main": "main.js",
   "license": "MIT",
   "author": "myunwang",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "node scripts/check-electron.js && electron .",
     "check:electron": "node scripts/check-electron.js",
+    "install:electron": "node node_modules/electron/install.js",
+    "test:electron": "electron test/electron-runtime.js",
     "install:hooks": "node backend/hookinstall.js",
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
@@ -21,8 +26,8 @@
   "devDependencies": {
     "@electron/notarize": "2.5.0",
     "@electron/osx-sign": "1.3.3",
-    "electron": "^33.2.0",
-    "electron-builder": "^26.15.3"
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
   },
   "build": {
     "appId": "com.myunwang.octopus",

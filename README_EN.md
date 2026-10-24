@@ -15,7 +15,7 @@ LLMPET now supports [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 - **Zero-config dsh monitoring** — supports framed zstd `session.jsonl.zstd` and plain `session.jsonl`; unknown log versions fail closed instead of being guessed.
 - **A separate dsh pet** — enable **🌊 dsh pet** in the tray for its own pet, skin, position, and name tag. The main pet can monitor dsh when the split pet is off.
 - **Whale Maid (`whale`) skin** — selectable for the main, Codex, or dsh pet, with 23 animations covering the full workflow rather than one static mascot.
-- **DeepSeek Maid (Transparent Remix, `deepseek-maid`)** — 23 transparent GIFs alongside the original Whale Maid. Preserves all 731 frame delays, the V6 spray loop, V4 tail/eyes, V10 keyboard/mouse motion, and white foreground props. Select it from the tray Skin menu or the pet's skin cycle; existing choices stay unchanged. [Preview and provenance](assets/deepseek-maid/CREDITS.md)
+- **DeepSeek Maid (Transparent Remix, `deepseek-maid`)** — 23 transparent GIFs alongside the original Whale Maid. Preserves all 731 frame delays, the V6 spray loop, V4 tail/eyes, V10 keyboard/mouse motion, and white foreground props. New installations use this as the main pet's default, including the V8 r3 sleeping and V9 r1 bubble repairs. Existing valid choices are preserved; switch skins from the tray or pet menu. [Preview and provenance](assets/deepseek-maid/CREDITS.md)
 - **Searchable and handoff-ready sessions** — dsh sessions appear in the unified workspace and local archive, and can be handed to Claude Code or Codex as a source. dsh is not currently advertised as a takeover target; see the exact boundary below.
 
 > Arrived here while searching for DeepSeek Harness or dsh? Start one dsh session after installing LLMPET and the pet will pick it up. If a whale that reports your agent's progress sounds useful, please leave a **Star** ⭐
@@ -59,7 +59,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
-- **Four skins** — Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
+- **Five skins** — the latest transparent DeepSeek Maid by default, plus Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
 LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.
@@ -107,6 +107,7 @@ Requirements:
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci
+npm run install:electron
 npm start
 ```
 
@@ -149,7 +150,7 @@ DeepSeek Harness is still a **developer preview** and may make breaking changes.
 $DSH_HOME|~/.dsh/sessions/--<project>--/<session>/session.jsonl.zstd
 ```
 
-Those logs are **concatenated zstd frames** by default, and the Node runtime inside Electron 33 has no zstd API — so LLMPET scans frame boundaries itself and decodes complete frames one by one (bundled pure-JS decoder [fzstd](https://github.com/101arrowz/fzstd), MIT, see `backend/vendor/`), leaving a torn trailing frame for the next poll. A compressed frame has a 32 MiB decode safety limit; a larger frame is logged and skipped while later frames continue, so the watcher cannot remain stuck forever. Uncompressed `session.jsonl` logs (`compression: 'none'`) work too.
+Those logs are **concatenated zstd frames** by default. For consistent behavior across runtimes, LLMPET scans frame boundaries itself and decodes complete frames one by one (bundled pure-JS decoder [fzstd](https://github.com/101arrowz/fzstd), MIT, see `backend/vendor/`), leaving a torn trailing frame for the next poll. A compressed frame has a 32 MiB decode safety limit; a larger frame is logged and skipped while later frames continue, so the watcher cannot remain stuck forever. Uncompressed `session.jsonl` logs (`compression: 'none'`) work too.
 
 `turn/start` means thinking; once the turn's first `tool/call` lands it stays "working"; `turn/end` maps to celebration, interruption, or error by its reason; `approval/asked` shows "waiting for you" (answer it in dsh's own UI); `session/title` supplies the session name, and `assistant/message.usage` plus `request/context.contextWindow` give the context percentage. Subagent logs (`origin: 'subagent'`, `delegationDepth > 0`) are skipped entirely.
 

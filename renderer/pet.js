@@ -2895,7 +2895,7 @@ let blinkTimer = null;
 let transientUntil = 0;   // 短暂状态（happy/error）持续到的时间
 let transientState = null;
 let muted = false;
-let skin = 'mascot';
+let skin = 'deepseek-maid';
 let lastWaiting = 0;
 let lastBgZombie = 0; // 后台疑似僵尸数
 let radialOpen = false;
@@ -3911,7 +3911,7 @@ function applyLang(next) {
 }
 
 function applySkin(s) {
-  skin = ['pixel', 'mascot', ...Object.keys(MEME_PACKS)].includes(s) ? s : 'mascot';
+  skin = ['pixel', 'mascot', ...Object.keys(MEME_PACKS)].includes(s) ? s : 'deepseek-maid';
   document.body.classList.toggle('skin-pixel', skin === 'pixel');
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
   document.body.classList.toggle('skin-cat', isMeme());
@@ -4447,7 +4447,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
     territorySupported = !!cfg.territorySupported;
     lootSupported = !!cfg.lootSupported;
     window.OctoI18n.setLang(cfg.lang || 'zh');
-    applySkin(cfg.skin || 'mascot');
+    applySkin(cfg.skin || 'deepseek-maid');
   }
   // Convert positions saved by older builds (which anchored the transparent
   // window rather than the visible pet) as soon as the real skin is known.

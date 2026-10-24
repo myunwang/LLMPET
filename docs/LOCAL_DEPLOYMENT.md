@@ -48,13 +48,34 @@ npm --version
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci
+npm run install:electron
 npm test
 npm start
 ```
 
 - `npm ci` 按 `package-lock.json` 安装锁定版本，适合可复现部署；
+- `npm run install:electron` 显式下载锁定的桌面运行时；
 - `npm test` 运行项目的无头回归测试；
+- `npm run test:electron` 在图形会话中验证真实窗口、IPC、授权与消息气泡；
 - `npm start` 以前台进程启动桌宠，关闭该终端会结束应用。
+
+### 运行时维护（#31）
+
+项目锁定 Electron **44.9.3** 和 electron-builder **26.18.0**，源码安装要求 Node.js ≥22.12.0。Electron 自带的 Node 与命令行中的 Node 是两个独立运行时；应用启动日志会记录实际 Electron、Chromium 和内嵌 Node 版本，便于核对重新构建的包。
+
+截至 2026-10-24，Electron 44 属于[官方支持分支](https://releases.electronjs.org/)。升级时应重新查询[支持策略](https://www.electronjs.org/docs/latest/tutorial/electron-timelines#version-support-policy)，同时更新锁文件，运行 `npm audit`、`npm test` 和 `npm run test:electron`，再构建平台安装包；不能用 `npm audit --omit=dev` 排除桌面运行时。桌面测试使用临时数据，覆盖透明窗口、preload/IPC、本地服务、允许/拒绝授权、完成气泡、详情面板及工作台配置刷新。设置 `LLMPET_SMOKE_OUTPUT` 可保存截图和实际运行时版本。
+
+需要将 Windows 下载和临时文件放到 D: 时，在安装前设置：
+
+```powershell
+$env:TEMP='D:\CodexData\Temp'
+$env:TMP=$env:TEMP
+$env:npm_config_cache='D:\CodexData\Cache\npm'
+$env:electron_config_cache='D:\CodexData\Cache\electron'
+$env:ELECTRON_CACHE=$env:electron_config_cache
+$env:ELECTRON_BUILDER_CACHE='D:\CodexData\Cache\electron-builder'
+New-Item -ItemType Directory -Force -Path $env:TEMP,$env:npm_config_cache,$env:electron_config_cache,$env:ELECTRON_BUILDER_CACHE | Out-Null
+```
 
 只验证界面、不修改 `~/.claude/settings.json`：
 
@@ -80,7 +101,7 @@ npm start
 macOS shell：
 
 ```bash
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run install:electron
 ```
 
 Windows PowerShell：
@@ -88,11 +109,12 @@ Windows PowerShell：
 ```powershell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
+npm run install:electron
 ```
 
 ### Electron 安装不完整或无法启动
 
-Windows + Node.js 26 的启动失败见 [#28](https://github.com/myunwang/LLMPET/issues/28)。报告者切换到 Node.js 20 后恢复，但当前锁定的 `@electron/rebuild` 打包依赖要求 Node.js ≥22.12.0，因此统一推荐 22.x。已有无头测试覆盖旧版本，并不代表 Electron 下载、启动和打包也经过了验证。
+Windows + Node.js 26 的启动失败见 [#28](https://github.com/myunwang/LLMPET/issues/28)。报告者切换到 Node.js 20 后恢复，但当前锁定的 `@electron/rebuild` 打包依赖要求 Node.js ≥22.12.0，因此统一推荐 22.x。当前 CI 使用 Node.js 22/24，并在 macOS、Windows 上单独运行 Electron 安装与桌面测试。
 
 `Electron failed to install correctly` 在 Electron 33 找不到安装生成的 `path.txt` 时出现。下载失败、禁用安装脚本或设置了 `ELECTRON_SKIP_BINARY_DOWNLOAD` 都可能留下这种状态，不能仅凭这条消息归因于 Node.js 26。
 
@@ -101,14 +123,15 @@ Windows + Node.js 26 的启动失败见 [#28](https://github.com/myunwang/LLMPET
 
    ```bash
    npm ci --foreground-scripts
+   npm run install:electron
    npm run check:electron
    npm start
    ```
 
-3. 如果仍失败，检查 `npm config get ignore-scripts` 是否为 `true`，以及是否设置了 `ELECTRON_SKIP_BINARY_DOWNLOAD`。`--foreground-scripts` 只显示安装日志，不会覆盖这些跳过设置。需要下载 Electron 时，先取消跳过下载的环境变量；若包已存在，可仅重试当前锁定版本的安装器：
+3. 当前 Electron 44 使用按需下载；仅执行 `npm ci` 不会安装二进制。请显式运行下方安装命令，网络失败时可重复执行，不需要删除锁文件。诊断命令刻意不加载 Electron 入口，避免检查时发生隐式下载：
 
    ```bash
-   node node_modules/electron/install.js
+   npm run install:electron
    npm run check:electron
    ```
 
@@ -122,6 +145,7 @@ Windows + Node.js 26 的启动失败见 [#28](https://github.com/myunwang/LLMPET
 
 ```bash
 npm ci
+npm run install:electron
 npm test
 ```
 

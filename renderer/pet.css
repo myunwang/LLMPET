@@ -418,7 +418,7 @@ html, body {
 .agent-tag.codex { background: rgba(59, 130, 246, 0.2); color: #9cc4ff; border: 1px solid rgba(59, 130, 246, 0.45); }
 .agent-tag.dsh { background: rgba(77, 107, 254, 0.2); color: #aab8ff; border: 1px solid rgba(77, 107, 254, 0.45); }
 
-/* ---------- 皮肤切换：默认图标款章鱼（mascot），可切像素怪兽（pixel）/ 月薪喵（cat） ---------- */
+/* ---------- 皮肤切换：默认透明 DeepSeek 娘，共用 cat GIF 容器 ---------- */
 #pixel { display: none; }
 #cat { display: none; }
 #mascot { display: flex; }

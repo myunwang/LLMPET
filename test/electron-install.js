@@ -22,21 +22,21 @@ function check(expectedStatus, expectedMessage) {
   assert.match(result.stdout + result.stderr, expectedMessage);
   if (expectedStatus !== 0) {
     assert.match(result.stderr, /npm ci --foreground-scripts/);
-    assert.match(result.stderr, /node node_modules\/electron\/install\.js/);
-    assert.match(result.stderr, /ELECTRON_SKIP_BINARY_DOWNLOAD/);
+    assert.match(result.stderr, /npm run install:electron/);
   }
 }
 
 try {
   fs.mkdirSync(scripts, { recursive: true });
   fs.copyFileSync(path.join(__dirname, '..', 'scripts', 'check-electron.js'), command);
-  check(1, /Cannot find module 'electron'/);
+  check(1, /Cannot find module 'electron\/package.json'/);
 
   fs.mkdirSync(electron, { recursive: true });
-  // Electron 33 throws this when its postinstall did not create path.txt (#28).
+  fs.writeFileSync(path.join(electron, 'package.json'), JSON.stringify({ name: 'electron', version: '44.9.3', main: 'index.js' }));
+  // Loading the newer package can download files. No diagnostic path may run it.
   fs.writeFileSync(path.join(electron, 'index.js'),
-    'throw new Error("Electron failed to install correctly, please delete node_modules/electron and try installing again");');
-  check(1, /Electron failed to install correctly/);
+    'throw new Error("Diagnostic must not execute the Electron entry point");');
+  check(1, /installation record.*missing/);
 
   // npm's ignore-scripts setting also skips prestart hooks. The diagnostic must
   // live in start itself so users with that setting still get recovery steps.
@@ -56,7 +56,7 @@ try {
     assert.match(result.stderr, /npm ci --foreground-scripts/);
   }
 
-  fs.writeFileSync(path.join(electron, 'index.js'), `module.exports = ${JSON.stringify(binary)};`);
+  fs.writeFileSync(path.join(electron, 'path.txt'), 'electron.exe');
   check(1, /ENOENT/);
 
   fs.mkdirSync(binary, { recursive: true });
@@ -64,6 +64,9 @@ try {
   fs.rmdirSync(binary);
 
   fs.writeFileSync(binary, 'fake executable: the check must never launch this file');
+  fs.writeFileSync(path.join(electron, 'dist', 'version'), '33.4.11');
+  check(1, /version mismatch/);
+  fs.writeFileSync(path.join(electron, 'dist', 'version'), '44.9.3');
   check(0, /Electron runtime found:/);
   console.log('Electron installation diagnostics passed');
 } finally {

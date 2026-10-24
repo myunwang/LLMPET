@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [18, 20, 22, 24]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +35,9 @@ jobs:
           cache: npm
       # Headless tests do not install Electron; verify the real binary separately.
       - run: npm ci --foreground-scripts
+      - run: npm run install:electron
       - run: npm run check:electron
       - name: Verify Electron can execute
         run: npx --no-install electron --version
+      - name: Exercise desktop windows, IPC and permission round-trip
+        run: npm run test:electron

@@ -32,7 +32,7 @@ assert.deepStrictEqual(
   ['whale', 'whale', 'whale'],
   'the whale skin must survive config sanitization for every pet role',
 );
-assert.strictEqual(sanitize({ skin: 'unknown-skin' }).skin, 'mascot',
+assert.strictEqual(sanitize({ skin: 'unknown-skin' }).skin, 'deepseek-maid',
   'unknown skins must still fail closed to the default');
 
 const maidCfg = sanitize({ skin: 'deepseek-maid', skinCodex: 'deepseek-maid', skinDsh: 'deepseek-maid' });

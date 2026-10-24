@@ -20,7 +20,7 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 - **零配置监听 dsh**：支持 zstd 分帧的 `session.jsonl.zstd` 与纯文本 `session.jsonl`，未知日志版本会 fail-closed，不猜格式。
 - **独立 dsh 桌宠**：托盘勾选 **🌊 dsh 桌宠**，就能给 Harness 单独一只宠物、皮肤、位置和名牌；不打开分身时，主宠也能监看 dsh。
 - **鲸鱼女仆（whale）皮肤**：可用于主宠、Codex 宠或 dsh 宠；23 张动画覆盖完整工作流，不再只有一张静态形象。
-- **DeepSeek 女仆（透明逐帧版，`deepseek-maid`）**：独立的 23 动作透明 GIF 包，与原鲸鱼女仆并存。保留 731 帧原时序、V6 喷雾循环、V4 鲸尾/眼睛和 V10 键盘/鼠标动作，白色衣物及道具不随背景删除；从托盘“形象”或桌宠菜单切换，不自动更改现有选择。[预览与版本记录](assets/deepseek-maid/CREDITS.md)
+- **DeepSeek 女仆（透明逐帧版，`deepseek-maid`）**：独立的 23 动作透明 GIF 包，与原鲸鱼女仆并存。保留 731 帧原时序、V6 喷雾循环、V4 鲸尾/眼睛和 V10 键盘/鼠标动作，白色衣物及道具不随背景删除；新安装的主宠默认使用此版，包含 V8 r3 稳定睡姿和 V9 r1 鲸鱼泡泡修复；已有有效选择继续保留，可从托盘“形象”或桌宠菜单切换。[预览与版本记录](assets/deepseek-maid/CREDITS.md)
 - **会话可见、可搜索、可交接**：dsh 会话进入统一会话列表与本机档案馆，也可作为来源交给 Claude Code 或 Codex 继续。当前不把 dsh 宣称为接管目标，准确边界见后文。
 
 > 从 DeepSeek Harness / dsh 搜过来的？安装 LLMPET 后启动一次 dsh 会话即可被感知。觉得这只会汇报进度的鲸鱼娘有用，欢迎点一下页面顶部的 **Star** ⭐
@@ -55,7 +55,7 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 
 | 能力层 | LLMPET 现在能做什么 |
 |---|---|
-| **桌面感知** | 用章鱼 🐙、像素怪兽 👾、月薪喵 🐱、鲸鱼女仆 🌊 四款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
+| **桌面感知** | 默认使用最新透明 DeepSeek 娘，另可选章鱼 🐙、像素怪兽 👾、月薪喵 🐱、鲸鱼女仆 🌊，共五款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
 | **统一会话层** | 汇总 Claude Code、Codex、dsh 的实时会话与本机历史；支持搜索、筛选、置顶、归档和回到原窗口 |
 | **跨 Agent 接管** | Claude ↔ Codex 双向交接；dsh → Claude / Codex 单向交接；同代理使用原生 resume / fork |
 | **本机档案馆** | 统一索引三类 Agent 的用户会话，过滤内部 subagent；可选增量备份，恢复时不覆盖仍存在的源文件 |
@@ -160,7 +160,7 @@ dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项
 ```
 
 - **不装任何插件**：dsh 自带 Claude Code / Codex 两种 hook 桥接插件，但都得用户往自己的 profile 里装插件、改 `cordis.patch.yml`。为一只桌宠去改你的 agent 组合不值当——所以照 Codex 的路子读它自己的会话日志，零配置、卸载无残留。
-- **压缩日志也读得动**：dsh 的日志默认是 **zstd 分帧**（`session.jsonl.zstd`，一次落盘一帧），而 Electron 33 自带的 Node 20 没有 zstd API。桌宠自己扫帧边界、逐帧解压（内置纯 JS 解码器 [fzstd](https://github.com/101arrowz/fzstd)，MIT，见 `backend/vendor/`），末尾半帧留到下一轮。单个压缩帧有 32 MiB 的解码安全上限；超过时会记录并跳过该帧、继续后续日志，避免监听永久卡死。`compression: 'none'` 的纯文本 `session.jsonl` 同样支持。
+- **压缩日志也读得动**：dsh 的日志默认是 **zstd 分帧**（`session.jsonl.zstd`，一次落盘一帧）。为保持不同运行时上的一致行为，桌宠自己扫帧边界、逐帧解压（内置纯 JS 解码器 [fzstd](https://github.com/101arrowz/fzstd)，MIT，见 `backend/vendor/`），末尾半帧留到下一轮。单个压缩帧有 32 MiB 的解码安全上限；超过时会记录并跳过该帧、继续后续日志，避免监听永久卡死。`compression: 'none'` 的纯文本 `session.jsonl` 同样支持。
 - 事件映射：`turn/start→思考`；首个 `tool/call` 之后整轮保持“干活中”；`turn/end completed→完成庆祝 + 💬`，`aborted/blocked→中断徽标`，`error→出错`；`approval/asked→等你回复`（授权仍在 dsh 自己的界面里答）；`compaction→打扫`；`session/title` 直接用它自己起的标题；`assistant/message.usage` 配 `request/context.contextWindow` 算上下文 %。`origin: 'subagent'` 与 `delegationDepth > 0` 的子 agent 线程整份跳过。
 - **第三只宠**（托盘 → **🌊 dsh 桌宠**）：勾上就多一只独立的 dsh 宠，形象 / 位置 / 名牌各一套，dsh 的事件只进它；不勾则由主宠一起盯。它和「🛰️ Codex 桌宠」是两个独立开关，四种组合都成立。
 - 运行时面板会把 `dsh web`、`--profile headless`、已安装的 `--profile tui`，以及 Node / `npx @deepseek-ai/dsh` 入口识别为 dsh agent。`dsh web` 是内置的通用 Web profile（默认 `http://127.0.0.1:3080`，改过端口用 `LLMPET_DSH_WEB` 覆盖），不是某一条历史会话的精确定位；会话列表的「去回复」只能打开这个通用入口，不能承诺跳回具体 session。TUI 可用 `dsh --profile tui --resume <id>` 恢复，但该 profile 需要本机先安装；只有 web / headless profile 的机器不能把 dsh 作为 LLMPET 接管目标。dsh 会话仍可作为**来源**交接给 Claude / Codex（生成本地交接单）。
@@ -193,16 +193,17 @@ dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
-npm ci               # 按 package-lock.json 安装（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci）
+npm ci               # 按 package-lock.json 安装 npm 依赖
+npm run install:electron # 下载锁定的 Electron 运行时（可设置 ELECTRON_MIRROR）
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
 
 > **Electron 启动报错：** Windows + Node.js 26 有 `Electron failed to install correctly` 的反馈（[#28](https://github.com/myunwang/LLMPET/issues/28)，报告者切换 Node.js 20 后恢复）。当前锁定的打包依赖要求 Node.js ≥22.12.0，所以源码安装和打包统一推荐 22.x。此报错表示 Electron 二进制安装不完整，不足以单独确认 Node.js 版本是根因。`npm start` 会先检查安装；可用 `npm run check:electron` 单独诊断，恢复步骤见[本地部署文档](docs/LOCAL_DEPLOYMENT.md#electron-安装不完整或无法启动)。
 
-启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切四款皮肤，并分别开关 Codex / dsh 分身。
+启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切五款皮肤，并分别开关 Codex / dsh 分身。
 
 **Windows 说明**
-- 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
+- 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm run install:electron`）。
 - 钩子在 Windows 下经 PowerShell 运行；「去回复」通过 user32 把会话所在的终端窗口（Windows Terminal / cmd / VS Code 等）带到前台，Windows Terminal 多标签场景只能聚焦到窗口级别。
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。

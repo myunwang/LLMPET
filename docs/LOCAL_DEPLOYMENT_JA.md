@@ -27,11 +27,14 @@ Git、Node.js 22（22.12.0 以降の 22.x を推奨）、Claude Code または O
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci
+npm run install:electron
 npm test
 npm start
 ```
 
-`npm ci` は `package-lock.json` に固定された依存関係をインストールします。`npm start` は LLMPET をフォアグラウンドで実行します。
+`npm ci` は `package-lock.json` に固定された依存関係をインストールします。`npm run install:electron` はランタイムを明示的に導入します。`npm start` は LLMPET をフォアグラウンドで実行します。`npm run test:electron` は GUI 環境でウィンドウ、IPC、権限操作、完了通知を検証します。
+
+ランタイム保守（#31）：Electron は **44.9.3**、electron-builder は **26.18.0** に固定しています。起動ログには実際の Electron、Chromium、内蔵 Node のバージョンを記録します。2026-10-24 時点で Electron 44 は[サポート対象](https://releases.electronjs.org/)です。更新時はサポート状況を再確認し、`npm audit`（開発依存関係を含む）、`npm test`、`npm run test:electron` を実行してから各 OS のパッケージを再構築してください。`LLMPET_SMOKE_OUTPUT` を設定すると画面とバージョンを保存できます。デスクトップテストは一時データを使用します。
 
 起動オプション：
 
@@ -50,7 +53,7 @@ npm start
 Electron のダウンロードが遅い場合：
 
 ```bash
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run install:electron
 ```
 
 PowerShell：
@@ -58,11 +61,12 @@ PowerShell：
 ```powershell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
+npm run install:electron
 ```
 
 ### Electron のインストール不備・起動失敗
 
-Windows + Node.js 26 での起動失敗は [#28](https://github.com/myunwang/LLMPET/issues/28) を参照してください。報告者は Node.js 20 への切り替えで復旧しましたが、固定済みの `@electron/rebuild` には Node.js ≥22.12.0 が必要なため、導入・パッケージ作成には 22.x を推奨します。旧バージョンでのヘッドレステストは、Electron のダウンロード・起動・パッケージ作成まで検証するものではありません。
+Windows + Node.js 26 での起動失敗は [#28](https://github.com/myunwang/LLMPET/issues/28) を参照してください。報告者は Node.js 20 への切り替えで復旧しましたが、固定済みの `@electron/rebuild` には Node.js ≥22.12.0 が必要なため、導入・パッケージ作成には 22.x を推奨します。CI は Node.js 22/24 を使用し、macOS と Windows で Electron の導入と実際のウィンドウも検証します。
 
 Electron 33 は、インストール時に生成される `path.txt` がないと `Electron failed to install correctly` を出します。ダウンロード失敗、インストールスクリプトの無効化、`ELECTRON_SKIP_BINARY_DOWNLOAD` の設定でも起きるため、このメッセージだけでは Node.js 26 との非互換とは断定できません。
 
@@ -71,14 +75,15 @@ Electron 33 は、インストール時に生成される `path.txt` がない�
 
    ```bash
    npm ci --foreground-scripts
+   npm run install:electron
    npm run check:electron
    npm start
    ```
 
-3. まだ失敗する場合は `npm config get ignore-scripts` が `true` か、`ELECTRON_SKIP_BINARY_DOWNLOAD` が設定されているかを確認します。`--foreground-scripts` はログを表示するだけで、これらの設定を上書きしません。ダウンロードする場合はスキップ用環境変数を解除します。パッケージが存在する場合は、固定されたバージョンのインストーラーだけを再実行できます。
+3. Electron 44 は必要時にバイナリをダウンロードするため、`npm ci` だけでは導入が完了しません。次の明示的なインストールを実行してください。通信に失敗した場合はロックファイルを削除せず再実行できます。診断は Electron のエントリーポイントを読み込まず、ダウンロードを開始しません：
 
    ```bash
-   node node_modules/electron/install.js
+   npm run install:electron
    npm run check:electron
    ```
 
@@ -92,6 +97,7 @@ Electron 33 は、インストール時に生成される `path.txt` がない�
 
 ```bash
 npm ci
+npm run install:electron
 npm test
 ```
 

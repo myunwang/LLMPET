@@ -27,11 +27,14 @@ Requirements: Git, preferably Node.js 22 (22.12.0 or a newer 22.x), and Claude C
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
 npm ci
+npm run install:electron
 npm test
 npm start
 ```
 
-`npm ci` installs the dependency versions pinned in `package-lock.json`. `npm start` runs LLMPET in the foreground.
+`npm ci` installs the dependency versions pinned in `package-lock.json`. `npm run install:electron` explicitly installs the desktop runtime. `npm start` runs LLMPET in the foreground. `npm run test:electron` requires a graphical session and checks real windows, IPC, permissions, and completion bubbles.
+
+Runtime maintenance (#31): Electron is pinned to **44.9.3** and electron-builder to **26.18.0**. Startup logs include the actual Electron, Chromium, and embedded Node versions. As of 2026-10-24, Electron 44 is a [supported branch](https://releases.electronjs.org/); recheck support when updating. Run `npm audit` (including dev dependencies), `npm test`, and `npm run test:electron` before rebuilding platform packages. Set `LLMPET_SMOKE_OUTPUT` to save desktop screenshots and runtime versions. Desktop tests use temporary data.
 
 Useful launch variants:
 
@@ -50,7 +53,7 @@ npm start
 If Electron downloads are slow:
 
 ```bash
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run install:electron
 ```
 
 PowerShell:
@@ -58,11 +61,12 @@ PowerShell:
 ```powershell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm ci
+npm run install:electron
 ```
 
 ### Incomplete Electron installation or startup failure
 
-Windows + Node.js 26 has a startup failure report in [#28](https://github.com/myunwang/LLMPET/issues/28); the reporter recovered with Node.js 20. The locked `@electron/rebuild` packaging dependency requires Node.js ≥22.12.0, so prefer 22.x for both installation and packaging. Headless test coverage on older versions does not verify Electron downloads, startup, or packaging.
+Windows + Node.js 26 has a startup failure report in [#28](https://github.com/myunwang/LLMPET/issues/28); the reporter recovered with Node.js 20. The locked `@electron/rebuild` packaging dependency requires Node.js ≥22.12.0, so prefer 22.x for both installation and packaging. CI uses Node.js 22/24 and separately tests Electron installation and desktop behavior on macOS and Windows.
 
 Electron 33 reports `Electron failed to install correctly` when its generated `path.txt` is missing. Failed downloads, disabled install scripts, or `ELECTRON_SKIP_BINARY_DOWNLOAD` can cause this state; the message alone does not establish a Node.js 26 incompatibility.
 
@@ -71,14 +75,15 @@ Electron 33 reports `Electron failed to install correctly` when its generated `p
 
    ```bash
    npm ci --foreground-scripts
+   npm run install:electron
    npm run check:electron
    npm start
    ```
 
-3. If it still fails, check whether `npm config get ignore-scripts` returns `true` or `ELECTRON_SKIP_BINARY_DOWNLOAD` is set. `--foreground-scripts` shows install logs but does not override those settings. Unset the skip-download variable when you want to download Electron. If the package is already present, retry just its pinned installer:
+3. Electron 44 downloads its binary on demand; `npm ci` alone does not install it. Run the explicit installer below and retry it on network failures without deleting the lockfile. Diagnostics intentionally avoid loading the Electron entry point so checks never initiate a download:
 
    ```bash
-   node node_modules/electron/install.js
+   npm run install:electron
    npm run check:electron
    ```
 
@@ -92,6 +97,7 @@ Run tests first:
 
 ```bash
 npm ci
+npm run install:electron
 npm test
 ```
 

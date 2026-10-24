@@ -238,7 +238,10 @@ assert.strictEqual(animation('working-4').opaqueSourceSha256, '5c8be7b54607dc118
 for (const role of ['skin', 'skinCodex', 'skinDsh']) {
   assert.strictEqual(sanitize({ [role]: 'deepseek-maid' })[role], 'deepseek-maid');
 }
-assert.strictEqual(sanitize({}).skin, 'mascot', 'do not silently change existing defaults');
+assert.strictEqual(sanitize({}).skin, 'deepseek-maid', 'new installs use the latest transparent maid pack');
+for (const skin of ['mascot', 'pixel', 'cat', 'whale', 'deepseek-maid']) {
+  assert.strictEqual(sanitize({ skin }).skin, skin, 'preserve an existing explicit skin choice');
+}
 for (const lang of ['zh', 'en', 'ja']) {
   assert(Object.hasOwn(i18n.DICT[lang], 'skin.deepseek-maid'), `${lang} needs its own label, not a fallback`);
   i18n.setLang(lang);
@@ -247,6 +250,9 @@ for (const lang of ['zh', 'en', 'ja']) {
 i18n.setLang('zh');
 
 const w = loadRenderer(['shared/i18n.js', 'shared/states.js', 'renderer/pet.js']);
+assert.strictEqual(vm.runInContext('skin', w.sandbox), 'deepseek-maid', 'renderer starts with the same default as config');
+vm.runInContext("applySkin('missing-skin')", w.sandbox);
+assert.strictEqual(vm.runInContext('skin', w.sandbox), 'deepseek-maid', 'invalid renderer skin uses the current default');
 w.handlers.config({ skin: 'deepseek-maid', muted: true });
 assert(w.document.body.classList.contains('skin-deepseek-maid'));
 assert(w.document.body.classList.contains('skin-cat'), 'reuse the GIF rendering path');
