@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { findCli } = require('./launch');
 const { agentOf } = require('./adapter');
+const { cliInvocation } = require('./cli-invocation');
 
 const MAX_PROMPT_CHARS = 12000;
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f-]{27,40}$/i;
@@ -294,8 +295,9 @@ function createCommandDispatcher(options = {}) {
     const cli = findCliImpl(name);
     const cwd = session.cwd && fs.existsSync(session.cwd) ? session.cwd : os.homedir();
     const args = kind === 'codex-resume'
-      ? ['exec', 'resume', '--json', '--skip-git-repo-check', session.id, prompt]
-      : ['--print', '--resume', session.id, '--output-format', 'stream-json', '--verbose', prompt];
+      ? ['exec', 'resume', '--json', '--skip-git-repo-check', session.id, platform === 'win32' ? '-' : prompt]
+      : ['--print', '--resume', session.id, '--output-format', 'stream-json', '--verbose',
+        ...(platform === 'win32' ? [] : [prompt])];
     return new Promise((resolve) => {
       let child;
       let settled = false;
@@ -306,13 +308,19 @@ function createCommandDispatcher(options = {}) {
         resolve(result);
       };
       try {
-        child = spawnImpl(cli, args, {
+        const invocation = cliInvocation(cli, args, platform);
+        child = spawnImpl(invocation.file, invocation.args, {
+          ...invocation.options,
           cwd,
           detached: true,
-          stdio: 'ignore',
+          stdio: platform === 'win32' ? ['pipe', 'ignore', 'ignore'] : 'ignore',
           windowsHide: true,
           env: { ...process.env, LLMPET_MEME_RESUME: '1' },
         });
+        if (platform === 'win32' && child.stdin) {
+          child.stdin.on('error', () => {});
+          child.stdin.end(prompt);
+        }
       } catch (err) {
         finish({ ok: false, submitted: false, inputSent: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
         return;
@@ -331,10 +339,10 @@ function createCommandDispatcher(options = {}) {
           }
           finish({
             ok: true,
-            // A spawned Claude process has not necessarily authenticated or
+            // A spawned CLI process has not necessarily authenticated or
             // appended the prompt yet. Its caller verifies the transcript
             // before reporting submitted=true.
-            submitted: kind === 'codex-resume',
+            submitted: false,
             inputSent: kind === 'codex-resume',
             launched: true,
             copied: false,
@@ -514,7 +522,13 @@ function createCommandDispatcher(options = {}) {
 
     if (route.kind === 'claude-resume') {
       const cli = findCliImpl('claude');
-      const auth = await runFile(execImpl, cli, ['auth', 'status']);
+      let invocation;
+      try { invocation = cliInvocation(cli, ['auth', 'status'], platform); } catch (error) {
+        return stageFallback(session, prompt, error.message);
+      }
+      const auth = await new Promise((resolve) => execImpl(invocation.file, invocation.args,
+        { ...invocation.options, timeout: 5000, windowsHide: true }, (error, stdout) =>
+          resolve({ ok: !error, stdout: String(stdout || '') })));
       let loggedIn = false;
       try { loggedIn = auth.ok && JSON.parse(auth.stdout).loggedIn === true; } catch {}
       if (!loggedIn) {
@@ -546,8 +560,15 @@ function createCommandDispatcher(options = {}) {
     }
 
     if (route.kind === 'codex-resume') {
+      let startSize = 0;
+      try { startSize = fs.statSync(session.transcriptPath).size; } catch {}
       const resumed = await nativeResume(session, prompt, route.kind);
-      if (resumed.ok) return resumed;
+      if (resumed.ok) {
+        const verified = await verifyPrompt(session, prompt, startSize);
+        return { ...resumed, submitted: verified, message: verified
+          ? '已通过 Codex CLI 续聊所选 session，并在对话记录中确认 Prompt。'
+          : 'Codex CLI 已启动，但尚未在所选 session 的对话记录中确认 Prompt；未将启动进程误报为发送成功。' };
+      }
       return stageFallback(session, prompt, resumed.message + ' Prompt 已复制并尝试聚焦目标 session。');
     }
 

@@ -108,6 +108,23 @@ async function run() {
   assert.strictEqual(await pet.webContents.executeJavaScript('typeof require'), 'undefined');
   assert.strictEqual((await pet.webContents.executeJavaScript('window.pet.getConfig()')).lang, 'zh');
   assert.strictEqual((await pet.webContents.executeJavaScript('window.pet.getConfig()')).skin, 'deepseek-maid');
+  assert.strictEqual(await pet.webContents.executeJavaScript('territorySupported'), ['darwin','win32'].includes(process.platform));
+  assert.strictEqual(await pet.webContents.executeJavaScript('lootSupported'), ['darwin','win32'].includes(process.platform));
+  const catalog=await pet.webContents.executeJavaScript('window.pet.getMemeCatalog()');
+  assert.strictEqual(catalog.items.length,4);
+  for(const item of catalog.items) {
+    const media=JSON.stringify(item.media);
+    const decoded=await pet.webContents.executeJavaScript(`(async()=>{
+      const media=${media};
+      const img=new Image(); img.src='../assets/memes/'+media.gif;
+      await img.decode();
+      const audio=document.createElement('audio'); audio.preload='metadata'; audio.src='../assets/memes/'+media.audio;
+      await new Promise((resolve,reject)=>{audio.onloadedmetadata=resolve;audio.onerror=()=>reject(Error('meme audio decode'));});
+      const result={width:img.naturalWidth,duration:audio.duration};
+      audio.removeAttribute('src');audio.load();return result;
+    })()`);
+    assert(decoded.width>0 && decoded.duration>0,'Windows/macOS meme GIF and audio must decode');
+  }
   await until(() => pet.webContents.executeJavaScript(`
     document.body.classList.contains('skin-deepseek-maid') &&
     document.getElementById('cat-img').src.includes('/assets/deepseek-maid/') &&

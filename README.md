@@ -186,7 +186,7 @@ dsh web / dsh --profile … ──写会话日志──► ~/.dsh/sessions/--项
 > **升级兼容说明：** `~/.octopus`、`OCTOPUS_*` 环境变量和 `octopus-hook.js` 是早期版本留下的内部兼容标识，为避免丢失配置、用量历史、辅助功能授权或已安装 hooks，1.0.0 继续保留；产品名称和所有对外发布物统一使用 **LLMPET**。
 
 **前置条件**
-- macOS 或 Windows（状态显示、授权气泡、计量计费、「去回复」终端聚焦全都可用；「领地模式」目前仅 macOS）
+- macOS 或 Windows（状态显示、授权气泡、计量计费、「去回复」终端聚焦、领地巡视与 Codex 桌宠掠夺均可用）
 - 推荐 Node.js 22（22.12.0 或更新的 22.x，含 npm；仓库 `.nvmrc` 使用 22）
 - 至少安装并使用过一个受支持的 agent：[Claude Code](https://claude.com/claude-code)、[OpenAI Codex](https://github.com/openai/codex) 或 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -217,7 +217,9 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
 - 托盘菜单可开详情面板、静音、唤起 Claude、打开日志、**卸载钩子**、退出。
 - 详情面板里可切皮肤 / 模式 / 设 5h 预算。
-- **🥊 领地模式**（macOS）：右键桌宠点“巡视”可立即扫描并执行一次；托盘可开启“自动巡逻”，开启后立即首巡、随后定时轮询（默认关）。两条定律：①**猫爪在上**——检测到别的桌面宠物（Desktop Goose / BongoCat / Shimeji 等）在跑，就把自己的窗口层级抬到最上，谁也不许压着咱（无需额外权限）；②**巡视行动**——发现对方窗口，小章鱼走过去把它一步步**顶到屏幕边上**。巡视需要**辅助功能**权限（移动别人的窗口）；没授权时「巡视」仍会执行猫爪在上，只是不推窗。对付 AXPosition 失效的透明窗桌宠时，会像 Computer Use 一样显示独立的橙色爪软件光标；底层兼容拖拽仍只在你**输入空闲 ≥2s** 时执行，期间隐藏系统光标，结束或异常都会补发 mouseUp 并把原光标复位，你手上有活时则静默撤退。自定义对手：`~/.octopus/config.json` 的 `territoryRivals` 数组加进程名关键词。
+- **🥊 领地模式**（macOS / Windows）：右键桌宠点“巡视”可立即扫描并执行一次；托盘可开启“自动巡逻”（默认关）。发现支持的桌宠后，LLMPET 保持在上方，走过去把对方推向屏幕边缘。macOS 推窗需要**辅助功能**权限，并保留空闲检查和拖拽兼容路径；Windows 使用原生窗口句柄移动，不接管鼠标、不抢焦点，自动巡逻只在输入空闲 ≥2s 时启动。自定义对手：`~/.octopus/config.json` 的 `territoryRivals` 数组加进程名关键词。
+- **🫳 Codex 桌宠互动**：右键选择“掠夺”，靠近 CodexPet、逐条收录真实会话索引、踢向边缘后只关闭桌宠窗口。Windows 支持新版大透明窗口中的 `Codex pet` 可访问性图片定位；会核验窗口句柄、进程和角色位置，不关闭主聊天窗口或删除源会话。无法识别、移动被拒绝或桌宠没有打开时会明确提示。详见 [Windows 互动说明](docs/WINDOWS_INTERACTIONS.md)。
+- **🎭 Windows 表情包**：GIF 和语音正常播放；指令通过 Claude / Codex CLI 按 session ID 续聊，支持原生 `.exe` 与 `.cmd` 启动器。长文本通过标准输入传递，只有在目标会话记录中看到指令才报告发送成功；CLI 不可用时保留复制与定位入口。
 
 ### 开发 / 验证开关
 - `OCTOPUS_NO_HOOKS=1 npm start` —— 启动但**不动** `~/.claude/settings.json`（只验证主进程 / 界面）。
@@ -316,7 +318,7 @@ test/zstd.js            zstd 分帧读取（完整帧 / 半帧 / 坏数据）
 
 ## 未做 / 后续
 - 其它 agent（Gemini / Copilot…）尚未适配；当前支持 Claude Code、OpenAI Codex 与 DeepSeek Harness（dsh 的接管边界见前文）。
-- Linux 的会话定位（Windows 已支持）、Windows 领地模式、远程审批、自动更新：本项目暂未实现。
+- Linux 的会话定位（Windows 已支持）、远程审批、自动更新：本项目暂未实现。
 
 ---
 

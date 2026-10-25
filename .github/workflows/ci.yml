@@ -41,3 +41,6 @@ jobs:
         run: npx --no-install electron --version
       - name: Exercise desktop windows, IPC and permission round-trip
         run: npm run test:electron
+      - name: Exercise native Windows pet window interactions
+        if: runner.os == 'Windows'
+        run: npm run test:windows

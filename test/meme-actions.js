@@ -313,6 +313,27 @@ async function main() {
   assert.strictEqual(codexResume.route, 'codex-resume');
   assert.deepStrictEqual(resumeCalls[1][1].slice(0, 5), ['exec', 'resume', '--json', '--skip-git-repo-check', codexId]);
 
+  const windowsCalls = [];
+  const windowsDispatcher = createCommandDispatcher({
+    platform: 'win32', resumeProbeMs: 1,
+    findCli: () => 'D:\\Tools\\codex.cmd',
+    verifyPrompt: async () => false,
+    spawn: (file, args, opts) => {
+      windowsCalls.push({file,args,opts});
+      const child=new EventEmitter(); child.exitCode=null; child.unref=()=>{};
+      child.stdin=new EventEmitter(); child.stdin.end=(text)=>windowsCalls.push({stdin:text});
+      process.nextTick(()=>child.emit('spawn'));
+      return child;
+    },
+  });
+  const windowsResult=await windowsDispatcher.dispatch({id:codexId,agentId:'codex',cwd:root},meme.prompt.text);
+  assert.strictEqual(windowsResult.submitted,false,'spawning Codex without transcript evidence is not delivery');
+  assert.strictEqual(windowsResult.launched,true);
+  assert(windowsCalls[0].file.endsWith('cmd.exe'));
+  assert(!windowsCalls[0].args.join(' ').includes(meme.prompt.text));
+  assert.strictEqual(windowsCalls[1].stdin,meme.prompt.text);
+  assert.deepStrictEqual(windowsCalls[0].opts.stdio,['pipe','ignore','ignore']);
+
   let loggedOutClaudeSpawned = false;
   const loggedOutClaudeDispatcher = createCommandDispatcher({
     platform: 'darwin',

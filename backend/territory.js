@@ -676,6 +676,7 @@ function createLootCaptureFlow(sessions, options = {}) {
   const wait = options.wait || sleep;
   const emit = typeof options.emit === 'function' ? options.emit : () => {};
   const now = typeof options.now === 'function' ? options.now : Date.now;
+  const shouldAbort = typeof options.shouldAbort === 'function' ? options.shouldAbort : () => false;
   const minimum = Math.min(LOOT_CAPTURE_MIN, queue.length);
   const common = { direction: options.direction, rival: options.rival };
   const captured = [];
@@ -697,7 +698,7 @@ function createLootCaptureFlow(sessions, options = {}) {
 
   const done = (async () => {
     await wait(LOOT_CAPTURE_START_MS);
-    if (stopped) { markStarted(); markMinimum(); return; }
+    if (stopped || shouldAbort()) { stopped = true; markStarted(); markMinimum(); return; }
     emit({
       kind: 'loot', phase: 'captureStart', available: queue.length,
       intervalMs: LOOT_CAPTURE_INTERVAL_MS, ...common, ts: now(),
@@ -706,7 +707,7 @@ function createLootCaptureFlow(sessions, options = {}) {
     if (!minimum) markMinimum();
 
     let index = 0;
-    while (!stopped) {
+    while (!stopped && !shouldAbort()) {
       if (index < queue.length) {
         const session = queue[index++];
         captured.push(session);
@@ -725,6 +726,8 @@ function createLootCaptureFlow(sessions, options = {}) {
       }
       if (!stopped) await wait(LOOT_CAPTURE_INTERVAL_MS);
     }
+    markStarted();
+    markMinimum();
   })().catch((error) => {
     flowError = error;
     markStarted();
@@ -739,7 +742,7 @@ function createLootCaptureFlow(sessions, options = {}) {
       if (flowError) throw flowError;
       return captured.slice();
     },
-    stop() { stopped = true; },
+    stop() { stopped = true; markStarted(); markMinimum(); },
     remainingAnimationMs() {
       if (!lastCapturedAt) return queue.length ? LOOT_CAPTURE_ANIMATION_MS : 80;
       return Math.max(0, LOOT_CAPTURE_ANIMATION_MS - Math.max(0, now() - lastCapturedAt));

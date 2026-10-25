@@ -6,8 +6,8 @@
 
 | 平台 | 从源码运行 | 备注 |
 | --- | --- | --- |
-| macOS Apple Silicon | 支持 | “巡视”功能仅 macOS 可用 |
-| Windows x64 | 支持 | 会话聚焦支持 Windows Terminal / cmd / VS Code 等 |
+| macOS Apple Silicon | 支持 | 巡视需要辅助功能权限 |
+| Windows x64 | 支持 | 会话聚焦、巡视、Codex 桌宠掠夺和表情包均支持 |
 | Linux | 未正式支持 | 当前没有完成窗口定位适配 |
 
 LLMPET 至少需要用户安装并使用过以下一个 agent：

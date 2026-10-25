@@ -60,7 +60,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
 - **Five skins** — the latest transparent DeepSeek Maid by default, plus Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
-- **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
+- **Patrol mode on macOS and Windows** — LLMPET can detect supported rival desktop pets, stay above them, and push their windows toward a screen edge.
 
 LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.
 
@@ -181,16 +181,18 @@ The catalog keeps the label, description, playback behavior, pet reaction, promp
 
 The localized prompts are adapted to the culture of each language rather than translated word for word. For example, the Chinese “你这瓜保熟吗？” challenge becomes **“Source: trust me bro?”** in English because both jokes serve the same purpose: demanding proof instead of an unverified claim.
 
-## macOS patrol mode
+## Patrol mode on macOS and Windows
 
 From the pet's context menu, choose **Patrol now**, or enable automatic patrol from the tray.
 
 1. **Paw stays on top:** when a supported rival pet is detected, LLMPET reasserts its topmost window level.
-2. **Push to the edge:** with Accessibility permission, LLMPET approaches the rival and attempts to move it to the nearest horizontal edge.
+2. **Push to the edge:** LLMPET approaches the rival and moves it toward a horizontal edge. macOS requires Accessibility permission; Windows uses native window handles without moving the mouse or taking focus.
 
 The drag helper avoids acting while the user is actively using the mouse. Global input fallback is guarded by idle checks and restores mouse state on completion or failure.
 
-Patrol mode is currently macOS-only.
+Windows also supports **Loot Codex pet**: import real session references into LLMPET, kick the pet to an edge, and close only the verified pet window. Modern large transparent overlays are identified by their accessible `Codex pet` image. Source session files and the host app remain intact. Automatic patrol waits for two seconds of input inactivity; unrecognized or inaccessible windows are skipped. See [Windows interaction details](docs/WINDOWS_INTERACTIONS.md).
+
+On Windows, meme commands resume the selected session through Claude/Codex CLI. Native executables and `.cmd` launchers are supported; prompts travel over stdin, and delivery is confirmed in the selected transcript. GIF/audio playback is tested in real Electron windows.
 
 ## Privacy and security
 

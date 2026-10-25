@@ -40,7 +40,10 @@ function postAbortable(pathName, body, options = {}) {
     const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) };
     if (authenticated && pathName === '/state') headers['x-octopus-token'] = server.getToken();
     req = http.request(
-      { hostname: '127.0.0.1', port: server.getPort(), path: requestPath, method: 'POST', headers },
+      // Hook/PID probes below synchronously block this test's event loop on
+      // Windows. Do not reuse a socket whose server keep-alive expired while
+      // the client could not consume its close event.
+      { hostname: '127.0.0.1', port: server.getPort(), path: requestPath, method: 'POST', headers, agent: false },
       (res) => {
         let data = '';
         res.on('data', (c) => (data += c));
@@ -59,7 +62,7 @@ function post(pathName, body, options) {
 
 function get(pathName) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: '127.0.0.1', port: server.getPort(), path: pathName }, (res) => {
+    const req = http.get({ hostname: '127.0.0.1', port: server.getPort(), path: pathName, agent: false }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));

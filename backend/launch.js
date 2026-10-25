@@ -41,7 +41,10 @@ function findCli(name) {
   if (plat === 'win32') {
     try {
       const out = execFileSync('where', [name], { encoding: 'utf8', timeout: 3000, windowsHide: true });
-      const line = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      const candidates = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      // npm also installs a POSIX shell script, which `where` can return first.
+      const line = candidates.find((s) => /\.exe$/i.test(s))
+        || candidates.find((s) => /\.(?:cmd|bat)$/i.test(s));
       if (line) return line;
     } catch {}
     return name;

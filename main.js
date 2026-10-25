@@ -42,6 +42,7 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
+const { createWindowsTerritory } = require('./backend/territory-windows');
 const { launchClaude, launchCodex, launchDsh, ensureDshWeb, launchExecutable, findCli } = require('./backend/launch');
 const { createAgentStartup } = require('./backend/agent-startup');
 const { createCodexWatch } = require('./backend/codex-watch');
@@ -261,8 +262,8 @@ function frontendConfig(agent = 'all') {
     permHook: c.permHook,
     territory: c.territory,
     // 巡视（领地模式）只由主宠负责，分身菜单里不显示
-    territorySupported: process.platform === 'darwin' && !clone,
-    lootSupported: process.platform === 'darwin' && !clone,
+    territorySupported: ['darwin', 'win32'].includes(process.platform) && !clone,
+    lootSupported: ['darwin', 'win32'].includes(process.platform) && !clone,
     agent,
     petMode: c.petMode,
     dshPet: c.dshPet,
@@ -643,8 +644,11 @@ function tweenTerritoryPetTo(x, y, ms) {
 }
 
 function bootTerritory() {
-  if (process.platform !== 'darwin') return;
-  territory = createTerritory({
+  if (!['darwin', 'win32'].includes(process.platform)) return;
+  const createPlatformTerritory = process.platform === 'win32' ? createWindowsTerritory : createTerritory;
+  territory = createPlatformTerritory({
+    screenToDipRect: (rect) => screen.screenToDipRect(null, rect),
+    dipToScreenPoint: (point) => screen.dipToScreenPoint(point),
     isEnabled: () => !!config.get().territory,
     rivalNames: () => [...DEFAULT_RIVALS, ...(config.get().territoryRivals || [])],
     excludePids: () => [process.pid],
@@ -751,6 +755,7 @@ function startAxGrantWatch() {
 }
 
 function ensureTerritoryPermission() {
+  if (process.platform === 'win32') return true;
   if (process.platform !== 'darwin') return false;
   const trusted = isAxTrusted();
   log('territory', `accessibility preflight trusted=${trusted}`);
@@ -777,15 +782,17 @@ function ensureTerritoryPermission() {
 }
 
 function runTerritoryNow() {
-  if (process.platform !== 'darwin' || !territory) return;
+  if (!territory) return;
   // 没权限也照跑:定律①(进程检测+抬层级)不需要辅助功能,只有推窗需要。
   // 权限提醒以实际 osascript/AX 操作结果为准，不能捕获点击瞬间的旧值并在
   // 用户中途完成授权后仍强制冒 noperm。
   const trustedBefore = ensureTerritoryPermission();
   territory.runNow()
     .then((result) => {
-      let trustedAfter = false;
-      try { trustedAfter = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
+      let trustedAfter = process.platform === 'win32';
+      if (process.platform === 'darwin') {
+        try { trustedAfter = systemPreferences.isTrustedAccessibilityClient(false); } catch {}
+      }
       log('territory', `manual patrol result=${result} trustedBefore=${trustedBefore} trustedAfter=${trustedAfter}`);
     })
     .catch((e) => log('territory', 'manual scan failed:', e.message));
@@ -842,7 +849,7 @@ function captureCodexSessions(sessions) {
 }
 
 function runLootNow() {
-  if (process.platform !== 'darwin' || !territory) return;
+  if (!territory) return;
   ensureTerritoryPermission();
   // watcher 的常驻列表只保留活跃会话；掠夺要在 native ready 之前每秒
   // 拿一条真实历史，因此点击时只读补齐最近 12 条作为有界队列。
@@ -857,7 +864,7 @@ function runLootNow() {
 
 function applyTerritory(on) {
   config.save({ territory: !!on });
-  if (on && process.platform === 'darwin') {
+  if (on && territory) {
     ensureTerritoryPermission();
     // 开启后立刻巡逻一次，不让用户等到下一个轮询周期(定律①无需权限)。
     if (territory) territory.runNow().catch((e) => log('territory', 'initial scan failed:', e.message));
@@ -1878,7 +1885,7 @@ function refreshTrayMenu() {
       { label: t('shape.panel'), type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
       { label: t('shape.menubar'), type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
     ] },
-    ...(process.platform === 'darwin' ? [
+    ...(['darwin', 'win32'].includes(process.platform) ? [
       { label: t('tray.patrol'), type: 'checkbox', checked: !!cfg.territory,
         click: () => applyTerritory(!config.get().territory) },
       { label: t('tray.patrolNow'), click: runTerritoryNow },

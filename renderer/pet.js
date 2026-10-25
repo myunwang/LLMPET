@@ -4243,7 +4243,7 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
 });
 
 // ---------- 泡泡菜单 ----------
-let territorySupported = false; // 由 pet:config 下发(仅 macOS true)
+let territorySupported = false; // 由 pet:config 下发(macOS / Windows)
 let lootSupported = false;
 let radialOpenSeq = 0;
 let lastRadialMetrics = null;

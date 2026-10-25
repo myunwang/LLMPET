@@ -6,8 +6,8 @@ This guide covers running and testing LLMPET from source and creating packages f
 
 | Platform | From source | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | Supported | Patrol mode is macOS-only |
-| Windows x64 | Supported | Session focusing supports common terminals |
+| macOS Apple Silicon | Supported | Patrol requires Accessibility permission |
+| Windows x64 | Supported | Session focus, patrol, Codex pet loot and memes supported |
 | Linux | Not officially supported | Window focusing is not implemented |
 
 Claude Code and/or OpenAI Codex must already be installed and used at least once.
