@@ -868,7 +868,8 @@ function applyTerritory(on) {
     ensureTerritoryPermission();
     // 开启后立刻巡逻一次，不让用户等到下一个轮询周期(定律①无需权限)。
     if (territory) territory.runNow().catch((e) => log('territory', 'initial scan failed:', e.message));
-  } else if (!on && territory && territory.dominating) {
+  } else if (!on && territory) {
+    if (typeof territory.cancelPatrol === 'function') territory.cancelPatrol();
     // 关闭后立刻执行一次 disabled tick，把窗口层级恢复为 floating。
     territory.tick().catch(() => {});
   }

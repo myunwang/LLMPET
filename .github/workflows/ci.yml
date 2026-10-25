@@ -44,3 +44,6 @@ jobs:
       - name: Exercise native Windows pet window interactions
         if: runner.os == 'Windows'
         run: npm run test:windows
+      - name: Exercise Windows interactions at 150% scale
+        if: runner.os == 'Windows'
+        run: npm run test:windows -- --force-device-scale-factor=1.5

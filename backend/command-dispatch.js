@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { StringDecoder } = require('string_decoder');
 const { findCli } = require('./launch');
 const { agentOf } = require('./adapter');
 const { cliInvocation } = require('./cli-invocation');
@@ -217,39 +218,42 @@ function transcriptHasPrompt(text, prompt) {
 }
 
 async function waitForTranscriptPrompt(transcriptPath, prompt, startSize, options = {}) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return false;
+  if (!transcriptPath) return false;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 6000;
   const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 120;
   const started = Date.now();
   let offset = Math.max(0, Number(startSize) || 0);
   let carry = '';
+  let decoder = new StringDecoder('utf8');
   while (Date.now() - started < timeoutMs) {
     try {
       const stat = fs.statSync(transcriptPath);
-      if (stat.size < offset) { offset = 0; carry = ''; }
+      if (stat.size < offset) { offset = 0; carry = ''; decoder = new StringDecoder('utf8'); }
       if (stat.size > offset) {
-        const length = stat.size - offset;
+        const length = Math.min(stat.size - offset, 256 * 1024);
         const buf = Buffer.alloc(length);
         let fd;
+        let bytesRead;
         try {
           fd = fs.openSync(transcriptPath, 'r');
-          fs.readSync(fd, buf, 0, length, offset);
+          bytesRead = fs.readSync(fd, buf, 0, length, offset);
         } finally {
           if (fd !== undefined) fs.closeSync(fd);
         }
-        offset = stat.size;
-        carry += buf.toString('utf8');
+        offset += bytesRead;
+        carry += decoder.write(buf.subarray(0, bytesRead));
         const cut = carry.lastIndexOf('\n');
         if (cut >= 0) {
           const complete = carry.slice(0, cut + 1);
           carry = carry.slice(cut + 1);
           if (transcriptHasPrompt(complete, prompt)) return true;
         }
+        if (bytesRead && offset < stat.size) continue;
       }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
-  return transcriptHasPrompt(carry, prompt);
+  return transcriptHasPrompt(carry + decoder.end(), prompt);
 }
 
 function createCommandDispatcher(options = {}) {

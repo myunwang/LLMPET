@@ -29,6 +29,8 @@ npm run test:windows
 
 `test:windows` 只移动和关闭测试自己创建的窗口，同时确认同进程主窗口不变。单元测试覆盖大透明表面识别、DPI/负坐标、目标身份变化、动作取消、移动抵抗、关闭失败，以及超过 Windows 命令行长度的 Unicode 输入。Electron 测试会实际解码全部表情包 GIF/音频。
 
+扩展回归还包含：左右方向 × 四档缩放 × 正负显示器原点的 16 组组合、混合缩放下跨屏透明表面、取消扫描/推挤/最终关闭、边缘回弹、多个桌宠、助手协议的 100 个并发请求及超时/退出恢复。真实窗口测试覆盖 12 次连续移动、左右贴边和取消，并在默认及 150% Electron 缩放下运行。中文与 emoji 日志按字节拆分写入、延迟创建及截断后仍可确认表情包指令。
+
 本地另用 Codex 26.1021.3705.0 的真实 Windows 桌宠验证了移动与复位、完整巡视、会话收录和关闭桌宠；其他第三方桌宠仍取决于其窗口实现。
 
 原生接口参考：[SetWindowPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos)、[UI Automation 控件模式](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-controlpatternsoverview)、[Electron screen 坐标转换](https://www.electronjs.org/docs/latest/api/screen)。

@@ -49,7 +49,11 @@ function createWindowsDesktop(options = {}) {
       const id = ++sequence;
       const timer = setTimeout(() => stop('helper-timeout'), options.timeoutMs || 10000);
       pending.set(id, { resolve, timer });
-      child.stdin.write(JSON.stringify({ ...params, command, id }) + '\n');
+      try {
+        child.stdin.write(JSON.stringify({ ...params, command, id }) + '\n');
+      } catch (error) {
+        stop(error.message || 'helper-write-failed');
+      }
     });
   }
   return { request, stop };

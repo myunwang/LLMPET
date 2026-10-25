@@ -44,11 +44,16 @@ function createWindowsTerritory(hooks) {
   let timer = null;
   let active = null;
   let activeKind = null;
+  let automatic = false;
+  let cancelRequested = false;
   let dominating = false;
   let stopped = false;
   const names = () => hooks.rivalNames ? hooks.rivalNames() : DEFAULT_RIVALS;
   const emit = (kind, phase, extra = {}) => hooks.emit({ kind, phase, ...extra, ts: Date.now() });
-  const aborted = (loot) => stopped || (loot ? (hooks.shouldAbortLoot || hooks.shouldAbort)() : hooks.shouldAbort());
+  const aborted = (loot) => stopped || cancelRequested || (automatic && !hooks.isEnabled())
+    || (loot ? (hooks.shouldAbortLoot || hooks.shouldAbort)() : hooks.shouldAbort());
+  const atEdge = (visual, area, direction) => Math.abs(direction > 0
+    ? visual.x + visual.w - area.x - area.width : visual.x - area.x) <= 3;
 
   async function scanDetailed() {
     const result = await desktop.request('scan', { names: [...new Set([...names(), ...HOSTS])] });
@@ -62,10 +67,12 @@ function createWindowsTerritory(hooks) {
     const rival = selectRivals([result.data], names(), hooks.excludePids(), toDip)[0];
     return rival ? { rival } : { error: 'target-no-longer-pet' };
   }
-  async function close(target) {
-    if (!target.host) return false;
+  async function close(target, direction, area) {
+    if (!target.host || aborted(true)) return false;
     const checked = await observe(target);
+    if (aborted(true)) return false;
     if (!checked.rival) return !!checked.gone;
+    if (!atEdge(checked.rival.visual, area, direction)) return false;
     const result = await desktop.request('close', { target: checked.rival.raw });
     if (!result.ok) return false;
     for (let n = 0; n < 10; n++) {
@@ -85,20 +92,27 @@ function createWindowsTerritory(hooks) {
     for (let step = 0; step < 160; step++) {
       if (aborted(loot)) return { outcome: 'abort' };
       const observed = await observe(rival);
+      if (aborted(loot)) return { outcome: 'abort' };
       if (observed.error) return { outcome: 'defeat' };
       if (observed.gone) return { outcome: 'victory', gone: true };
       rival = observed.rival;
-      const edge = (dir > 0 ? area.x + area.width - rival.visual.w : area.x) - (rival.visual.x - rival.x);
-      if (Math.abs(rival.x - edge) <= 3) return { outcome: 'victory', rival };
-      const x = rival.x + Math.sign(edge - rival.x) * Math.min(loot ? 52 : 24, Math.abs(edge - rival.x));
-      const point = toScreen({ x: Math.round(x), y: Math.round(rival.y) });
-      const moved = await desktop.request('move', { target: rival.raw, x: point.x, y: point.y });
+      const edge = dir > 0 ? area.x + area.width - rival.visual.w : area.x;
+      if (atEdge(rival.visual, area, dir)) return { outcome: 'victory', rival, area };
+      const x = rival.visual.x + Math.sign(edge - rival.visual.x) * Math.min(loot ? 52 : 24, Math.abs(edge - rival.visual.x));
+      // A large transparent surface can start on a differently scaled monitor.
+      // Convert the visible mascot anchor, then apply its physical delta to
+      // the HWND. Converting the outer origin can choose the wrong display.
+      const anchor = rival.raw.mascot || rival.raw;
+      const point = toScreen({ x: Math.round(x), y: Math.round(rival.visual.y) });
+      const moved = await desktop.request('move', { target: rival.raw,
+        x: rival.raw.x + point.x - anchor.x, y: rival.raw.y });
       if (!moved.ok) {
         log('territory', `Windows move refused: ${moved.error}`);
         return { outcome: 'defeat' };
       }
       await wait(loot ? 25 : 45);
       const landed = await observe(rival);
+      if (aborted(loot)) return { outcome: 'abort' };
       if (landed.error) return { outcome: 'defeat' };
       if (landed.gone) return { outcome: 'victory', gone: true };
       if (Math.abs(landed.rival.x - rival.x) < 2) resistance++; else resistance = 0;
@@ -142,6 +156,7 @@ function createWindowsTerritory(hooks) {
         if (aborted(true)) return 'abort';
         emit(kind, 'ready', { count: captured.length, direction: dir });
         await wait(flow.remainingAnimationMs());
+        if (aborted(true)) return 'abort';
         emit(kind, 'kick', { direction: dir });
         await wait(420);
         if (aborted(true)) return 'abort';
@@ -153,7 +168,8 @@ function createWindowsTerritory(hooks) {
       if (loot) {
         if (outcome === 'abort') return outcome;
         if (outcome !== 'victory') { emit(kind, 'pushFailed'); return outcome; }
-        if (!pushed.gone && !(await close(pushed.rival))) {
+        if (!pushed.gone && !(await close(pushed.rival, dir, pushed.area))) {
+          if (aborted(true)) { outcome = 'abort'; return outcome; }
           emit(kind, 'closeFailed');
           return 'close-failed';
         }
@@ -190,6 +206,8 @@ function createWindowsTerritory(hooks) {
       return Promise.resolve('disabled');
     }
     activeKind = kind;
+    automatic = !force;
+    cancelRequested = false;
     active = (async () => {
       if (force) emit(kind, 'searching');
       if (!hooks.canScan()) {
@@ -202,17 +220,29 @@ function createWindowsTerritory(hooks) {
       }
       const first = await scanDetailed();
       if (!first.ok) { emit(kind, loot ? 'failed' : 'blocked'); return 'scan-error'; }
-      if (stopped) return 'abort';
+      if (aborted(loot)) { if (force) emit(kind, 'abort'); return 'abort'; }
       if (first.rivals.length) { dominating = true; hooks.assertTop(); }
       else if (dominating) { dominating = false; hooks.relaxTop(); }
-      const target = first.rivals.find((r) => loot ? r.host : true);
-      if (!target) { if (force) emit(kind, loot ? 'notFound' : 'clear'); return 'clear'; }
+      const target = first.rivals.find((r) => {
+        if (loot) return r.host;
+        const area = hooks.getWorkArea(r.visual);
+        return !atEdge(r.visual, area, -1) && !atEdge(r.visual, area, 1);
+      });
+      if (!target) {
+        const present = !loot && first.rivals.length > 0;
+        if (force) emit(kind, loot ? 'notFound' : present ? 'ontop' : 'clear');
+        return present ? 'present' : 'clear';
+      }
       await wait(140);
       const confirmed = await observe(target);
+      if (aborted(loot)) { if (force) emit(kind, 'abort'); return 'abort'; }
       if (!confirmed.rival) { if (force) emit(kind, 'blocked'); return 'blocked'; }
       const visual = confirmed.rival.visual;
       const wa = hooks.getWorkArea(visual);
-      if (!loot && (Math.abs(visual.x - wa.x) <= 3 || Math.abs(visual.x + visual.w - wa.x - wa.width) <= 3)) return 'present';
+      if (!loot && (atEdge(visual, wa, -1) || atEdge(visual, wa, 1))) {
+        if (force) emit(kind, 'ontop', { rival: target.name });
+        return 'present';
+      }
       return episode(confirmed.rival, loot, sessions);
     })().catch((error) => {
       log(kind, `Windows patrol failed: ${error.message}`);
@@ -232,7 +262,12 @@ function createWindowsTerritory(hooks) {
     clearInterval(timer); timer = null;
     desktop.stop();
   }
-  return { start, stop, emergencyRelease: stop, scan: async () => (await scanDetailed()).rivals,
+  function cancelPatrol() {
+    if (activeKind === 'territory') cancelRequested = true;
+    if (dominating) hooks.relaxTop();
+    dominating = false;
+  }
+  return { start, stop, cancelPatrol, emergencyRelease: stop, scan: async () => (await scanDetailed()).rivals,
     tick: (force) => run(force), runNow: () => run(true), runLoot: (sessions) => run(true, true, sessions),
     get busy() { return !!active; }, get dominating() { return dominating; } };
 }
