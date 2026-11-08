@@ -60,7 +60,7 @@ async function run() {
             }
             return { ok:true,data:target && (options.reused ? { ...main, hwnd:target.hwnd } : structuredClone(target)) };
           }
-          if (command === 'move') {
+          if (command === 'move' || command === 'nudge') {
             moveCount++; moves.push(args.x);
             if (options.disableAfterMove) { enabled=false; void backend.tick(); }
             if (options.cancelAfterMove) backend.cancelPatrol();
@@ -91,7 +91,7 @@ async function run() {
   assert.strictEqual(patrol.closeCount,0,'patrol moves; loot closes');
   assert(patrol.events.some(e=>e.phase==='victory'));
   // Smooth push: many small, even steps, and the pet follows every frame. The fake clock is read twice per frame
-  // (50 ms of fake time = 18 px); real 16 ms frames move ~6 px. The old stepping push moved 24 px per burst.
+  // (50 ms of fake time = 12 px); real 16 ms frames move ~4 px. The old stepping push moved 24 px per burst.
   const steps=patrol.moves.slice(1).map((x,i)=>x-patrol.moves[i]);
   assert(patrol.moves.length>=20,`push should glide in many frames, got ${patrol.moves.length}`);
   assert(Math.max(...steps.map(Math.abs))<=20,`no burst larger than 20 px, got ${Math.max(...steps.map(Math.abs))}`);

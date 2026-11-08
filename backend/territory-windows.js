@@ -7,9 +7,9 @@ const { log } = require('./log');
 const HOSTS = ['ChatGPT', 'Codex'];
 const PET_TITLE = /^(?:Codex Pet(?: Mascot(?: Effect)?)?|ChatGPT Pet|(?:Codex |ChatGPT )?Avatar(?: Overlay)?)$/i;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// Continuous push (glide): DIP px per second and frame pacing. 360 px/s reads as a
+// Continuous push (glide): DIP px per second and frame pacing. 240 px/s reads as a
 // determined shove; the loot kick launches fast and decelerates.
-const GLIDE_PUSH_SPEED = 360;
+const GLIDE_PUSH_SPEED = 240;
 const GLIDE_KICK_SPEED = 1400;
 const GLIDE_FRAME_MS = 16;
 const sameWindow = (a, b) => !!a && !!b && a.hwnd === b.hwnd && a.pid === b.pid
@@ -117,7 +117,8 @@ function createWindowsTerritory(hooks) {
         const x = startX + (edge - startX) * e;
         const point = toScreen({ x: Math.round(x), y: Math.round(rival.visual.y) });
         const requestX = Math.round(rival.raw.x + point.x - anchor.x);
-        const moved = await desktop.request('move', { target: rival.raw, x: requestX, y: rival.raw.y });
+        // First frame: full identity validation (Move). Later frames: the cheap per-frame check (Nudge).
+        const moved = await desktop.request(frame ? 'nudge' : 'move', { target: rival.raw, x: requestX, y: rival.raw.y });
         if (!moved.ok || !moved.data) return rival;               // the stepping loop reports refusal / gone
         slips = Math.abs(moved.data.x - requestX) > 4 ? slips + 1 : 0;
         if (slips >= 3) return rival;                             // clamped or resisting: let the loop decide

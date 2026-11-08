@@ -15,6 +15,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             'read' { $data = [LLMPetDesktop]::Read([string]$request.hwnd) }
             'idle' { $data = [LLMPetDesktop]::IdleSeconds() }
             'move' { $data = [LLMPetDesktop]::Move($w.hwnd, $w.pid, $w.name, $w.title, $w.className, $request.x, $request.y) }
+            'nudge' { $data = [LLMPetDesktop]::Nudge($w.hwnd, $w.pid, $w.title, $w.className, $request.x, $request.y) }
             'close' { [LLMPetDesktop]::Close($w.hwnd, $w.pid, $w.name, $w.title, $w.className); $data = $true }
             default { throw 'unknown-command' }
         }

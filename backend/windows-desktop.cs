@@ -105,6 +105,25 @@ public static class LLMPetDesktop {
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         return Validate(handle,pid,name,title,cls);
     }
+    // Per-frame move for a glide that already passed Move()'s full Validate on its first frame. Identity is re-checked
+    // with cheap Win32 calls only (same pid, class, title and pet-like layered style); the UI Automation mascot
+    // lookup and process-name query that make Validate ~17 ms are skipped, so a push can update every display frame.
+    public static Window Nudge(string handle, int pid, string title, string cls, int x, int y) {
+        long number;
+        if (!long.TryParse(handle, out number) || number <= 0) throw new InvalidOperationException("target-changed");
+        IntPtr h = new IntPtr(number);
+        if (!IsWindow(h) || !IsWindowVisible(h) || IsIconic(h)) throw new InvalidOperationException("target-changed");
+        uint id; GetWindowThreadProcessId(h, out id);
+        var text = new StringBuilder(1024); GetWindowText(h, text, text.Capacity);
+        var klass = new StringBuilder(256); GetClassName(h, klass, klass.Capacity);
+        if ((int)id != pid || text.ToString() != title || klass.ToString() != cls) throw new InvalidOperationException("target-changed");
+        int style = GetWindowLong(h,-16), exStyle = GetWindowLong(h,-20);
+        if ((style & 0x00c00000) != 0 && (exStyle & (0x00080000|0x00000080)) == 0) throw new InvalidOperationException("target-is-not-a-pet");
+        if (!SetWindowPos(h, IntPtr.Zero, x,y,0,0, 0x0015))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        Rect r; if (!GetWindowRect(h, out r)) throw new InvalidOperationException("target-changed");
+        return new Window { hwnd=handle, pid=pid, title=title, className=cls, x=r.Left, y=r.Top, w=r.Right-r.Left, h=r.Bottom-r.Top };
+    }
     public static void Close(string handle, int pid, string name, string title, string cls) {
         Validate(handle,pid,name,title,cls);
         if (!PostMessage(new IntPtr(long.Parse(handle)), 0x0010, IntPtr.Zero, IntPtr.Zero))
