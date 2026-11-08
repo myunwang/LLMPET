@@ -7,6 +7,11 @@ const { log } = require('./log');
 const HOSTS = ['ChatGPT', 'Codex'];
 const PET_TITLE = /^(?:Codex Pet(?: Mascot(?: Effect)?)?|ChatGPT Pet|(?:Codex |ChatGPT )?Avatar(?: Overlay)?)$/i;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Continuous push (glide): DIP px per second and frame pacing. 360 px/s reads as a
+// determined shove; the loot kick launches fast and decelerates.
+const GLIDE_PUSH_SPEED = 360;
+const GLIDE_KICK_SPEED = 1400;
+const GLIDE_FRAME_MS = 16;
 const sameWindow = (a, b) => !!a && !!b && a.hwnd === b.hwnd && a.pid === b.pid
   && a.name === b.name && a.title === b.title && a.className === b.className;
 
@@ -41,6 +46,7 @@ function createWindowsTerritory(hooks) {
   const wait = hooks.sleep || sleep;
   const toDip = hooks.screenToDipRect || ((r) => r);
   const toScreen = hooks.dipToScreenPoint || ((p) => p);
+  const now = hooks.now || Date.now;
   let timer = null;
   let active = null;
   let activeKind = null;
@@ -83,12 +89,54 @@ function createWindowsTerritory(hooks) {
     }
     return false;
   }
+  // Continuous phase: one time-based glide from the current spot to the edge.
+  // The stepping loop below moved 24/52 px, waited, re-read the window and then
+  // eased the pet over 80 ms, so a push advanced in visible bursts about four
+  // times a second. Here every frame requests the position for "now" (speed is
+  // in DIP px/s, so helper latency only lowers the frame rate, never the speed)
+  // and the pet is placed beside the rival on the same frame. Anything unusual
+  // (refusal, clamping, a window that slips) hands over to the stepping loop,
+  // which keeps all existing edge and resistance checks.
+  async function glide(rival, dir, loot, area) {
+    const edge = dir > 0 ? area.x + area.width - rival.visual.w : area.x;
+    const startX = rival.visual.x;
+    const distance = Math.abs(edge - startX);
+    if (distance < 8) return rival;
+    const total = Math.max(120, (distance / (loot ? GLIDE_KICK_SPEED : GLIDE_PUSH_SPEED)) * 1000);
+    const anchor = rival.raw.mascot || rival.raw;
+    const pet = hooks.getPetBounds();
+    const follow = !loot && typeof hooks.setPetFrame === 'function';
+    const t0 = now();
+    let slips = 0;
+    try {
+      for (let frame = 0; frame < 2000; frame++) {
+        if (aborted(loot)) return null;
+        const frameStart = now();
+        const t = Math.min(1, (frameStart - t0) / total);
+        const e = loot ? 1 - (1 - t) * (1 - t) : t;            // the kick decelerates; a push walks steadily
+        const x = startX + (edge - startX) * e;
+        const point = toScreen({ x: Math.round(x), y: Math.round(rival.visual.y) });
+        const requestX = Math.round(rival.raw.x + point.x - anchor.x);
+        const moved = await desktop.request('move', { target: rival.raw, x: requestX, y: rival.raw.y });
+        if (!moved.ok || !moved.data) return rival;               // the stepping loop reports refusal / gone
+        slips = Math.abs(moved.data.x - requestX) > 4 ? slips + 1 : 0;
+        if (slips >= 3) return rival;                             // clamped or resisting: let the loop decide
+        if (follow) hooks.setPetFrame(standX(x, rival.visual.w, dir, pet.width), pet.y);
+        if (t >= 1) return rival;
+        await wait(Math.max(0, GLIDE_FRAME_MS - (now() - frameStart)));
+      }
+      return rival;
+    } finally {
+      if (follow && typeof hooks.endPetFrames === 'function') hooks.endPetFrames();
+    }
+  }
   async function push(target, dir, loot) {
     let rival = target;
     let resistance = 0;
     // Keep this episode on the original monitor, including monitors with a
     // negative origin. Re-selecting a monitor at an edge can cause ping-pong.
     const area = hooks.getWorkArea(rival.visual);
+    if (!atEdge(rival.visual, area, dir) && (await glide(rival, dir, loot, area)) === null) return { outcome: 'abort' };
     for (let step = 0; step < 160; step++) {
       if (aborted(loot)) return { outcome: 'abort' };
       const observed = await observe(rival);

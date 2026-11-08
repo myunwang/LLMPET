@@ -26,7 +26,7 @@ async function run() {
 
   function fixture(options = {}) {
     let target = structuredClone(options.target || pet);
-    const events = [], commands = [];
+    const events = [], commands = [], moves = [], petFrames = [];
     let abort = false, edgeReads = 0, enabled = true, moveCount = 0, closeCount = 0;
     let bounds = options.bounds || { x: 150, y: 300, width: 120, height: 120 };
     const area = options.area || { x:0,y:0,width:1000,height:700 };
@@ -35,10 +35,12 @@ async function run() {
       shouldAbort: () => abort, shouldAbortLoot: () => abort,
       getPetBounds: () => ({ ...bounds }),
       tweenPetTo: async (x, y) => { bounds.x=x; bounds.y=y; },
+      setPetFrame: (x, y) => { petFrames.push(x); bounds.x=x; bounds.y=y; },
       getWorkArea: () => area, assertTop: () => {}, relaxTop: () => {},
       screenToDipRect: options.toDip, dipToScreenPoint: options.toScreen,
       emit: (event) => { events.push(event); if (options.cancelOn === event.phase) abort=true; },
       sleep: () => new Promise((resolve) => setImmediate(resolve)),
+      now: (() => { let t = 0; return () => (t += 25); })(),   // fake clock: glides finish in a few dozen frames
       desktop: {
         stop() {},
         async request(command, args) {
@@ -50,15 +52,16 @@ async function run() {
           }
           if (command === 'idle') return { ok:true,data:options.idleSeconds ?? 10 };
           if (command === 'read') {
+            // edge reads: 1 = push loop confirms the edge after the glide, 2 = close() re-checks right before WM_CLOSE
             if (target && target.mascot.x + target.mascot.w >= 997) {
               edgeReads++;
-              if (edgeReads === 3 && options.bounceBeforeClose) { target.x-=100; target.mascot.x-=100; }
-              if (edgeReads === 3 && options.abortBeforeClose) abort=true;
+              if (edgeReads === 2 && options.bounceBeforeClose) { target.x-=100; target.mascot.x-=100; }
+              if (edgeReads === 2 && options.abortBeforeClose) abort=true;
             }
             return { ok:true,data:target && (options.reused ? { ...main, hwnd:target.hwnd } : structuredClone(target)) };
           }
           if (command === 'move') {
-            moveCount++;
+            moveCount++; moves.push(args.x);
             if (options.disableAfterMove) { enabled=false; void backend.tick(); }
             if (options.cancelAfterMove) backend.cancelPatrol();
             assert.strictEqual(args.target.hwnd,pet.hwnd, 'never move main window');
@@ -80,13 +83,19 @@ async function run() {
         },
       },
     });
-    return { backend, events, commands, get target(){return target;}, get moveCount(){return moveCount;}, get closeCount(){return closeCount;} };
+    return { backend, events, commands, moves, petFrames, get target(){return target;}, get moveCount(){return moveCount;}, get closeCount(){return closeCount;} };
   }
   const patrol = fixture();
   assert.strictEqual(await patrol.backend.runNow(), 'victory');
   assert(Math.abs(patrol.target.mascot.x+pet.mascot.w-1000)<=3);
   assert.strictEqual(patrol.closeCount,0,'patrol moves; loot closes');
   assert(patrol.events.some(e=>e.phase==='victory'));
+  // Smooth push: many small, even steps, and the pet follows every frame. The fake clock is read twice per frame
+  // (50 ms of fake time = 18 px); real 16 ms frames move ~6 px. The old stepping push moved 24 px per burst.
+  const steps=patrol.moves.slice(1).map((x,i)=>x-patrol.moves[i]);
+  assert(patrol.moves.length>=20,`push should glide in many frames, got ${patrol.moves.length}`);
+  assert(Math.max(...steps.map(Math.abs))<=20,`no burst larger than 20 px, got ${Math.max(...steps.map(Math.abs))}`);
+  assert(patrol.petFrames.length>=patrol.moves.length-2,'the pet is placed beside the rival on every frame');
 
   const loot = fixture();
   const sessions=[{id:'one'}, {id:'one'}, {id:'two'}, {id:'three'}];
