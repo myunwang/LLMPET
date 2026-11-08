@@ -91,7 +91,7 @@ function sanitizeLootCapturedSessions(value, now = Date.now()) {
 
 // 皮肤白名单只此一份：渲染端 applySkin 和托盘菜单都以它为准，
 // 少改一处就会出现"菜单能点、设置存不下"的静默回落。
-const SKINS = ['mascot', 'pixel', 'cat', 'whale', 'deepseek-maid'];
+const SKINS = ['mascot', 'pixel', 'cat', 'whale', 'deepseek-maid', 'claude-ojou'];
 
 function sanitize(raw) {
   const out = { ...DEFAULTS };

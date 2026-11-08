@@ -2,6 +2,31 @@
 
 [简体中文](README.md) | **English** | [日本語](README_JA.md)
 
+<p align="center">
+  <img src="assets/claude-ojou/claude-ojou-working.gif" width="110" alt="working">
+  <img src="assets/claude-ojou/claude-ojou-thinking.gif" width="110" alt="thinking">
+  <img src="assets/claude-ojou/claude-ojou-happy.gif" width="110" alt="happy">
+  <img src="assets/claude-ojou/claude-ojou-loved.gif" width="110" alt="loved">
+  <img src="assets/claude-ojou/claude-ojou-sorry.gif" width="110" alt="sorry">
+  <img src="assets/claude-ojou/claude-ojou-sleeping.gif" width="110" alt="sleeping">
+</p>
+<p align="center"><b>New skin: Claude Ojou-sama · Patrol &amp; Loot now work on Windows</b></p>
+
+Pick **Claude Ojou-sama** from the tray "Skin" menu or the pet's right-click menu — it works for the main, Codex and dsh pets. 25 transparent 360×360 GIFs cover every state, with her own poses for being praised and apologising.
+
+## 🆕 Patrol and Loot on Windows
+
+| 🥊 Patrol: push rival pets off your turf | 🫳 Loot: collect the Codex pet's session index, then kick it away |
+|:---:|:---:|
+| <img src="docs/media/windows-patrol.gif" width="400" alt="Windows patrol demo"> | <img src="docs/media/windows-loot.gif" width="400" alt="Windows loot demo"> |
+
+- **Patrol**: right-click the pet → Patrol to sweep the desktop now; Auto patrol in the tray is off by default. On Windows, rival pet windows are moved by native handle — no mouse takeover, no focus stealing; auto patrol only starts after ≥2 s of input idle.
+- **Loot**: right-click → Loot. The pet walks to the Codex pet, records its sessions into the LLMPET index, kicks it to the screen edge and closes only the pet window — never the Codex chat window, never the original sessions. Window handle, process and sprite position are verified first. Details: [Windows interactions](docs/WINDOWS_INTERACTIONS.md).
+
+> Recorded in a Windows demo environment; all sessions shown are sample data.
+
+Claude Ojou-sama is a fan-made character with no affiliation with or endorsement by Anthropic.
+
 LLMPET is a **local-first multi-agent workspace with a desktop pet as its front door**. It brings **Claude Code, OpenAI Codex, and DeepSeek Harness** into one desktop layer where you can watch live state, find and reopen sessions, manage local history, and hand work from one agent to another.
 
 The pet remains the most immediate interface: it reacts while an agent is thinking, using tools, waiting for you, finishing, failing, or resting, and it surfaces the latest reply in a speech bubble. LLMPET now goes beyond observation with unified session management, cross-agent takeover, a local archive and optional backup, usage diagnostics, and explicit user-triggered agent actions.
@@ -59,7 +84,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
 - **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
-- **Five skins** — the latest transparent DeepSeek Maid by default, plus Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
+- **Six skins** — the latest transparent DeepSeek Maid by default, plus Claude Ojou-sama 👑, Octopus 🐙, Pixel Monster 👾, Salary Cat 🐱, and Whale Maid 🌊.
 - **Patrol mode on macOS and Windows** — LLMPET can detect supported rival desktop pets, stay above them, and push their windows toward a screen edge.
 
 LLMPET's state machine, metering, permission flow, process reconciliation, and desktop UI are implemented in this repository. Claude Code connects through its public hook system. Codex and DeepSeek Harness integrations are read-only: LLMPET tails their local session files and does not modify Agent configuration.

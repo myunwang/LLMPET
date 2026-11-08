@@ -7,11 +7,64 @@
   <a href="https://github.com/myunwang/LLMPET/forks"><img src="https://img.shields.io/github/forks/myunwang/LLMPET?style=for-the-badge&amp;logo=github&amp;label=Forks&amp;labelColor=2d2735&amp;color=8a5b88" alt="GitHub Forks"></a>
 </p>
 
-LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**。它把 **Claude Code、OpenAI Codex 和 DeepSeek Harness** 的会话放到同一个桌面层：看状态、找会话、回到原窗口、管理历史，也能把一项工作从一个 Agent 安全地交给另一个 Agent 继续。
+<p align="center">
+  <img src="assets/claude-ojou/claude-ojou-working.gif" width="110" alt="干活">
+  <img src="assets/claude-ojou/claude-ojou-thinking.gif" width="110" alt="思考">
+  <img src="assets/claude-ojou/claude-ojou-happy.gif" width="110" alt="完成庆祝">
+  <img src="assets/claude-ojou/claude-ojou-loved.gif" width="110" alt="被夸">
+  <img src="assets/claude-ojou/claude-ojou-sorry.gif" width="110" alt="道歉">
+  <img src="assets/claude-ojou/claude-ojou-sleeping.gif" width="110" alt="睡觉">
+</p>
+<p align="center"><b>新皮肤「Claude 大小姐」</b> · <b>Windows 现已支持巡视 / 掠夺</b></p>
 
-桌宠仍然是 LLMPET 最直观的交互方式：它会随 Agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把回复弹成气泡；但产品能力已经从“看 Agent 在做什么”，扩展到**统一会话管理、跨 Agent 接管、本机归档与备份、用量诊断和可控的 Agent 行动**。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
+LLMPET 是一个**以桌宠为入口、本地优先的多 Agent 工作台**，macOS 和 Windows 都能用。Claude Code、OpenAI Codex、DeepSeek Harness 正在干活、在等你授权，还是已经做完，看一眼桌宠的表情就知道。
 
-> **跨 Agent 的准确边界：** Claude 与 Codex 之间不是共享一份原生 transcript。LLMPET 会在本地提取最近对话和当前 Git 工作区摘要，做密钥脱敏后生成临时交接单，再启动目标 Agent；交接单明确要求目标 Agent 重新核查文件、运行状态和失败路径。同一 Agent 内则使用官方 resume / fork。DeepSeek Harness 目前可作为交接来源，暂不作为接管目标。
+- 🎭 **随状态变表情**：思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉，回复弹成气泡；Claude Code 需要授权时，直接在桌宠上点允许或拒绝。
+- 🗂️ **统一会话**：三家 Agent 的实时会话和本机历史放在一个列表里，能搜索、置顶、归档，一键回到原窗口。
+- 🔁 **跨 Agent 接管**：Claude ↔ Codex 双向交接，dsh 可交给二者继续；同一 Agent 用官方 resume / fork。
+- 🥊 **巡视 / 掠夺**：把别家桌宠推出屏幕，或者收录 Codex 桌宠的会话索引再一脚踢走。只动桌宠窗口，不动原会话。
+- 📊 **用量与档案**：上下文、额度窗口、token 趋势、本机会话归档与备份。
+
+## 🆕 Windows 也能巡视和掠夺了
+
+| 🥊 巡视：把别家桌宠推出领地 | 🫳 掠夺：收录 Codex 会话索引，再一脚踢走 |
+|:---:|:---:|
+| <img src="docs/media/windows-patrol.gif" width="400" alt="Windows 巡视演示"> | <img src="docs/media/windows-loot.gif" width="400" alt="Windows 掠夺演示"> |
+
+- **巡视**：右键桌宠选「巡视」立即扫一遍桌面；托盘可开「自动巡逻」（默认关）。发现支持的桌宠就走过去，推到屏幕边缘。Windows 用原生窗口句柄移动，不接管鼠标、不抢焦点，自动巡逻只在输入空闲 ≥2 秒时启动。
+- **掠夺**：右键选「掠夺」，走到 Codex 桌宠旁打开会话面板，把它的会话逐条收进 LLMPET 的索引，然后踢向屏幕边缘、只关闭桌宠窗口。会核验窗口句柄、进程和角色位置；不关闭 Codex 主聊天窗口，不删除、不改写原始会话。
+- 无法识别、移动被拒绝或对方没开桌宠时会明确提示。实现细节见 [Windows 互动说明](docs/WINDOWS_INTERACTIONS.md)。
+
+> 录屏来自 Windows 演示环境，会话均为示例数据。
+
+## Claude 大小姐 × 全部表情状态
+
+托盘「形象」或桌宠右键菜单里选 **Claude 大小姐**，主宠、Codex 宠和 dsh 宠都能用。25 张 360×360 透明 GIF 覆盖全部状态，`working`、`loafing`、`sleeping` 会在多张姿态间轮换；被夸和道歉有她专属的动作。
+
+| 表情 | 状态 | 什么时候出现 |
+|:---:|:---|:---|
+| <img src="assets/claude-ojou/claude-ojou-working.gif" width="72" alt="干活"> <img src="assets/claude-ojou/claude-ojou-working-2.gif" width="72" alt="干活"> <img src="assets/claude-ojou/claude-ojou-working-3.gif" width="72" alt="干活"> <img src="assets/claude-ojou/claude-ojou-working-4.gif" width="72" alt="干活"> | 🛠️ **working 干活** | 正在调用工具、执行命令或修改文件 |
+| <img src="assets/claude-ojou/claude-ojou-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 一轮开始或首次工具调用前的推理 |
+| <img src="assets/claude-ojou/claude-ojou-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Agent 正在输出回复 |
+| <img src="assets/claude-ojou/claude-ojou-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 多个 subagent 同时工作 |
+| <img src="assets/claude-ojou/claude-ojou-sweeping.gif" width="72" alt="清理"> | 🧹 **sweeping 清理** | 压缩或整理上下文 |
+| <img src="assets/claude-ojou/claude-ojou-waiting.gif" width="72" alt="等待授权"> | ✋ **waiting 等待授权** | 需要你处理授权 |
+| <img src="assets/claude-ojou/claude-ojou-needsinput.gif" width="72" alt="等待回复"> | ❓ **needsinput 等待回复** | Agent 需要你选择或输入 |
+| <img src="assets/claude-ojou/claude-ojou-attention.gif" width="72" alt="看一眼"> | 🔔 **attention 看一眼** | 任务刚结束，需要你查看 |
+| <img src="assets/claude-ojou/claude-ojou-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮顺利完成 |
+| <img src="assets/claude-ojou/claude-ojou-loved.gif" width="72" alt="被夸"> | 💕 **loved 被夸** | 你夸了她 |
+| <img src="assets/claude-ojou/claude-ojou-sorry.gif" width="72" alt="道歉"> | 🙇 **sorry 道歉** | Agent 在道歉 |
+| <img src="assets/claude-ojou/claude-ojou-greet.gif" width="72" alt="打招呼"> | 👋 **greet 打招呼** | 新会话启动 |
+| <img src="assets/claude-ojou/claude-ojou-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 工具、命令或 API 执行失败 |
+| <img src="assets/claude-ojou/claude-ojou-sad.gif" width="72" alt="难过"> | 😭 **sad 难过** | 负面反馈或失败情绪 |
+| <img src="assets/claude-ojou/claude-ojou-loafing.gif" width="72" alt="摸鱼"> <img src="assets/claude-ojou/claude-ojou-loafing-2.gif" width="72" alt="摸鱼"> <img src="assets/claude-ojou/claude-ojou-loafing-3.gif" width="72" alt="摸鱼"> | 🍟 **loafing 摸鱼** | 上一步结束、下一步还没开始的间隙 |
+| <img src="assets/claude-ojou/claude-ojou-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 当前没有任务 |
+| <img src="assets/claude-ojou/claude-ojou-roam.gif" width="72" alt="旅行"> | 🧳 **roam 旅行 / 掠夺出脚** | 只读项目探索；掠夺时的飞踢 |
+| <img src="assets/claude-ojou/claude-ojou-thinking-2.gif" width="72" alt="看战果"> | 👀 **lookout 看战果** | 探索或掠夺完成后查看结果 |
+| <img src="assets/claude-ojou/claude-ojou-sleeping.gif" width="72" alt="睡觉"> <img src="assets/claude-ojou/claude-ojou-sleeping-2.gif" width="72" alt="睡觉"> | 😴 **sleeping 睡觉** | 会话结束或长时间没有活动 |
+
+Claude 大小姐是社区同人形象，与 Anthropic 无隶属或代言关系。
+
 
 ## DeepSeek Harness（dsh）已接入：给它一只鲸鱼娘桌宠
 
@@ -55,7 +108,7 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 
 | 能力层 | LLMPET 现在能做什么 |
 |---|---|
-| **桌面感知** | 默认使用最新透明 DeepSeek 娘，另可选章鱼 🐙、像素怪兽 👾、月薪喵 🐱、鲸鱼女仆 🌊，共五款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
+| **桌面感知** | 默认使用最新透明 DeepSeek 娘，另可选 Claude 大小姐 👑、章鱼 🐙、像素怪兽 👾、月薪喵 🐱、鲸鱼女仆 🌊，共六款皮肤呈现思考、工具执行、并行子任务、等待、完成和错误状态 |
 | **统一会话层** | 汇总 Claude Code、Codex、dsh 的实时会话与本机历史；支持搜索、筛选、置顶、归档和回到原窗口 |
 | **跨 Agent 接管** | Claude ↔ Codex 双向交接；dsh → Claude / Codex 单向交接；同代理使用原生 resume / fork |
 | **本机档案馆** | 统一索引三类 Agent 的用户会话，过滤内部 subagent；可选增量备份，恢复时不覆盖仍存在的源文件 |
@@ -63,6 +116,8 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | **用量与诊断** | 展示上下文、额度窗口、真实 token 趋势、本机台账和可追溯的估算口径，不把本机数据冒充厂商账单 |
 
 ## 跨 Agent 接管怎么工作
+
+> **跨 Agent 的准确边界：** Claude 与 Codex 之间不是共享一份原生 transcript。LLMPET 会在本地提取最近对话和当前 Git 工作区摘要，做密钥脱敏后生成临时交接单，再启动目标 Agent；交接单明确要求目标 Agent 重新核查文件、运行状态和失败路径。同一 Agent 内则使用官方 resume / fork。DeepSeek Harness 目前可作为交接来源，暂不作为接管目标。
 
 ```text
 来源会话
@@ -200,7 +255,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 
 > **Electron 启动报错：** Windows + Node.js 26 有 `Electron failed to install correctly` 的反馈（[#28](https://github.com/myunwang/LLMPET/issues/28)，报告者切换 Node.js 20 后恢复）。当前锁定的打包依赖要求 Node.js ≥22.12.0，所以源码安装和打包统一推荐 22.x。此报错表示 Electron 二进制安装不完整，不足以单独确认 Node.js 版本是根因。`npm start` 会先检查安装；可用 `npm run check:electron` 单独诊断，恢复步骤见[本地部署文档](docs/LOCAL_DEPLOYMENT.md#electron-安装不完整或无法启动)。
 
-启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切五款皮肤，并分别开关 Codex / dsh 分身。
+启动后新开的 Claude Code / Codex / DeepSeek Harness 会话会被感知；近期仍活跃的 Codex rollout 与支持版本的 dsh 日志也会静默恢复到会话列表。右键桌宠可切六款皮肤，并分别开关 Codex / dsh 分身。
 
 **Windows 说明**
 - 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm run install:electron`）。

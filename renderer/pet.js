@@ -165,11 +165,22 @@ const DEEPSEEK_MAID_POOLS = Object.fromEntries(
   Object.entries(CAT_POOLS).map(([state, files]) => [state, files.map((file) => file.replace(/^cat-/, 'deepseek-maid-'))]),
 );
 
+// Claude 大小姐：与 DeepSeek 女仆同一套 360×360 动作位（月薪喵结构），另有专属的道歉（鞠躬）与被夸（躲到书后）。
+const CLAUDE_OJOU_STATES = Object.fromEntries(
+  Object.entries(CAT_STATES).map(([state, file]) => [state, file.replace(/^cat-/, 'claude-ojou-')]),
+);
+CLAUDE_OJOU_STATES.sorry = 'claude-ojou-sorry.gif';
+CLAUDE_OJOU_STATES.loved = 'claude-ojou-loved.gif';
+const CLAUDE_OJOU_POOLS = Object.fromEntries(
+  Object.entries(CAT_POOLS).map(([state, files]) => [state, files.map((file) => file.replace(/^cat-/, 'claude-ojou-'))]),
+);
+
 // meme 类皮肤共用一条渲染分支，彼此的差别全部收在这张表里。
 const MEME_PACKS = {
   cat: { dir: 'cat', states: CAT_STATES, pools: CAT_POOLS },
   whale: { dir: 'whale', states: WHALE_STATES, pools: WHALE_POOLS },
   'deepseek-maid': { dir: 'deepseek-maid', states: DEEPSEEK_MAID_STATES, pools: DEEPSEEK_MAID_POOLS },
+  'claude-ojou': { dir: 'claude-ojou', states: CLAUDE_OJOU_STATES, pools: CLAUDE_OJOU_POOLS },
 };
 const isMeme = () => Object.prototype.hasOwnProperty.call(MEME_PACKS, skin);
 const memePack = () => MEME_PACKS[skin] || MEME_PACKS.cat;
@@ -3917,6 +3928,7 @@ function applySkin(s) {
   document.body.classList.toggle('skin-cat', isMeme());
   document.body.classList.toggle('skin-whale', skin === 'whale');
   document.body.classList.toggle('skin-deepseek-maid', skin === 'deepseek-maid');
+  document.body.classList.toggle('skin-claude-ojou', skin === 'claude-ojou');
   if (skin === 'mascot') updateMascotEyes(state);
   if (isMeme()) updateCat(state);
   syncErrorRibbons();

@@ -501,6 +501,7 @@ body.skin-cat .sessions { width: 180px; }
    a Retina display gets a real 2x source. */
 body.skin-whale .sessions { width: 180px; }
 body.skin-deepseek-maid .sessions { width: 180px; }
+body.skin-claude-ojou .sessions { width: 180px; }
 .sess-dot {
   width: 9px; height: 9px;
   border-radius: 50%;
@@ -854,6 +855,7 @@ body.skin-deepseek-maid .sessions { width: 180px; }
    50%，同时在 Retina 屏上维持逐设备像素供图。 */
 body.skin-whale #cat { width: 180px; height: 180px; }
 body.skin-deepseek-maid #cat { width: 180px; height: 180px; }
+body.skin-claude-ojou #cat { width: 180px; height: 180px; }
 
 /* 掠夺素材的原生朝向不一致：attention 朝右，飞踢/看战果朝左。
    JS 按“素材原生朝向 → 目标方向”决定是否镜像；只翻 GIF，不动容器、

@@ -2,6 +2,31 @@
 
 [简体中文](README.md) | [English](README_EN.md) | **日本語**
 
+<p align="center">
+  <img src="assets/claude-ojou/claude-ojou-working.gif" width="110" alt="working">
+  <img src="assets/claude-ojou/claude-ojou-thinking.gif" width="110" alt="thinking">
+  <img src="assets/claude-ojou/claude-ojou-happy.gif" width="110" alt="happy">
+  <img src="assets/claude-ojou/claude-ojou-loved.gif" width="110" alt="loved">
+  <img src="assets/claude-ojou/claude-ojou-sorry.gif" width="110" alt="sorry">
+  <img src="assets/claude-ojou/claude-ojou-sleeping.gif" width="110" alt="sleeping">
+</p>
+<p align="center"><b>新スキン「Claude お嬢様」 · Windows でもパトロール／略奪に対応</b></p>
+
+トレイの「スキン」またはペットの右クリックメニューで **Claude お嬢様** を選ぶと、メイン／Codex／dsh のどのペットでも使えます。360×360 の透過 GIF 25 枚で全状態をカバーし、褒められたときと謝るときは専用ポーズです。
+
+## 🆕 Windows でもパトロールと略奪
+
+| 🥊 パトロール：他のペットを縄張りから押し出す | 🫳 略奪：Codex ペットのセッション索引を収録して蹴り出す |
+|:---:|:---:|
+| <img src="docs/media/windows-patrol.gif" width="400" alt="Windows patrol demo"> | <img src="docs/media/windows-loot.gif" width="400" alt="Windows loot demo"> |
+
+- **パトロール**：ペットを右クリック →「パトロール」で今すぐデスクトップを巡回。トレイの自動パトロールは既定でオフ。Windows ではネイティブのウィンドウハンドルで移動し、マウスを奪わずフォーカスも奪いません。自動パトロールは入力が 2 秒以上ないときだけ動きます。
+- **略奪**：右クリック →「略奪」。Codex ペットの隣へ歩き、セッションを LLMPET の索引に収録してから画面端へ蹴り、ペットのウィンドウだけを閉じます。Codex のチャットウィンドウや元のセッションには触れません。詳細は [Windows 操作説明](docs/WINDOWS_INTERACTIONS.md)。
+
+> Windows のデモ環境で録画。表示されているセッションはすべてサンプルデータです。
+
+Claude お嬢様はファンメイドのキャラクターで、Anthropic とは提携・推奨関係にありません。
+
 LLMPET は、**デスクトップペットを入口にした、ローカル優先のマルチ Agent ワークスペース**です。**Claude Code、OpenAI Codex、DeepSeek Harness** を一つのデスクトップ層にまとめ、実行状態の確認、Session の検索と再表示、ローカル履歴の管理、別 Agent への作業引き継ぎを行えます。
 
 ペットは今も最も直感的なインターフェースです。思考中、ツール実行中、ユーザー待ち、完了、エラー、休憩中といった状態に合わせて表情が変わり、最新の返答を吹き出しで表示します。一方、LLMPET の範囲は監視だけでなく、統合 Session 管理、Agent 間の引き継ぎ、ローカル保管庫と任意バックアップ、利用状況の診断、ユーザーが明示的に開始する Agent 行動へ広がっています。
@@ -59,7 +84,7 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 - **ミームアクション** — GIF と音声を再生しながら、対応する構造化 Prompt を選択中のセッションへ送れます。
 - **旅するカエル** — 選択した Claude / Codex を独立した読み取り専用の探索へ送り、帰還後にローカルの旅便りを受け取れます。
 - **利用状況パネル** — 実 token 推移、モデル別内訳、Claude の API 公開価格換算、Codex のローカル token 台帳、レート制限、診断情報、現在の操作を確認できます。
-- **5 種類のスキン** — 既定の最新透明 DeepSeek メイド、タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱、クジラメイド 🌊。
+- **6 種類のスキン** — 既定の最新透明 DeepSeek メイド、Claude お嬢様 👑、タコ 🐙、ピクセルモンスター 👾、月薪喵 🐱、クジラメイド 🌊。
 - **macOS / Windows のパトロールモード** — 対応する他のデスクトップペットを検出し、最前面を維持しながら相手を画面端へ押し出します。
 
 状態機械、利用量計測、権限処理、プロセス照合、デスクトップ UI はこのリポジトリ内で実装されています。Claude Code は公開 hook API を利用し、Codex と DeepSeek Harness は各自のローカル Session ファイルを読み取り専用で監視します。Agent の設定は変更しません。

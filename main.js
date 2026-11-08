@@ -1866,6 +1866,7 @@ function refreshTrayMenu() {
       { label: t('skin.cat'), type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
       { label: t('skin.whale'), type: 'radio', checked: skin === 'whale', click: () => applySkin('whale') },
       { label: t('skin.deepseek-maid'), type: 'radio', checked: skin === 'deepseek-maid', click: () => applySkin('deepseek-maid') },
+      { label: t('skin.claude-ojou'), type: 'radio', checked: skin === 'claude-ojou', click: () => applySkin('claude-ojou') },
     ] },
     ...(petMode === 'duo' ? [{ label: t('tray.skinCodex'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
@@ -1873,6 +1874,7 @@ function refreshTrayMenu() {
       { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
       { label: t('skin.whale'), type: 'radio', checked: skinCodex === 'whale', click: () => applySkin('whale', 'codex') },
       { label: t('skin.deepseek-maid'), type: 'radio', checked: skinCodex === 'deepseek-maid', click: () => applySkin('deepseek-maid', 'codex') },
+      { label: t('skin.claude-ojou'), type: 'radio', checked: skinCodex === 'claude-ojou', click: () => applySkin('claude-ojou', 'codex') },
     ] }] : []),
     ...(dshPet ? [{ label: t('tray.skinDsh'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skinDsh === 'mascot', click: () => applySkin('mascot', 'dsh') },
@@ -1880,6 +1882,7 @@ function refreshTrayMenu() {
       { label: t('skin.cat'), type: 'radio', checked: skinDsh === 'cat', click: () => applySkin('cat', 'dsh') },
       { label: t('skin.whale'), type: 'radio', checked: skinDsh === 'whale', click: () => applySkin('whale', 'dsh') },
       { label: t('skin.deepseek-maid'), type: 'radio', checked: skinDsh === 'deepseek-maid', click: () => applySkin('deepseek-maid', 'dsh') },
+      { label: t('skin.claude-ojou'), type: 'radio', checked: skinDsh === 'claude-ojou', click: () => applySkin('claude-ojou', 'dsh') },
     ] }] : []),
     { label: t('tray.shape'), submenu: [
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
